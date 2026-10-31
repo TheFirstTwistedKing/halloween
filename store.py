@@ -7,6 +7,8 @@ import re
 import sqlite3
 from pathlib import Path
 
+import balance as balance_rules
+
 CANDY = "🍬"                     # 할로윈 재화의 아이콘
 CANDY_NAME = "할로윈 재화"
 CANDY_MAX = 99999                # 보유할 수 있는 최대 재화
@@ -31,6 +33,7 @@ DEFAULT_SETTINGS = {
     "package_mode": "all",       # all: 누구나 각자 한 번씩 / first: 먼저 뜯은 한 명만
     "package_seconds": 120,      # 패키지가 머무는 시간(초)
     "reaction": True,            # 재화를 얻으면 메시지에 🍬 반응을 단다
+    "dungeon": {},               # 던전 밸런스 중 관리자가 바꾼 값 {항목 이름: 숫자}. 비어 있으면 모두 기본값 (balance.py)
 }
 
 
@@ -65,6 +68,10 @@ def validate_settings(cfg: dict) -> None:
         raise ValueError("패키지 방식은 all 또는 first여야 해요.")
     if not isinstance(cfg["reaction"], bool):
         raise ValueError("reaction은 켜짐/꺼짐이어야 해요.")
+    dungeon = cfg["dungeon"]
+    if not isinstance(dungeon, dict) or len(dungeon) > 500 or any(
+            not isinstance(k, str) or isinstance(v, bool) or not isinstance(v, (int, float)) for k, v in dungeon.items()):
+        raise ValueError("던전 밸런스 설정이 올바르지 않아요.")
     channels = cfg["channels"]
     if not isinstance(channels, list) or len(channels) > 100 or any(isinstance(c, bool) or not isinstance(c, int) for c in channels):
         raise ValueError("이벤트 채널 목록이 올바르지 않아요.")
@@ -107,6 +114,7 @@ class Store:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=FULL")
         self._settings: dict[int, dict] = {}
+        self._balances: dict[int, balance_rules.Balance] = {}
         self.db.executescript("""
             CREATE TABLE IF NOT EXISTS settings(guild INTEGER PRIMARY KEY, data TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS wallets(
@@ -158,7 +166,15 @@ class Store:
             self.db.execute("INSERT INTO settings VALUES(?,?) ON CONFLICT(guild) DO UPDATE SET data=excluded.data",
                             (guild, json.dumps(cfg, ensure_ascii=False)))
         self._settings[guild] = copy.deepcopy(cfg)
+        self._balances.pop(guild, None)
         return cfg
+
+    def balance(self, guild: int) -> "balance_rules.Balance":
+        """이 서버의 던전 밸런스(기본값 위에 관리자가 바꾼 값을 덮어쓴 것). 설정이 바뀔 때까지 캐시한다."""
+        cached = self._balances.get(guild)
+        if cached is None:
+            cached = self._balances[guild] = balance_rules.Balance.build(self.settings(guild)["dungeon"])
+        return cached
 
     # ---- 지갑 ----
     def wallet(self, guild: int, user: int) -> tuple[int, int]:

@@ -20,7 +20,7 @@ class RealPathTests(unittest.IsolatedAsyncioTestCase):
         self.state.user = discord.ClientUser(state=self.state, data={
             "id": "999", "username": "bot", "discriminator": "0", "avatar": None, "bot": True})
         self.bot._ready = asyncio.Event()
-        for extension in ("cogs.economy", "cogs.admin", "cogs.shop"):
+        for extension in ("cogs.economy", "cogs.admin", "cogs.shop", "cogs.dungeon_admin"):
             await self.bot.load_extension(extension)
         self.sent = {}
         for name in ("send_message", "defer", "autocomplete"):
@@ -107,9 +107,39 @@ class RealPathTests(unittest.IsolatedAsyncioTestCase):
         choices = call.args[0] if call.args else call.kwargs["choices"]
         self.assertEqual([(c.name, c.value) for c in choices], [("🕯️ 호박 초", "호박 초")])
 
+    async def test_dungeon_balance_commands_with_korean_option_names(self):
+        await self.bot.tree._call(self.interaction("던전설정", [{"name": "항목", "type": 3, "value": "몬스터.슬라임.체력"},
+                                                              {"name": "값", "type": 10, "value": 300}], perms=ADMIN))
+        self.assertEqual(self.store.settings(100)["dungeon"], {"몬스터.슬라임.체력": 300})
+        self.assertIn("270 → **300**", self.sent_embed()[0].description)
+        await self.bot.tree._call(self.interaction("던전설정확인", [{"name": "분류", "type": 3, "value": "몬스터"}], perms=ADMIN))
+        self.assertIn("`몬스터.슬라임.체력` **300** ✏️ 기본 270", self.sent_embed()[0].description)
+        await self.bot.tree._call(self.interaction("던전설정초기화", [{"name": "항목", "type": 3, "value": "몬스터.슬라임.체력"}], perms=ADMIN))
+        self.assertEqual(self.store.settings(100)["dungeon"], {})
+        await self.bot.tree._call(self.interaction("던전시뮬", [{"name": "판수", "type": 4, "value": 100}], perms=ADMIN))
+        self.sent["defer"].assert_awaited()
+        embed = self.followup.await_args.kwargs["embed"]
+        self.assertIn("100판", embed.title)
+
+    async def test_dungeon_balance_commands_refuse_regular_members_on_the_real_path(self):
+        await self.bot.tree._call(self.interaction("던전설정", [{"name": "항목", "type": 3, "value": "몬스터.슬라임.체력"},
+                                                              {"name": "값", "type": 10, "value": 300}], perms=MEMBER))
+        self.assertEqual(self.store.settings(100)["dungeon"], {})
+        self.assertIn("관리자만", self.sent_embed()[0].description)
+
+    async def test_autocomplete_for_dungeon_balance_keys_is_wired(self):
+        self.store.update_settings(100, dungeon={"몬스터.마녀.공격": 99})
+        options = [{"name": "항목", "type": 3, "value": "마녀", "focused": True}]
+        for command in ("던전설정", "던전설정초기화"):
+            self.sent["autocomplete"].reset_mock()
+            await self.bot.tree._call(self.interaction(command, options, kind=4, perms=ADMIN))
+            call = self.sent["autocomplete"].await_args
+            choices = call.args[0] if call.args else call.kwargs["choices"]
+            self.assertIn(("✏️ 몬스터.마녀.공격 = 99 (기본 135)", "몬스터.마녀.공격"), [(c.name, c.value) for c in choices], command)
+
     async def test_all_commands_serialize_for_discord(self):
         commands = self.bot.tree.get_commands()
-        self.assertEqual(len(commands), 17)
+        self.assertEqual(len(commands), 21)
         for command in commands:
             payload = command.to_dict(self.bot.tree)
             self.assertLessEqual(len(payload["description"]), 100, command.name)

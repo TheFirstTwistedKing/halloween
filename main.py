@@ -19,7 +19,7 @@ from store import Store
 
 BASE = Path(__file__).resolve().parent
 LOG = logging.getLogger("halloween")
-EXTENSIONS = ("cogs.economy", "cogs.admin", "cogs.shop", "cogs.dungeon")
+EXTENSIONS = ("cogs.economy", "cogs.admin", "cogs.shop", "cogs.dungeon", "cogs.dungeon_admin")
 
 
 def parse_guild_ids(raw: str) -> list[int]:

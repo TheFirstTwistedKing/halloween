@@ -19,9 +19,9 @@ except ImportError:                              # discord.py가 없는 환경�
             return self._locks[hash((guild_id, user_id)) % len(self._locks)]
 
 G, U = 100, 7
-EMPTY = 0.4        # roll_room: 30 <= 40 < 60 → 빈 방
-MONSTER = 0.1      # 0 <= 10 < 30 → 몬스터
-CHEST = 0.7        # 60 <= 70 < 80 → 상자
+EMPTY = 0.1        # 짝수 방(빈 방 40% · 잡몹 60%): 10 < 40 → 빈 방
+MONSTER = 0.7      # 70 >= 40 → 잡몹
+# 홀수 방은 상자, 마지막(10번째) 방은 미니 보스로 정해져 있어 난수를 뽑지 않는다.
 
 
 class Scripted:
@@ -94,6 +94,124 @@ class RuleTests(unittest.TestCase):
         self.assertEqual(dungeon.roll_clear_reward(Scripted(randoms=[0.0], ints=[high])), (high, True))
         edge = dungeon.TICKET_CHANCE / 100
         self.assertEqual(dungeon.roll_clear_reward(Scripted(randoms=[edge], ints=[low])), (low, False))
+
+    # ---- 방 배치 ----
+    def test_room_plan_chests_on_odd_rooms_boss_last(self):
+        self.assertEqual(len(dungeon.ROOM_PLAN), dungeon.ROOMS)
+        for room in range(1, dungeon.ROOMS + 1):
+            if room == dungeon.ROOMS:
+                self.assertEqual(dungeon.roll_room(Scripted(), room), "boss")          # 난수를 뽑지 않는다
+            elif room % 2:
+                self.assertEqual(dungeon.roll_room(Scripted(), room), "chest")         # 난수를 뽑지 않는다
+            else:                                                                      # 빈 방 40% · 잡몹 60%
+                self.assertEqual(dungeon.roll_room(Scripted(randoms=[0.399]), room), "empty")
+                self.assertEqual(dungeon.roll_room(Scripted(randoms=[0.4]), room), "monster")
+
+    # ---- 회피 ----
+    def _fight(self, monster, weapon=None, shield=None):
+        run = dungeon.new_run(weapon=weapon, shield=shield)
+        run.enemy, run.phase = dungeon._spawn(monster), "battle"
+        return run
+
+    def test_mobs_dodge_10_rat_30_bosses_never(self):
+        by = {m.key: m for m in dungeon.MONSTERS}
+        for key in ("giant_bat", "slime", "witch"):
+            self.assertEqual(dungeon.enemy_dodge(self._fight(by[key])), 10)
+        self.assertEqual(dungeon.enemy_dodge(self._fight(by["giant_rat"])), 30)
+        for boss in dungeon.BOSSES:
+            self.assertEqual(dungeon.enemy_dodge(self._fight(boss)), 0)
+            self.assertEqual(dungeon.hit_chance(self._fight(boss)), 100)
+
+    def test_boss_cannot_dodge_even_when_the_weapon_converts_dodge(self):
+        for weapon in ("crossbow", "gun"):
+            run = self._fight(dungeon.BOSSES[0], weapon=weapon)
+            self.assertEqual(dungeon.enemy_dodge(run), 0)
+            before = run.enemy["hp"]
+            dungeon.player_attack(run, Scripted(randoms=[0.0]))              # 회피 굴림 0%도 맞는다(0 < 0 은 거짓)
+            self.assertLess(run.enemy["hp"], before)
+        mob = self._fight(dungeon.MONSTERS[1], weapon="gun")
+        self.assertEqual(dungeon.enemy_dodge(mob), 50)                       # 잡몹에게는 기존대로 변환
+
+    # ---- 기본 장비 ----
+    def test_common_gear_was_buffed(self):
+        g = dungeon.GEAR_BY_KEY
+        self.assertEqual((g["club"].attack, g["dagger"].attack, g["dagger"].crit), (30, 35, 50))
+        self.assertEqual((g["wooden_shield"].guard, g["wooden_shield"].reflect, g["shield"].reflect), (80, 40, 50))
+        for common in ("club", "dagger"):                                    # 일반 < 희귀 순서는 유지
+            self.assertLess(g[common].attack, g["longsword"].attack)
+
+    # ---- 방어 ----
+    def test_guard_success_reduces_heals_reflects_and_stuns(self):
+        run = self._fight(dungeon.MONSTERS[2])                               # 마녀: HP 135, 공격 135
+        run.hp = 500
+        dungeon.player_defend(run, True)
+        taken = dungeon.reduce_damage(135, dungeon.GUARD_BASE)               # 60% 줄어 54
+        healed = 135 * dungeon.GUARD_HEAL // 100                             # 67
+        self.assertEqual(run.hp, 500 - taken + healed)
+        self.assertEqual(run.enemy["hp"], 135 - 135 * dungeon.REFLECT_BASE // 100)   # 30% 반사
+        self.assertTrue(run.enemy["stunned"])
+        # 기절한 몬스터는 다음 공격을 못 한다: 내가 공격해도 반격이 없다.
+        hp = run.hp
+        dungeon.player_attack(run, Scripted(randoms=[0.99]))
+        self.assertEqual(run.hp, hp)
+        self.assertFalse(run.enemy["stunned"])
+        self.assertTrue(any("공격하지 못했" in e for e in run.events))
+        dungeon.player_attack(run, Scripted(randoms=[0.99]))                 # 기절은 한 번뿐: 다음엔 맞는다
+        self.assertLess(run.hp, hp)
+
+    def test_guard_failure_gets_nothing(self):
+        run = self._fight(dungeon.MONSTERS[2])
+        run.hp = 500
+        dungeon.player_defend(run, False)
+        self.assertEqual((run.hp, run.enemy["hp"], run.enemy["stunned"]), (500 - 135, 135, False))
+
+    def test_shield_gear_changes_reduction_and_reflect(self):
+        wood = self._fight(dungeon.MONSTERS[2], shield="wooden_shield")
+        dungeon.player_defend(wood, True)
+        self.assertEqual(wood.enemy["hp"], 135 - 135 * 40 // 100)
+        steel = self._fight(dungeon.MONSTERS[2], shield="shield")
+        steel.hp = 500
+        dungeon.player_defend(steel, True)
+        self.assertEqual(steel.enemy["hp"], 135 - 135 * 50 // 100)
+        self.assertEqual(steel.hp, 500 - dungeon.reduce_damage(135, 90) + 135 * dungeon.GUARD_HEAL // 100)
+
+    def test_reflect_can_kill_and_heal_never_exceeds_max(self):
+        run = self._fight(dungeon.MONSTERS[3])                               # 거대 쥐 HP 90
+        run.enemy["hp"] = 10
+        dungeon.player_defend(run, True)                                     # 반사 13 ≥ 10
+        self.assertEqual((run.phase, run.enemy["hp"], run.hp), ("cleared", 0, dungeon.MAX_HP))
+        self.assertTrue(run.can_advance)
+
+    def test_dying_to_the_guarded_hit_gives_no_bonus(self):
+        run = self._fight(dungeon.MONSTERS[2])
+        run.hp = 10
+        dungeon.player_defend(run, True)                                     # 54 피해로 쓰러진다
+        self.assertEqual((run.phase, run.hp, run.enemy["hp"]), ("dead", 0, 135))
+
+    def test_defending_against_a_stunned_enemy_just_burns_the_stun(self):
+        run = self._fight(dungeon.MONSTERS[2])
+        run.enemy["stunned"] = True
+        run.hp = 500
+        dungeon.player_defend(run, True)
+        self.assertEqual((run.hp, run.enemy["hp"], run.enemy["stunned"]), (500, 135, False))
+
+    def test_guarding_forever_cannot_farm_hp(self):
+        """방어 한 번의 기대 HP 변화는 어떤 몬스터·방패 조합에서도 음수다 → 방어만 반복해서 HP를 채울 수 없다."""
+        chance = dungeon.GUARD_CHANCE / 100
+        for monster in dungeon.MONSTERS + dungeon.BOSSES:
+            for shield in (None, "wooden_shield", "shield"):
+                guard = dungeon.guard_percent(dungeon.new_run(shield=shield))
+                taken_ok = dungeon.reduce_damage(monster.damage, guard)
+                heal = monster.damage * dungeon.GUARD_HEAL // 100
+                expected = chance * (heal - taken_ok) + (1 - chance) * (-monster.damage)
+                self.assertLess(expected, 0, (monster.name, shield, expected))
+
+    def test_old_saved_enemy_without_stun_field_still_works(self):
+        run = dungeon.new_run()
+        run.phase, run.enemy = "battle", {"key": "slime", "name": "슬라임", "emoji": "🟢", "hp": 300, "max_hp": 300,
+                                          "damage": 50, "dodge": 20, "boss": False}
+        dungeon.player_defend(run, True)
+        self.assertTrue(run.enemy["stunned"])
 
     def test_guard_edge(self):
         self.assertTrue(dungeon.roll_guard(Scripted(randoms=[0.5999])))
@@ -178,12 +296,10 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_full_clear_pays_the_reward_exactly_once(self):
         run = (await service.enter(self.store, self.locks, G, U)).run
-        rng = Scripted(randoms=[EMPTY] * dungeon.ROOMS)
-        for _ in range(dungeon.ROOMS):
-            result = await self.go(rng, "advance", run.rev)
-            self.assertTrue(result.ok, result.text)
-            run = result.run
-        self.assertEqual(run.room, dungeon.ROOMS)
+        data = json.loads(run.to_json())
+        data.update(room=dungeon.ROOMS, phase="cleared", kind="boss")      # 마지막 방(보스)을 막 이긴 상태
+        self.store.save_dungeon(G, U, json.dumps(data))
+        run = dungeon.Run.from_json(json.dumps(data))
         low, _ = dungeon.CLEAR_CANDY
         final = Scripted(randoms=[0.0], ints=[low])                    # 획득권도 나오는 추첨
         results = await asyncio.gather(self.go(final, "advance", run.rev), self.go(Scripted(), "advance", run.rev))
@@ -193,6 +309,17 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((self.store.wallet(G, U)[0], self.store.tickets(G, U)), (low, 1))
         self.assertIsNone(self.store.dungeon_run(G, U))
 
+    async def test_first_rooms_follow_the_plan_chest_then_empty_or_mob_then_chest(self):
+        run = (await service.enter(self.store, self.locks, G, U)).run
+        run = (await self.go(Scripted(), "advance", run.rev)).run                 # 1번째 방: 상자(난수 없음)
+        self.assertEqual((run.room, run.phase), (1, "chest"))
+        run = (await self.go(Scripted(randoms=[0.0, 0.0]), "chest", run.rev)).run
+        run = (await self.go(Scripted(), "discard", run.rev)).run
+        run = (await self.go(Scripted(randoms=[EMPTY]), "advance", run.rev)).run  # 2번째 방: 빈 방
+        self.assertEqual((run.room, run.phase), (2, "empty"))
+        run = (await self.go(Scripted(), "advance", run.rev)).run                 # 3번째 방: 다시 상자
+        self.assertEqual((run.room, run.phase), (3, "chest"))
+
     async def test_dying_and_quitting_give_nothing_and_end_the_run(self):
         run = (await service.enter(self.store, self.locks, G, U)).run
         data = json.loads(run.to_json())
@@ -200,7 +327,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
                     enemy={"key": "witch", "name": "마녀", "emoji": "🧙", "hp": 150, "max_hp": 150, "damage": 150,
                            "dodge": 20, "boss": False})
         self.store.save_dungeon(G, U, json.dumps(data))
-        result = await self.go(Scripted(randoms=[0.99]), "attack", run.rev)         # 공격이 빗나가고 마녀에게 맞는다
+        result = await self.go(Scripted(randoms=[0.99]), "attack", run.rev)         # 공격은 맞지만 마녀를 못 잡고 마녀에게 맞는다
         self.assertEqual((result.ok, result.ended, result.reward), (True, "dead", None))
         self.assertIsNone(self.store.dungeon_run(G, U))
         self.assertEqual(self.store.wallet(G, U)[0], 0)
@@ -213,7 +340,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_chest_flow_and_items(self):
         run = (await service.enter(self.store, self.locks, G, U)).run
-        run = (await self.go(Scripted(randoms=[CHEST]), "advance", run.rev)).run
+        run = (await self.go(Scripted(), "advance", run.rev)).run
         self.assertEqual(run.phase, "chest")
         blocked = await self.go(Scripted(), "advance", run.rev)
         self.assertFalse(blocked.ok)

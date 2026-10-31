@@ -1,4 +1,4 @@
-"""패키지: 채팅 중에 가끔 나타나는 상자. 누구나 뜯을 수 있고, 결과는 꽝·열쇠·재화 50·쓰레기."""
+"""패키지: 채팅 중에 가끔 나타나는 상자. 누구나 뜯을 수 있고, 결과는 서버마다 정한 결과표(`/패키지결과`)에서 뽑는다."""
 from __future__ import annotations
 
 import logging
@@ -7,7 +7,7 @@ import time
 import discord
 
 import theme
-from store import PACKAGE_CANDY, roll_package_result
+from store import roll_package_result
 
 LOG = logging.getLogger("halloween")
 PKG_OPEN_ID = "hw:pkg:open"
@@ -33,12 +33,12 @@ class PackageView(discord.ui.View):
             embed=theme.make_embed("🚪 그냥 두었어요", "마음이 바뀌면 [뜯기]를 눌러도 돼요.", color=theme.PURPLE), ephemeral=True)
 
 
-def apply_reward(store, guild_id: int, user_id: int, result: str) -> int:
-    """결과를 가방에 넣는다. 받은 재화 수(재화가 아니면 0)를 돌려준다."""
-    if result == "candy":
-        return store.add_candy(guild_id, user_id, PACKAGE_CANDY)
-    if result in ("key", "trash"):
-        store.add_item(guild_id, user_id, store.ensure_system_items(guild_id)[result], 1)
+def apply_reward(store, guild_id: int, user_id: int, entry: dict) -> int:
+    """결과표의 한 칸을 가방에 넣는다. 받은 재화 수(재화가 아니면 0)를 돌려준다. 물품이 그 사이 지워졌다면 아무것도 주지 않는다."""
+    if entry["kind"] == "candy":
+        return store.add_candy(guild_id, user_id, entry["amount"])
+    if entry["kind"] == "item" and store.item(guild_id, entry["item"]) is not None:
+        store.add_item(guild_id, user_id, entry["item"], entry["amount"])
     return 0
 
 
@@ -57,16 +57,19 @@ async def spawn(client, message, cfg) -> discord.Message | None:
 async def open_package(interaction: discord.Interaction):
     client, store = interaction.client, interaction.client.store
     now = time.time()
-    result = roll_package_result(client.rng)
-    status = store.open_package(interaction.message.id, interaction.user.id, result, now)
+    table = store.package_table(interaction.guild_id)
+    if not table or sum(e["weight"] for e in table) <= 0:      # 표가 비었다면(관리자가 직접 고치지 않는 한 없는 일) 꽝으로 둔다.
+        table = [{"id": "none", "kind": "none", "weight": 1, "amount": 1}]
+    entry = roll_package_result(table, client.rng)
+    status = store.open_package(interaction.message.id, interaction.user.id, entry["id"], now)
     if status != "ok":
         text = {"again": "이미 이 패키지를 뜯었어요. 다음 패키지를 기다려 보세요!",
                 "closed": "한발 늦었어요. 이미 다른 분이 뜯었어요!",
                 "gone": "패키지가 이미 사라졌어요."}[status]
         await interaction.response.send_message(embed=theme.notice(text, False), ephemeral=True)
         return
-    gained = apply_reward(store, interaction.guild_id, interaction.user.id, result)
-    title, description = theme.package_result_text(result, gained)
+    gained = apply_reward(store, interaction.guild_id, interaction.user.id, entry)
+    title, description = theme.package_result_text(entry, store, interaction.guild_id, gained)
     await interaction.response.send_message(embed=theme.make_embed(title, description, color=theme.PURPLE), ephemeral=True)
     row = store.package(interaction.message.id)
     if row and row["closed"] == 1:     # 선착순: 뜯은 사람이 나오면 바로 결과를 모두에게 보여준다.
@@ -74,16 +77,24 @@ async def open_package(interaction: discord.Interaction):
         store.mark_summarized(row["message"])
 
 
-def summary_embed(row, openers) -> discord.Embed:
+def summary_embed(row, openers, store=None) -> discord.Embed:
+    """패키지가 끝났을 때 메시지를 바꿀 요약. 결과표가 그 사이 바뀌어 사라진 결과는 '사라진 결과'로 보여준다."""
+    table = {e["id"]: e for e in store.settings(row["guild"])["package_table"]} if store else {}
+
+    def label(result_id: str) -> str:
+        entry = table.get(result_id)
+        if entry is None:
+            return "📦 사라진 결과"
+        emoji, title = theme.entry_icon_title(entry, store, row["guild"])
+        return f"{emoji} {title}"
+
     if row["mode"] == "first" and openers:
-        title, _ = theme.package_result_text(openers[0]["result"])
-        return theme.make_embed("📦 패키지가 열렸어요!", f"<@{openers[0]['user']}> 님이 뜯었어요 → **{title}**", color=theme.PURPLE)
+        return theme.make_embed("📦 패키지가 열렸어요!", f"<@{openers[0]['user']}> 님이 뜯었어요 → **{label(openers[0]['result'])}**", color=theme.PURPLE)
     if openers:
         counts = {}
         for opener in openers:
             counts[opener["result"]] = counts.get(opener["result"], 0) + 1
-        names = {"key": "🗝️ 열쇠", "candy": f"{theme.CANDY} {PACKAGE_CANDY}", "trash": "🗑️ 쓰레기", "none": "👻 꽝"}
-        detail = " · ".join(f"{names[k]} ×{v}" for k, v in counts.items())
+        detail = " · ".join(f"{label(k)} ×{v}" for k, v in counts.items())
         return theme.make_embed("📦 패키지가 사라졌어요", f"{len(openers)}명이 뜯었어요.\n{detail}", color=theme.PURPLE)
     return theme.make_embed("📦 패키지가 사라졌어요", "아무도 뜯지 않았어요… 🕸️", color=theme.PURPLE)
 
@@ -95,7 +106,7 @@ async def summarize(client, row):
         return
     try:
         await channel.get_partial_message(row["message"]).edit(
-            embed=summary_embed(row, client.store.package_openers(row["message"])), view=None)
+            embed=summary_embed(row, client.store.package_openers(row["message"]), client.store), view=None)
     except discord.HTTPException:
         pass
 

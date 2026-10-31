@@ -46,10 +46,10 @@ class OpenTests(PackageFixture):
         b = await self.open(2, 0.65)                        # 열쇠
         c = await self.open(3, 0.85)                        # 재화 50
         d = await self.open(4, 0.95)                        # 쓰레기
-        self.assertEqual([e.title for e in (a, b, c, d)], ["👻 꽝!", "🗝️ 열쇠!", "🍬 할로윈 재화 50!", "🗑️ 쓰레기…"])
-        self.assertEqual(self.store.wallet(100, 3)[0], PACKAGE_CANDY)
+        self.assertEqual([e.title for e in (a, b, c, d)], ["👻 꽝!", "🗝️ 열쇠!", "🍬 할로윈 재화 50!", "🗑️ 쓰레기!"])
+        self.assertEqual(self.store.wallet(100, 3), PACKAGE_CANDY)
         self.assertEqual((self.store.qty(100, 2, ids["key"]), self.store.qty(100, 4, ids["trash"])), (1, 1))
-        self.assertEqual((self.store.qty(100, 1, ids["key"]), self.store.wallet(100, 1)), (0, (0, 0)))     # 꽝은 아무것도 없다.
+        self.assertEqual((self.store.qty(100, 1, ids["key"]), self.store.wallet(100, 1)), (0, 0))     # 꽝은 아무것도 없다.
         self.assertEqual(len(self.store.package_openers(9001)), 4)
 
     async def test_one_opening_per_person(self):
@@ -78,7 +78,7 @@ class OpenTests(PackageFixture):
         edit.assert_awaited_once()
         shown = edit.await_args.kwargs
         self.assertIn("<@1>", shown["embed"].description)
-        self.assertIn("🗝️ 열쇠!", shown["embed"].description)
+        self.assertIn("🗝️ 열쇠", shown["embed"].description)
         self.assertIsNone(shown["view"])                   # 버튼이 사라진다.
         self.assertEqual(self.store.package(9001)["closed"], 2)      # 늦게 누른 사람에게 안내하려고 만료까지 기록은 남긴다.
         late = await self.open(3, 0.65)
@@ -100,7 +100,7 @@ class OpenTests(PackageFixture):
         self.package("all")
         self.store.add_candy(100, 1, CANDY_MAX - 20)
         embed = await self.open(1, 0.85)
-        self.assertEqual(self.store.wallet(100, 1)[0], CANDY_MAX)
+        self.assertEqual(self.store.wallet(100, 1), CANDY_MAX)
         self.assertIn("20개만 받았어요", embed.description)
 
     async def test_skipping_changes_nothing(self):
@@ -113,11 +113,57 @@ class OpenTests(PackageFixture):
         self.assertEqual(embed.title, "👻 꽝!")
 
     async def test_apply_reward_directly(self):
-        self.assertEqual(apply_reward(self.store, 100, 5, "none"), 0)
-        self.assertEqual(apply_reward(self.store, 100, 5, "candy"), 50)
-        self.assertEqual(apply_reward(self.store, 100, 5, "key"), 0)
-        self.assertEqual(apply_reward(self.store, 100, 5, "trash"), 0)
+        table = {e["id"]: e for e in self.store.package_table(100)}
+        self.assertEqual(apply_reward(self.store, 100, 5, table["none"]), 0)
+        self.assertEqual(apply_reward(self.store, 100, 5, table["candy"]), 50)
+        self.assertEqual(apply_reward(self.store, 100, 5, table["key"]), 0)
+        self.assertEqual(apply_reward(self.store, 100, 5, table["trash"]), 0)
         self.assertEqual({r["name"]: r["qty"] for r in self.store.inventory(100, 5)}, {"열쇠": 1, "쓰레기": 1})
+        ghost = {"id": "g", "kind": "item", "item": 99999, "amount": 2, "weight": 1}          # 그 사이 지워진 물품: 오류 없이 아무것도 안 준다.
+        self.assertEqual(apply_reward(self.store, 100, 5, ghost), 0)
+        self.assertEqual({r["name"]: r["qty"] for r in self.store.inventory(100, 5)}, {"열쇠": 1, "쓰레기": 1})   # 아무것도 더해지지 않았다.
+        self.assertEqual(self.store.holdings(100, 99999), 0)
+
+
+class CustomTableTests(PackageFixture):
+    """관리자가 결과표를 바꾸면 실제 뜯기에 그대로 반영된다."""
+
+    def set_table(self, table):
+        self.store.package_table(100)                          # 기본 표를 먼저 만들어 둔다(처음 한 번).
+        self.store.update_settings(100, package_table=table)
+
+    async def test_custom_entries_rewards_icons_and_ratios(self):
+        gem = self.store.create_item(100, "보석", emoji="💎")
+        self.set_table([{"id": "a", "kind": "item", "item": gem["id"], "amount": 3, "weight": 1, "emoji": "✨", "title": "반짝 보석"},
+                        {"id": "b", "kind": "candy", "amount": 7, "weight": 3}])         # 합계 4 → 25% / 75%
+        self.package("all")
+        first = await self.open(1, 0.1)                       # 0~0.25 → a
+        second = await self.open(2, 0.3)                      # 0.25~1 → b
+        self.assertEqual((first.title, second.title), ("✨ 반짝 보석!", "🍬 할로윈 재화 7!"))
+        self.assertEqual((self.store.qty(100, 1, gem["id"]), self.store.wallet(100, 2)), (3, 7))
+        self.assertEqual([r["result"] for r in self.store.package_openers(9001)], ["a", "b"])
+
+    async def test_currency_changes_show_in_the_result(self):
+        self.store.set_currency(100, emoji="💰", name="골드")
+        self.set_table([{"id": "c", "kind": "candy", "amount": 40, "weight": 1}])
+        self.package("all")
+        embed = await self.open(1, 0.5)
+        self.assertEqual(embed.title, "💰 골드 40!")
+        self.assertIn("💰 40개", embed.description)
+
+    async def test_a_result_removed_while_the_package_is_up_is_shown_safely(self):
+        self.package("all", expires=NOW + 10)
+        await self.open(1, 0.0)                                # 꽝('none')을 뽑는다
+        self.store.update_settings(100, package_table=[e for e in self.store.package_table(100) if e["id"] != "none"])
+        await finalize_due(self.w.bot, NOW + 11)
+        self.assertIn("사라진 결과", self.channel.partial[9001].edit.await_args.kwargs["embed"].description)
+
+    async def test_an_empty_or_all_zero_table_falls_back_to_nothing_instead_of_crashing(self):
+        self.store.package_table(100)
+        self.store.update_settings(100, package_table=[])
+        self.package("all")
+        embed = await self.open(1, 0.5)
+        self.assertEqual(embed.title, "👻 꽝!")
 
 
 class FinalizeTests(PackageFixture):

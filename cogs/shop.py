@@ -106,10 +106,10 @@ class Shop(commands.Cog):
     @app_commands.default_permissions(administrator=True)
     @app_commands.rename(name="이름", buyable="구입", sellable="판매", buy_price="구입가", sell_price="판매가", description="설명", emoji="이모지")
     @app_commands.describe(name="물품 이름 (30자까지)", buyable="사람들이 살 수 있게 할까요? (true/false)",
-                           sellable="사람들이 팔 수 있게 할까요? (true/false)", buy_price="구입 가격(🍬). 구입을 켰다면 필수",
-                           sell_price="판매 가격(🍬). 판매를 켰다면 필수", description="설명 (200자까지)", emoji="아이콘 (기본 🎃)")
+                           sellable="사람들이 팔 수 있게 할까요? (true/false)", buy_price="구입 가격(재화). 구입을 켰다면 필수",
+                           sell_price="판매 가격(재화). 판매를 켰다면 필수", description="설명 (200자까지)", emoji="아이콘 (기본 🎃)")
     async def add_item(self, interaction: discord.Interaction, name: str, buyable: bool, sellable: bool,
-                       buy_price: app_commands.Range[int, 0, 99999] = 0, sell_price: app_commands.Range[int, 0, 99999] = 0,
+                       buy_price: app_commands.Range[int, 0, 1_000_000_000] = 0, sell_price: app_commands.Range[int, 0, 1_000_000_000] = 0,
                        description: str = "", emoji: str = "🎃"):
         if not await require_admin(interaction):
             return
@@ -119,17 +119,17 @@ class Shop(commands.Cog):
         except StoreError as exc:
             await self._deny(interaction, str(exc))
             return
-        await self._finish(interaction, f"{item['emoji']} **{item['name']}**을(를) 등록했어요.\n" + self._flags(item))
+        await self._finish(interaction, f"{item['emoji']} **{item['name']}**을(를) 등록했어요.\n" + self._flags(item, self.bot.store.currency(interaction.guild_id)))
 
     @app_commands.command(name="역할등록", description="상점에 역할을 등록해요. 사면 그 역할을 받아요 (관리자)")
     @app_commands.guild_only()
     @app_commands.default_permissions(administrator=True)
     @app_commands.rename(role="역할", buyable="구입", sellable="판매", buy_price="구입가", sell_price="판매가", description="설명", emoji="이모지")
     @app_commands.describe(role="상점에 올릴 역할", buyable="사람들이 살 수 있게 할까요? (true/false)",
-                           sellable="역할을 반납하고 팔 수 있게 할까요? (true/false)", buy_price="구입 가격(🍬). 구입을 켰다면 필수",
-                           sell_price="판매 가격(🍬). 판매를 켰다면 필수", description="설명 (200자까지)", emoji="아이콘 (기본 👑)")
+                           sellable="역할을 반납하고 팔 수 있게 할까요? (true/false)", buy_price="구입 가격(재화). 구입을 켰다면 필수",
+                           sell_price="판매 가격(재화). 판매를 켰다면 필수", description="설명 (200자까지)", emoji="아이콘 (기본 👑)")
     async def add_role(self, interaction: discord.Interaction, role: discord.Role, buyable: bool, sellable: bool,
-                       buy_price: app_commands.Range[int, 0, 99999] = 0, sell_price: app_commands.Range[int, 0, 99999] = 0,
+                       buy_price: app_commands.Range[int, 0, 1_000_000_000] = 0, sell_price: app_commands.Range[int, 0, 1_000_000_000] = 0,
                        description: str = "", emoji: str = "👑"):
         if not await require_admin(interaction):
             return
@@ -143,12 +143,12 @@ class Shop(commands.Cog):
         except StoreError as exc:
             await self._deny(interaction, str(exc))
             return
-        await self._finish(interaction, f"{item['emoji']} {role.mention} 역할을 상점에 등록했어요.\n" + self._flags(item))
+        await self._finish(interaction, f"{item['emoji']} {role.mention} 역할을 상점에 등록했어요.\n" + self._flags(item, self.bot.store.currency(interaction.guild_id)))
 
     @staticmethod
-    def _flags(item) -> str:
-        buy = f"구입 ✅ {theme.money(item['buy_price'])}" if item["buyable"] else "구입 ❌"
-        sell = f"판매 ✅ {theme.money(item['sell_price'])}" if item["sellable"] else "판매 ❌"
+    def _flags(item, cur=None) -> str:
+        buy = f"구입 ✅ {theme.money(item['buy_price'], cur)}" if item["buyable"] else "구입 ❌"
+        sell = f"판매 ✅ {theme.money(item['sell_price'], cur)}" if item["sellable"] else "판매 ❌"
         note = "" if item["buyable"] or item["sellable"] else "\n(구입·판매가 모두 꺼져 있어서 상점에는 나오지 않아요.)"
         return f"{buy} · {sell}{note}"
 
@@ -158,13 +158,13 @@ class Shop(commands.Cog):
     @app_commands.rename(item="물품", new_name="새이름", buyable="구입", sellable="판매", buy_price="구입가", sell_price="판매가",
                          description="설명", emoji="이모지")
     async def edit_item(self, interaction: discord.Interaction, item: str, new_name: str | None = None, buyable: bool | None = None,
-                        sellable: bool | None = None, buy_price: app_commands.Range[int, 0, 99999] | None = None,
-                        sell_price: app_commands.Range[int, 0, 99999] | None = None, description: str | None = None,
+                        sellable: bool | None = None, buy_price: app_commands.Range[int, 0, 1_000_000_000] | None = None,
+                        sell_price: app_commands.Range[int, 0, 1_000_000_000] | None = None, description: str | None = None,
                         emoji: str | None = None):
         if not await require_admin(interaction):
             return
         store, gid = self.bot.store, interaction.guild_id
-        store.ensure_system_items(gid)
+        store.ensure_defaults(gid)
         row = store.item_by_name(gid, item)
         if row is None:
             await self._deny(interaction, "그런 물품이 없어요.")
@@ -182,7 +182,7 @@ class Shop(commands.Cog):
         except StoreError as exc:
             await self._deny(interaction, str(exc))
             return
-        await self._finish(interaction, f"{updated['emoji']} **{updated['name']}**을(를) 고쳤어요.\n" + self._flags(updated))
+        await self._finish(interaction, f"{updated['emoji']} **{updated['name']}**을(를) 고쳤어요.\n" + self._flags(updated, self.bot.store.currency(interaction.guild_id)))
 
     @app_commands.command(name="물품삭제", description="물품을 지워요. 가방에 있던 것도 사라져요 (관리자)")
     @app_commands.guild_only()
@@ -192,12 +192,13 @@ class Shop(commands.Cog):
         if not await require_admin(interaction):
             return
         store, gid = self.bot.store, interaction.guild_id
+        store.ensure_defaults(gid)
         row = store.item_by_name(gid, item)
         if row is None:
             await self._deny(interaction, "그런 물품이 없어요.")
             return
-        if row["system"]:
-            await self._deny(interaction, "기본 물품(열쇠·쓰레기)은 지울 수 없어요. 상점에서 빼려면 구입·판매를 꺼 주세요.")
+        if users := store.item_users(gid, row["id"]):
+            await self._deny(interaction, "이 물품을 쓰는 설정이 있어서 지울 수 없어요: " + ", ".join(users) + ". 먼저 그쪽을 바꿔 주세요.")
             return
         held = store.holdings(gid, row["id"])
         warning = f"가방에 있는 **{held:,}개**도 함께 사라져요. " if held else ""
@@ -212,12 +213,12 @@ class Shop(commands.Cog):
         if not await require_admin(interaction):
             return
         store, gid = self.bot.store, interaction.guild_id
-        store.ensure_system_items(gid)
-        lines = []
+        store.ensure_defaults(gid)
+        lines, cur = [], store.currency(gid)
         for row in store.items(gid):
-            kind = " `역할`" if row["kind"] == "role" else (" `기본`" if row["system"] else "")
-            buy = f"구입 {theme.money(row['buy_price'])}" if row["buyable"] else "구입 ❌"
-            sell = f"판매 {theme.money(row['sell_price'])}" if row["sellable"] else "판매 ❌"
+            kind = " `역할`" if row["kind"] == "role" else ""
+            buy = f"구입 {theme.money(row['buy_price'], cur)}" if row["buyable"] else "구입 ❌"
+            sell = f"판매 {theme.money(row['sell_price'], cur)}" if row["sellable"] else "판매 ❌"
             lines.append(f"{row['emoji']} **{display_name(interaction.guild, row)}**{kind} · {buy} · {sell}")
         listed = len(store.items(gid, shop_only=True))
         text = "\n".join(lines)[:3800] or "등록된 물품이 없어요."
@@ -229,7 +230,7 @@ class Shop(commands.Cog):
     async def item_autocomplete(self, interaction: discord.Interaction, current: str):
         if interaction.guild_id is None:
             return []
-        self.bot.store.ensure_system_items(interaction.guild_id)
+        self.bot.store.ensure_defaults(interaction.guild_id)
         return await item_choices(self.bot.store, interaction.guild_id, current)
 
 

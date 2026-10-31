@@ -6,7 +6,7 @@ import logging
 import discord
 
 import theme
-from store import CANDY, valid_emoji
+from store import valid_emoji
 
 LOG = logging.getLogger("halloween")
 SHOP_SELECT_ID = "hw:shop:select"
@@ -33,12 +33,13 @@ def role_names(guild, rows) -> dict[int, str]:
 class ShopPanelView(discord.ui.View):
     """채널에 올라가는 상점. 봇을 껐다 켜도 계속 동작하도록 timeout이 없고 버튼 ID가 고정이다."""
 
-    def __init__(self, rows=None, guild=None, *, with_emoji: bool = True):
+    def __init__(self, rows=None, guild=None, *, with_emoji: bool = True, store=None):
         super().__init__(timeout=None)
+        cur = store.currency(guild.id) if store and guild else None
         options = []
         for row in rows or []:
-            buy = f"구매 {CANDY} {row['buy_price']:,}" if row["buyable"] else "구매 불가"
-            sell = f"판매 {CANDY} {row['sell_price']:,}" if row["sellable"] else "판매 불가"
+            buy = f"구매 {theme.plain_money(row['buy_price'], cur)}" if row["buyable"] else "구매 불가"
+            sell = f"판매 {theme.plain_money(row['sell_price'], cur)}" if row["sellable"] else "판매 불가"
             options.append(discord.SelectOption(
                 label=display_name(guild, row)[:100], value=str(row["id"]), description=f"{buy} · {sell}"[:100],
                 emoji=partial_emoji(row["emoji"]) if with_emoji else None))
@@ -71,7 +72,8 @@ class ShopPanelView(discord.ui.View):
 
 def build_panel(store, guild, *, with_emoji: bool = True):
     rows = store.items(guild.id, shop_only=True)
-    return theme.shop_embed(rows, role_names(guild, rows)), ShopPanelView(rows, guild, with_emoji=with_emoji)
+    return (theme.shop_embed(rows, role_names(guild, rows), store.currency(guild.id)),
+            ShopPanelView(rows, guild, with_emoji=with_emoji, store=store))
 
 
 async def post_panel(client, channel) -> discord.Message:

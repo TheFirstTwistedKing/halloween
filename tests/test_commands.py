@@ -50,7 +50,7 @@ class AdminOnlyTests(CommandFixture):
             (Admin.add_channel, self.admin, (self.channel,)), (Admin.remove_channel, self.admin, (self.channel,)),
             (Admin.list_channels, self.admin, ()),
             (Admin.settings, self.admin, (), dict(candy_chance=99.0)),
-            (Admin.give_candy, self.admin, (self.target, 50)), (Admin.give_exp, self.admin, (self.target, 50)),
+            (Admin.give_candy, self.admin, (self.target, 50)),
             (Admin.give_item, self.admin, (self.target, "초", 3)),
             (Shop.register_shop, self.shop, (self.channel,)), (Shop.unregister_shop, self.shop, (self.channel,)),
             (Shop.add_item, self.shop, ("나쁜 물품", True, True, 5, 5)),
@@ -77,7 +77,7 @@ class AdminOnlyTests(CommandFixture):
     async def test_the_server_owner_counts_as_an_admin_even_without_the_permission_bit(self):
         interaction = self.ask(admin=False, uid=1)                              # 서버 주인(id 1)
         await self.call(Admin.give_candy, self.admin, interaction, self.target, 5)
-        self.assertEqual(self.store.wallet(100, 8)[0], 5)
+        self.assertEqual(self.store.wallet(100, 8), 5)
 
     async def test_every_admin_command_is_hidden_from_non_admins_in_discord(self):
         for cog in (self.admin, self.shop):
@@ -92,7 +92,7 @@ class EventChannelTests(CommandFixture):
     async def test_add_remove_and_list(self):
         interaction = await self.call(Admin.add_channel, self.admin, self.ask(), self.channel)
         self.assertEqual(self.store.settings(100)["channels"], [400])
-        self.assertIn("<#400>에서 재화·EXP·패키지가 나와요", self.reply(interaction)[0])
+        self.assertIn("<#400>에서 재화·패키지가 나와요", self.reply(interaction)[0])
         self.assertNotIn("⚠️", self.reply(interaction)[0])
         interaction = await self.call(Admin.add_channel, self.admin, self.ask(), self.channel)
         self.assertIn("이미 이벤트 채널", self.reply(interaction)[0])
@@ -135,7 +135,7 @@ class SettingsCommandTests(CommandFixture):
     async def test_changes_apply_and_are_shown(self):
         interaction = await self.call(Admin.settings, self.admin, self.ask(), candy_chance=75.5, candy_min=2, candy_max=9,
                                      candy_cooldown=0, package_chance=1.5, package_mode=Choice(name="먼저", value="first"),
-                                     package_seconds=45, reaction=False, exp_max=0, exp_min=0)
+                                     package_seconds=45, reaction=False)
         cfg = self.store.settings(100)
         self.assertEqual((cfg["candy_chance"], cfg["candy_min"], cfg["candy_max"], cfg["candy_cooldown"]), (75.5, 2, 9, 0))
         self.assertEqual((cfg["package_chance"], cfg["package_mode"], cfg["package_seconds"], cfg["reaction"]), (1.5, "first", 45, False))
@@ -153,24 +153,21 @@ class SettingsCommandTests(CommandFixture):
 
 
 class GrantTests(CommandFixture):
-    async def test_candy_and_exp_grants_report_the_real_change(self):
+    async def test_candy_grants_report_the_real_change(self):
         interaction = await self.call(Admin.give_candy, self.admin, self.ask(), self.target, 40)
-        self.assertEqual(self.reply(interaction)[0], "<@8>의 할로윈 재화이 +40만큼 바뀌었어요. (지금 🍬 40)")
+        self.assertEqual(self.reply(interaction)[0], "<@8>의 할로윈 재화가 +40만큼 바뀌었어요. (지금 🍬 40)")
         interaction = await self.call(Admin.give_candy, self.admin, self.ask(), self.target, CANDY_MAX)
         self.assertIn(f"+{CANDY_MAX - 40:,}만큼", self.reply(interaction)[0])                   # 상한까지만
         interaction = await self.call(Admin.give_candy, self.admin, self.ask(), self.target, -99999)
-        self.assertEqual(self.store.wallet(100, 8)[0], 0)
-        interaction = await self.call(Admin.give_exp, self.admin, self.ask(), self.target, 20000)
-        self.assertIn("✨ 20,000", self.reply(interaction)[0])
-        self.assertEqual(self.store.wallet(100, 8)[1], 20000)
+        self.assertEqual(self.store.wallet(100, 8), 0)
 
     async def test_bots_are_refused(self):
         bot = self.w.new_member(77)
         bot.bot = True
-        for command, args in ((Admin.give_candy, (bot, 5)), (Admin.give_exp, (bot, 5)), (Admin.give_item, (bot, "열쇠", 1))):
+        for command, args in ((Admin.give_candy, (bot, 5)), (Admin.give_item, (bot, "열쇠", 1))):
             interaction = await self.call(command, self.admin, self.ask(), *args)
             self.assertIn("봇에게는", self.reply(interaction)[0])
-        self.assertEqual(self.store.wallet(100, 77), (0, 0))
+        self.assertEqual(self.store.wallet(100, 77), 0)
 
     async def test_item_grants(self):
         interaction = await self.call(Admin.give_item, self.admin, self.ask(), self.target, "열쇠", 3)       # 기본 물품은 처음 쓸 때 만들어진다.
@@ -318,11 +315,12 @@ class ItemManagementTests(CommandFixture):
             self.assertIn(text, self.reply(interaction)[0])
         self.assertEqual(self.refresh.await_count, 0)
 
-    async def test_system_items_can_be_put_on_sale_but_not_renamed(self):
+    async def test_default_items_can_be_put_on_sale_and_renamed(self):
         interaction = await self.call(Shop.edit_item, self.shop, self.ask(), "쓰레기", sellable=True, sell_price=2)
         self.assertIn("🗑️ **쓰레기**을(를) 고쳤어요.", self.reply(interaction)[0])
-        interaction = await self.call(Shop.edit_item, self.shop, self.ask(), "열쇠", new_name="마스터 키")
-        self.assertIn("기본 물품의 이름", self.reply(interaction)[0])
+        interaction = await self.call(Shop.edit_item, self.shop, self.ask(), "열쇠", new_name="마스터 키", emoji="🔑")
+        self.assertIn("🔑 **마스터 키**을(를) 고쳤어요.", self.reply(interaction)[0])
+        self.assertEqual(self.store.item(100, self.store.ensure_system_items(100)["key"])["name"], "마스터 키")
 
     async def test_list_items(self):
         self.w.add_role(50, name="유령 손님")
@@ -332,7 +330,7 @@ class ItemManagementTests(CommandFixture):
         text = sent_embed(interaction)[0].description
         self.assertIn("🕯️ **초** · 구입 🍬 5 · 판매 ❌", text)
         self.assertIn("**유령 손님** `역할` · 구입 ❌ · 판매 🍬 9", text)
-        self.assertIn("**열쇠** `기본`", text)
+        self.assertIn("🗝️ **열쇠** · 구입 ❌ · 판매 ❌", text)
         self.assertIn("상점에 진열 2/25", text)
 
     async def test_item_autocomplete(self):
@@ -379,8 +377,12 @@ class DeleteTests(CommandFixture):
         self.assertIn("그런 물품이 없어요", embed.description)
         self.assertIsNone(view)
         self.store.ensure_system_items(100)
-        embed, view, _ = await self.start("열쇠")
-        self.assertIn("기본 물품", embed.description)
+        embed, view, _ = await self.start("열쇠")                       # 던전 입장 물품이라 지울 수 없다.
+        self.assertIn("쓰는 설정", embed.description)
+        self.assertIn("/던전입장물품", embed.description)
+        self.assertIsNone(view)
+        embed, view, _ = await self.start("쓰레기")                     # 패키지 결과표가 쓰고 있다.
+        self.assertIn("/패키지결과", embed.description)
         self.assertIsNone(view)
 
     async def test_an_item_deleted_by_someone_else_in_the_meantime(self):
@@ -402,8 +404,8 @@ class EconomyCommandTests(CommandFixture):
         self.assertIn("**50%** 확률로 **1~5**개", text)
         self.assertIn("**0.1%** 확률로 패키지", text)
         self.assertIn("누구나 한 번씩", text)
-        self.assertIn("EXP 15,000 → 🍬 15", text)
-        self.assertIn("꽝 60% · 🗝️ 열쇠 20% · 🍬 50개 10% · 🗑️ 쓰레기 10%", text)
+        self.assertNotIn("EXP", text)
+        self.assertIn("👻 꽝 60% · 🗝️ 열쇠 20% · 🍬 할로윈 재화 50 10% · 🗑️ 쓰레기 10%", text)
         self.assertIn("최대 99,999개", text)
         self.store.update_settings(100, channels=[400, 401], candy_chance=80, package_mode="first")
         interaction = await self.call(Economy.help, self.economy, self.ask(admin=False))
@@ -418,15 +420,13 @@ class EconomyCommandTests(CommandFixture):
         self.assertEqual(embed.title, "🎒 user7의 가방")
         self.assertTrue(kwargs["ephemeral"])
 
-    async def test_exchange_command(self):
-        self.store.add_exp(100, 7, 31000)
-        interaction = await self.call(Economy.exchange, self.economy, self.ask(admin=False), 2)
-        embed, kwargs = sent_embed(interaction)
-        self.assertEqual(embed.description, "✨ EXP 30,000을 내고 🍬 30을 샀어요.")
-        self.assertTrue(kwargs["ephemeral"])
-        interaction = await self.call(Economy.exchange, self.economy, self.ask(admin=False), 1)
-        self.assertEqual(sent_embed(interaction)[0].title, "👻 앗!")
-        self.assertEqual(self.store.wallet(100, 7), (30, 1000))
+    async def test_the_exp_commands_are_gone(self):
+        self.assertFalse(hasattr(Economy, "exchange"))
+        self.assertFalse(hasattr(Admin, "give_exp"))
+        interaction = await self.call(Economy.bag, self.economy, self.ask(admin=False))
+        names = [f.name for f in sent_embed(interaction)[0].fields]
+        self.assertFalse(any("경험치" in n for n in names), names)
+        self.assertNotIn("EXP", sent_embed(interaction)[0].description or "")
 
 
 if __name__ == "__main__":

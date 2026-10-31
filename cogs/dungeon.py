@@ -19,7 +19,7 @@ def bar(value: int, maximum: int, full: str, width: int = BAR) -> str:
     return full * filled + "⬛" * (width - filled)
 
 
-def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None) -> discord.Embed:
+def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=None) -> discord.Embed:
     """지금 화면. 끝난 던전이면 결과(보상)를 보여 준다."""
     bal = bal or DEFAULT
     ended = outcome.ended if outcome else None
@@ -38,22 +38,23 @@ def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None) -> dis
                         value=f"{bar(enemy['hp'], enemy['max_hp'], '🟥')} {enemy['hp']}/{enemy['max_hp']}")
     embed.add_field(name="❤️ HP", inline=False, value=f"{bar(run.hp, bal.max_hp, '🟩')} {run.hp}/{bal.max_hp}")
     if not ended:
-        weapon, shield = run.gear_weapon, run.gear_shield
+        weapon, shield = bal.gear_by_key.get(run.weapon), bal.gear_by_key.get(run.shield)
         gear = [f"{weapon.emoji} {weapon.name}" if weapon else "👊 맨손", f"{shield.emoji} {shield.name}" if shield else "✋ 맨몸 가드"]
         embed.add_field(name="🎒 장비", value=" · ".join(gear), inline=False)
-        if run.items:
-            embed.add_field(name="🧪 소지품", inline=False,
-                            value="\n".join(f"{bal.item_by_key[k].emoji} {bal.item_by_key[k].name} ×{n}" for k, n in run.items.items() if k in bal.item_by_key))
+        held = [f"{bal.item_by_key[k].emoji} {bal.item_by_key[k].name} ×{n}" for k, n in run.items.items() if k in bal.item_by_key]
+        if held:                                          # 관리자가 지운 아이템만 남았다면 칸 자체를 숨긴다(빈 칸은 디스코드가 거절한다).
+            embed.add_field(name="🧪 소지품", value="\n".join(held), inline=False)
         if run.regen_turns:
             embed.add_field(name="👻 회복 중", value=f"턴마다 HP +{run.regen_amount} (남은 {run.regen_turns}턴)", inline=False)
     reward = outcome.reward if outcome else None
     if ended == "clear" and reward:
-        lines = [f"{theme.money(reward.candy)} 을(를) 받았어요."]
+        lines = [f"{theme.money(reward.candy, cur)} 을(를) 받았어요."]
+        lines += [f"{emoji} **{name}** ×{amount:,}" for emoji, name, amount in reward.items]
         if reward.ticket:
             lines.append(f"🎟️ **히든 칭호 획득권**이 나왔어요! (지금 {reward.tickets_total}장)")
         embed.add_field(name="🎁 보상", value="\n".join(lines), inline=False)
     elif ended in ("dead", "quit"):
-        embed.add_field(name="열쇠", value="쓴 열쇠는 돌아오지 않아요. 새로 도전하려면 🗝️ 열쇠가 필요해요.", inline=False)
+        embed.add_field(name="입장 물품", value="입장에 쓴 물품은 돌아오지 않아요. 새로 도전하려면 입장 물품이 다시 필요해요.", inline=False)
     if run.loot and ended:
         embed.add_field(name="🧾 이번에 얻은 것", value=", ".join(run.loot[-10:]), inline=False)
     return embed
@@ -75,7 +76,7 @@ class DungeonView(discord.ui.View):
             self._button("버리기", "🗑️", "discard", discord.ButtonStyle.secondary)
         elif run.can_advance:
             self._button("앞으로" if run.room else "출발", "🚪", "advance", discord.ButtonStyle.success)
-        if run.items and not run.pending_gear:
+        if not run.pending_gear and any(k in (bal or DEFAULT).item_by_key for k in run.items):
             self.add_item(ItemSelect(run, bal or DEFAULT))
         self._button("나가기", "🏃", "ask_quit", discord.ButtonStyle.secondary)
 
@@ -85,7 +86,7 @@ class DungeonView(discord.ui.View):
         async def callback(interaction: discord.Interaction):
             if action == "ask_quit":
                 await interaction.response.send_message(
-                    embed=theme.notice("정말 나갈까요? 던전 진행과 쓴 열쇠가 사라져요.", False),
+                    embed=theme.notice("정말 나갈까요? 던전 진행과 입장에 쓴 물품이 사라져요.", False),
                     view=ConfirmQuit(self.client, self.user_id, self.rev), ephemeral=True)
                 return
             await self.handle(interaction, action)
@@ -147,18 +148,18 @@ async def respond(interaction: discord.Interaction, client, rev: int, action: st
     view = None if outcome.ended else DungeonView(client, interaction.user.id, run, bal)
     if from_confirm:
         # 확인창(별도 메시지)에서 눌렀다. 던전 화면은 그 메시지에서 따로 바꿀 수 없으니 결과만 알린다.
-        await interaction.response.edit_message(embed=run_embed(run, outcome, bal), view=None)
+        await interaction.response.edit_message(embed=run_embed(run, outcome, bal, client.store.currency(interaction.guild_id)), view=None)
         return
-    await interaction.response.edit_message(embed=run_embed(run, outcome, bal), view=view)
+    await interaction.response.edit_message(embed=run_embed(run, outcome, bal, client.store.currency(interaction.guild_id)), view=view)
 
 
 class Dungeon(commands.Cog):
-    """🏚️ 열쇠를 써서 들어가는 10개 방의 던전."""
+    """🏚️ 입장 물품을 내고 들어가는 10개 방의 던전."""
 
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="던전", description="🗝️ 열쇠 1개로 던전에 들어가요 (진행 중이면 이어서 해요)")
+    @app_commands.command(name="던전", description="🏚️ 입장 물품을 내고 던전에 들어가요 (진행 중이면 이어서 해요)")
     @app_commands.guild_only()
     async def enter(self, interaction: discord.Interaction):
         outcome = await service.enter(self.bot.store, self.bot.locks, interaction.guild_id, interaction.user.id)
@@ -166,7 +167,7 @@ class Dungeon(commands.Cog):
             await interaction.response.send_message(embed=theme.notice(outcome.text, False), ephemeral=True)
             return
         bal = self.bot.store.balance(interaction.guild_id)
-        await interaction.response.send_message(embed=run_embed(outcome.run, None, bal),
+        await interaction.response.send_message(embed=run_embed(outcome.run, None, bal, self.bot.store.currency(interaction.guild_id)),
                                                 view=DungeonView(self.bot, interaction.user.id, outcome.run, bal), ephemeral=True)
 
 

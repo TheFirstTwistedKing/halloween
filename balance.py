@@ -6,7 +6,7 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 
 # ---------------------------------------------------------------- 기본값
 MAX_HP = 1000
@@ -135,6 +135,121 @@ BOSSES = (                                                      # 보스는 회�
 )
 
 
+# ---------------------------------------------------------------- 던전 콘텐츠(몬스터·보스·장비·소모품을 관리자가 더하고 빼고 바꾼다)
+SECTIONS = ("monsters", "bosses", "gear", "consumables")
+SECTION_LABELS = {"monsters": "몬스터", "bosses": "보스", "gear": "장비", "consumables": "소모품"}
+SECTION_LIMITS = {"monsters": 25, "bosses": 25, "gear": 50, "consumables": 50}
+NAME_MAX = 30
+
+
+def entity_dict(entity) -> dict:
+    """저장용 사전(설명은 수치에서 다시 만들므로 저장하지 않는다)."""
+    data = asdict(entity)
+    data.pop("description", None)
+    return data
+
+
+def _num(data: dict, key: str, low, high, default=0, none_ok=False):
+    value = data.get(key, default)
+    if value is None and none_ok:
+        return None, None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value != int(value) or not low <= value <= high:
+        return None, f"{key} 값은 {low}~{high} 사이의 정수여야 해요."
+    return int(value), None
+
+
+def check_entity(section: str, data) -> tuple[object | None, str | None]:
+    """사전 하나를 몬스터·장비·소모품으로 바꾸고 검사한다. (개체, None) 또는 (None, 이유). 이모지 형식은 명령어 쪽에서 따로 본다."""
+    if section not in SECTIONS or not isinstance(data, dict):
+        return None, "올바르지 않은 데이터예요."
+    key, name, emoji = data.get("key"), data.get("name"), data.get("emoji")
+    if not isinstance(key, str) or not key or len(key) > 40:
+        return None, "key가 올바르지 않아요."
+    if not isinstance(name, str) or not 1 <= len(name) <= NAME_MAX or name != name.strip():
+        return None, f"이름은 앞뒤 공백 없이 1~{NAME_MAX}자로 써 주세요."
+    if not isinstance(emoji, str) or not 1 <= len(emoji) <= 80:
+        return None, "이모지가 올바르지 않아요."
+
+    def numbers(*specs):
+        out = {}
+        for spec in specs:
+            value, problem = _num(data, *spec)
+            if problem:
+                return None, problem
+            out[spec[0]] = value
+        return out, None
+
+    if section in ("monsters", "bosses"):
+        boss = section == "bosses"
+        n, problem = numbers(("hp", 1, 100000, 1), ("damage", 0, 100000, 0), ("dodge", 0, 95, BASE_DODGE))
+        if problem:
+            return None, problem
+        return Monster(key, name, emoji, n["hp"], n["damage"], 0 if boss else n["dodge"], boss), None
+    tier = data.get("tier", "일반")
+    if tier not in TIER_ORDER:
+        return None, "등급은 일반·희귀·전설 중 하나여야 해요."
+    if section == "gear":
+        slot = data.get("slot")
+        if slot not in ("weapon", "shield"):
+            return None, "장비 종류는 무기·방패 중 하나여야 해요."
+        n, problem = numbers(("weight", 0, 1000, 0), ("attack", 0, 100000, 0), ("crit", 0, 100, 0))
+        if problem:
+            return None, problem
+        extra = {}
+        for field_name, high in (("dodge", 95), ("guard", 100), ("reflect", 500)):
+            extra[field_name], problem = _num(data, field_name, 0, high, None, none_ok=True)
+            if problem:
+                return None, problem
+        if slot == "weapon":
+            extra["guard"] = extra["reflect"] = None
+        else:
+            n["attack"] = n["crit"] = 0
+            extra["dodge"] = None
+            if extra["guard"] is None:
+                return None, "방패에는 가드(피해 감소 %)가 필요해요."
+        gear = Gear(key, name, emoji, slot, tier, n["weight"], attack=n["attack"], crit=n["crit"], dodge=extra["dodge"],
+                    guard=extra["guard"], reflect=extra["reflect"])
+        return replace(gear, description=describe_gear(gear)), None
+    n, problem = numbers(("weight", 0, 1000, 0), ("heal", 0, 100000, 0), ("regen", 0, 100000, 0), ("regen_turns", 0, 1000, 0))
+    if problem:
+        return None, problem
+    full = data.get("full", False)
+    if not isinstance(full, bool):
+        return None, "full 값이 올바르지 않아요."
+    if full:
+        n["heal"] = n["regen"] = n["regen_turns"] = 0
+    elif n["regen"] > 0:
+        n["heal"] = 0
+        if n["regen_turns"] < 1:
+            return None, "지속 회복에는 지속 턴(1 이상)이 필요해요."
+    elif n["heal"] <= 0:
+        return None, "회복량·전체 회복·지속 회복 중 하나는 있어야 해요."
+    else:
+        n["regen_turns"] = 0
+    item = Consumable(key, name, emoji, tier, n["weight"], heal=n["heal"], full=full, regen=n["regen"], regen_turns=n["regen_turns"])
+    return replace(item, description=describe_item(item)), None
+
+
+def clean_content(content) -> dict[str, tuple]:
+    """저장된 던전 콘텐츠에서 쓸 수 있는 구역만 꺼낸다. 구역이 있으면 기본 표 대신 그것을 쓴다. 잘못된 칸·중복 key는 버린다."""
+    out: dict[str, tuple] = {}
+    if not isinstance(content, dict):
+        return out
+    for section in SECTIONS:
+        raw = content.get(section)
+        if not isinstance(raw, list):
+            continue
+        items, keys = [], set()
+        for data in raw[:SECTION_LIMITS[section]]:
+            entity, problem = check_entity(section, data)
+            if problem or entity.key in keys:
+                continue
+            keys.add(entity.key)
+            items.append(entity)
+        out[section] = tuple(items)
+    return out
+
+
 def reduce_damage(damage: int, percent: int) -> int:
     """피해를 percent% 줄인다(반올림)."""
     return (damage * (100 - percent) + 50) // 100
@@ -153,6 +268,7 @@ class Param:
 
 
 GROUPS = ("일반", "방 배치", "몬스터", "보스", "장비", "아이템")
+SCALAR_GROUPS = ("일반", "방 배치")           # /던전설정으로 바꾸는 분류. 몬스터·장비·소모품은 /몬스터 /장비 /소모품 명령으로 편집한다
 
 
 def _build_params() -> dict[str, Param]:
@@ -276,8 +392,10 @@ class Balance:
         object.__setattr__(self, "monster_by_key", {m.key: m for m in self.monsters + self.bosses})
 
     @classmethod
-    def build(cls, overrides=None) -> "Balance":
+    def build(cls, overrides=None, content=None) -> "Balance":
+        """기본값 위에 숫자 덮어쓰기(overrides)를 얹고, 관리자가 만든 콘텐츠(content)가 있는 구역은 그것으로 통째로 바꾼다."""
         o = clean(overrides)
+        custom = clean_content(content)
 
         def get(key):
             return o.get(key, PARAMS[key].default)
@@ -304,31 +422,37 @@ class Balance:
             else:
                 c = replace(c, heal=get(f"아이템.{c.name}.회복량"), weight=get(f"아이템.{c.name}.등장"))
             items.append(replace(c, description=describe_item(c)))
+        monsters = tuple(replace(m, hp=get(f"몬스터.{m.name}.체력"), damage=get(f"몬스터.{m.name}.공격"),
+                                 dodge=get(f"몬스터.{m.name}.회피")) for m in MONSTERS)
+        bosses = tuple(replace(b, hp=get(f"보스.{b.name}.체력"), damage=get(f"보스.{b.name}.공격")) for b in BOSSES)
         return cls(
             max_hp=get("일반.최대체력"), base_damage=get("일반.맨손공격력"), guard_chance=get("방어.성공확률"),
             guard_base=get("방어.기본피해감소"), guard_heal=get("방어.회복률"), reflect_base=get("방어.기본반사"),
             clear_candy=(get("보상.최소"), get("보상.최대")), ticket_chance=get("보상.획득권확률"), room_plan=plan,
-            monsters=tuple(replace(m, hp=get(f"몬스터.{m.name}.체력"), damage=get(f"몬스터.{m.name}.공격"),
-                                   dodge=get(f"몬스터.{m.name}.회피")) for m in MONSTERS),
-            bosses=tuple(replace(b, hp=get(f"보스.{b.name}.체력"), damage=get(f"보스.{b.name}.공격")) for b in BOSSES),
-            gear=tuple(gear), consumables=tuple(items))
+            monsters=custom.get("monsters", monsters), bosses=custom.get("bosses", bosses),
+            gear=custom.get("gear", tuple(gear)), consumables=custom.get("consumables", tuple(items)))
 
 
 DEFAULT = Balance.build({})
 
 
-def validate(overrides: dict) -> str | None:
-    """값 하나하나와, 값들을 합쳤을 때 게임이 깨지지 않는지(한 방의 가중치가 전부 0 등)를 검사한다. 문제가 있으면 이유를 돌려준다."""
+def validate(overrides: dict, content=None) -> str | None:
+    """값 하나하나와, 값들을 합쳤을 때 게임이 깨지지 않는지(한 방의 가중치가 전부 0, 나올 몬스터가 없음 등)를 검사한다. 문제가 있으면 이유를 돌려준다."""
     for key, value in overrides.items():
         _, problem = check_value(key, value)
         if problem:
             return problem
-    bal = Balance.build(overrides)
+    bal = Balance.build(overrides, content)
     if bal.clear_candy[0] > bal.clear_candy[1]:
         return "클리어 보상의 최소가 최대보다 클 수 없어요."
     for room, table in enumerate(bal.room_plan, start=1):
         if not table:
             return f"{room}번째 방의 상자·빈방·잡몹·보스 가중치가 모두 0이에요. 하나는 0보다 커야 해요."
+    kinds = {kind for table in bal.room_plan for kind, _ in table}
+    if "monster" in kinds and not bal.monsters:
+        return "잡몹이 나오는 방이 있는데 잡몹이 하나도 없어요. 몬스터를 추가하거나 방 배치에서 잡몹 가중치를 0으로 해 주세요."
+    if "boss" in kinds and not bal.bosses:
+        return "보스가 나오는 방이 있는데 보스가 하나도 없어요. 보스를 추가하거나 방 배치를 바꿔 주세요."
     if sum(g.weight for g in bal.gear) <= 0:
         return "상자에서 나오는 장비의 '등장' 가중치가 전부 0이에요. 하나는 0보다 커야 해요."
     if sum(c.weight for c in bal.consumables) <= 0:

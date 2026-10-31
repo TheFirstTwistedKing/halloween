@@ -249,9 +249,9 @@ class StoreTests(unittest.TestCase):
         self.store.enter_dungeon(G, U, "{}")
         self.store.add_candy(G, U, CANDY_MAX - 10)
         self.assertEqual(self.store.end_dungeon(G, U, candy=100, tickets=1), (10, 1))
-        self.assertEqual(self.store.wallet(G, U)[0], CANDY_MAX)
+        self.assertEqual(self.store.wallet(G, U), CANDY_MAX)
         self.assertIsNone(self.store.end_dungeon(G, U, candy=100, tickets=1))       # 두 번째는 보상 없음
-        self.assertEqual((self.store.wallet(G, U)[0], self.store.tickets(G, U)), (CANDY_MAX, 1))
+        self.assertEqual((self.store.wallet(G, U), self.store.tickets(G, U)), (CANDY_MAX, 1))
 
     def test_saving_does_not_bring_back_a_finished_dungeon(self):
         self.store.add_item(G, U, self.key, 1)
@@ -306,7 +306,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sorted(r.ok for r in results), [False, True])  # 겹친 요청 중 하나만 성공
         done = next(r for r in results if r.ok)
         self.assertEqual((done.ended, done.reward.candy, done.reward.ticket, done.reward.tickets_total), ("clear", low, True, 1))
-        self.assertEqual((self.store.wallet(G, U)[0], self.store.tickets(G, U)), (low, 1))
+        self.assertEqual((self.store.wallet(G, U), self.store.tickets(G, U)), (low, 1))
         self.assertIsNone(self.store.dungeon_run(G, U))
 
     async def test_first_rooms_follow_the_plan_chest_then_empty_or_mob_then_chest(self):
@@ -330,7 +330,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         result = await self.go(Scripted(randoms=[0.99]), "attack", run.rev)         # 공격은 맞지만 마녀를 못 잡고 마녀에게 맞는다
         self.assertEqual((result.ok, result.ended, result.reward), (True, "dead", None))
         self.assertIsNone(self.store.dungeon_run(G, U))
-        self.assertEqual(self.store.wallet(G, U)[0], 0)
+        self.assertEqual(self.store.wallet(G, U), 0)
 
         self.store.add_item(G, U, self.store.ensure_system_items(G)["key"], 1)
         run = (await service.enter(self.store, self.locks, G, U)).run

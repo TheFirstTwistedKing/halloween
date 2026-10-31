@@ -1,4 +1,4 @@
-"""사용자가 쓰는 화면: 물품 상세, 수량 입력, 가방, 경험치 교환."""
+"""사용자가 쓰는 화면: 물품 상세, 수량 입력, 가방."""
 from __future__ import annotations
 
 import discord
@@ -6,49 +6,22 @@ import discord
 import services
 import theme
 from panel import display_name
-from store import EXCHANGE_EXP, QTY_MAX
+from store import QTY_MAX
 
 
 def bag_for(client, member) -> discord.Embed:
     store, guild = client.store, member.guild
-    candy, exp = store.wallet(guild.id, member.id)
+    candy = store.wallet(guild.id, member.id)
     roles = []
     for row in store.items(guild.id):
         if row["kind"] == "role" and any(role.id == row["role_id"] for role in member.roles):
             roles.append(f"{row['emoji']} {display_name(guild, row)}")
-    return theme.bag_embed(member.display_name, candy=candy, exp=exp, items=store.inventory(guild.id, member.id), roles=roles,
-                           tickets=store.tickets(guild.id, member.id))
-
-
-class ExchangeModal(discord.ui.Modal):
-    def __init__(self):
-        super().__init__(title="✨ 경험치 교환")
-        self.count = discord.ui.TextInput(label=f"교환 횟수 ({EXCHANGE_EXP:,} EXP = 🍬 15 / 번)", default="1", min_length=1, max_length=4)
-        self.add_item(self.count)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        text = self.count.value.strip()
-        if not (text.isascii() and text.isdigit() and int(text) >= 1):
-            await interaction.response.send_message(embed=theme.notice("횟수는 1 이상의 숫자로 입력해 주세요.", False), ephemeral=True)
-            return
-        client = interaction.client
-        result = await services.exchange(client.store, client.locks, interaction.user, int(text))
-        await interaction.response.send_message(embed=theme.notice(result.text, result.ok), ephemeral=True)
-
-
-class BagView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=300)
-        button = discord.ui.Button(label="경험치 교환", emoji="✨", style=discord.ButtonStyle.primary)
-        button.callback = self.on_exchange
-        self.add_item(button)
-
-    async def on_exchange(self, interaction: discord.Interaction):
-        await interaction.response.send_modal(ExchangeModal())
+    return theme.bag_embed(member.display_name, candy=candy, items=store.inventory(guild.id, member.id), roles=roles,
+                           tickets=store.tickets(guild.id, member.id), cur=store.currency(guild.id))
 
 
 async def send_bag(interaction: discord.Interaction):
-    await interaction.response.send_message(embed=bag_for(interaction.client, interaction.user), view=BagView(), ephemeral=True)
+    await interaction.response.send_message(embed=bag_for(interaction.client, interaction.user), ephemeral=True)
 
 
 class QuantityModal(discord.ui.Modal):
@@ -80,7 +53,7 @@ class DetailView(discord.ui.View):
         super().__init__(timeout=180)
         self.client, self.item_id, self.member = client, item_id, member
         item = client.store.item(member.guild.id, item_id)
-        self.buy_button = discord.ui.Button(label="구매", emoji="🍬", style=discord.ButtonStyle.success,
+        self.buy_button = discord.ui.Button(label="구매", emoji="🛒", style=discord.ButtonStyle.success,
                                             disabled=not (item and item["buyable"]))
         self.sell_button = discord.ui.Button(label="판매", emoji="🎃", style=discord.ButtonStyle.danger,
                                              disabled=not (item and item["sellable"]))
@@ -92,12 +65,13 @@ class DetailView(discord.ui.View):
     def embed(self) -> discord.Embed:
         store, guild = self.client.store, self.member.guild
         item = store.item(guild.id, self.item_id)
-        candy, _ = store.wallet(guild.id, self.member.id)
+        candy = store.wallet(guild.id, self.member.id)
         if item["kind"] == "role":
             owned = any(role.id == item["role_id"] for role in self.member.roles)
         else:
             owned = store.qty(guild.id, self.member.id, item["id"])
-        return theme.detail_embed(item, candy=candy, owned=owned, role_name=display_name(guild, item))
+        return theme.detail_embed(item, candy=candy, owned=owned, role_name=display_name(guild, item),
+                                  cur=store.currency(guild.id))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return interaction.user.id == self.member.id

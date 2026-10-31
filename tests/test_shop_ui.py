@@ -8,7 +8,7 @@ import discord
 from panel import ShopPanelView, build_panel, post_panel, refresh_panels
 from store import CANDY_MAX
 from tests.helpers import FakeRole, World, sent_embed
-from views import BagView, DetailView, ExchangeModal, QuantityModal, bag_for, send_bag
+from views import DetailView, QuantityModal, bag_for, send_bag
 
 
 class UiFixture(unittest.IsolatedAsyncioTestCase):
@@ -51,6 +51,22 @@ class PanelContentTests(UiFixture):
         self.assertEqual(select.options[1].description, "구매 불가 · 판매 🍬 7")
         self.assertEqual([str(o.emoji) for o in select.options], ["🕯️", "🦇", "👑"])
         self.assertEqual((bag.label, str(bag.emoji)), ("가방", "🎒"))
+
+    async def test_the_shop_uses_the_servers_currency(self):
+        self.store.set_currency(100, emoji="💎", name="젬")
+        embed, view = build_panel(self.store, self.w.guild)
+        self.assertIn("🕯️ **호박 초**\n┕ 구매 💎 30 · 판매 💎 10", embed.description)
+        self.assertEqual(embed.fields[0].name, "💎 = 젬")
+        self.assertEqual(view.children[0].options[0].description, "구매 💎 30 · 판매 💎 10")
+        detail = DetailView(self.w.bot, self.candle["id"], self.w.member).embed()
+        self.assertEqual({f.name: f.value for f in detail.fields}["구매"], "💎 30")
+
+    async def test_a_server_emoji_currency_becomes_its_name_in_select_descriptions(self):
+        """선택창 설명에는 서버 이모지가 그림으로 안 보이므로 재화 이름을 쓴다(본문 임베드에서는 그림으로 보인다)."""
+        self.store.set_currency(100, emoji="<:gem:123456789012345678>", name="젬")
+        embed, view = build_panel(self.store, self.w.guild)
+        self.assertEqual(view.children[0].options[0].description, "구매 젬 30 · 판매 젬 10")
+        self.assertIn("구매 <:gem:123456789012345678> 30", embed.description)
 
     async def test_an_empty_shop(self):
         w = World()
@@ -236,7 +252,7 @@ class QuantityModalTests(UiFixture):
         self.assertEqual((embed.title, embed.description), ("🎃 완료!", "🍬 60을 내고 🕯️ **호박 초** ×2을(를) 샀어요."))
         embed, _ = await self.submit("sell", "1")
         self.assertEqual(embed.description, "🕯️ **호박 초** ×1을(를) 팔고 🍬 10을 받았어요.")
-        self.assertEqual((self.store.wallet(100, 7)[0], self.store.qty(100, 7, self.candle["id"])), (50, 1))
+        self.assertEqual((self.store.wallet(100, 7), self.store.qty(100, 7, self.candle["id"])), (50, 1))
 
     async def test_failures_show_a_red_notice(self):
         embed, _ = await self.submit("buy", "5")
@@ -249,7 +265,7 @@ class QuantityModalTests(UiFixture):
             embed, _ = await self.submit("buy", text)
             self.assertEqual(embed.title, "👻 앗!", text)
             self.assertTrue("수량" in embed.description, text)
-        self.assertEqual(self.store.wallet(100, 7), (0, 0))
+        self.assertEqual(self.store.wallet(100, 7), 0)
 
     async def test_a_deleted_item(self):
         self.store.delete_item(100, self.bat["id"])
@@ -258,10 +274,9 @@ class QuantityModalTests(UiFixture):
 
 
 class BagTests(UiFixture):
-    async def test_the_bag_shows_candy_exp_items_and_roles(self):
+    async def test_the_bag_shows_candy_items_and_roles(self):
         ids = self.store.ensure_system_items(100)
         self.store.add_candy(100, 7, 12345)
-        self.store.add_exp(100, 7, 33000)
         self.store.add_item(100, 7, ids["key"], 2)
         self.store.add_item(100, 7, self.candle["id"], 5)
         self.w.member.roles.append(self.w.roles[50])
@@ -270,8 +285,7 @@ class BagTests(UiFixture):
         self.assertEqual(embed.title, "🎒 user7의 가방")
         self.assertIn("**12,345** / 99,999", fields["🍬 할로윈 재화"])
         self.assertTrue(fields["🍬 할로윈 재화"].endswith("🟧" + "⬛" * 9))          # 12% → 10칸 중 1칸
-        self.assertIn("**33,000**", fields["✨ 경험치"])
-        self.assertIn("**2번** 교환 가능", fields["✨ 경험치"])
+        self.assertNotIn("✨ 경험치", fields)                                      # 경험치 기능은 없다.
         self.assertEqual(fields["🎒 물품"], "🗝️ 열쇠 ×2\n🕯️ 호박 초 ×5")
         self.assertEqual(fields["👑 역할"], "👑 유령 손님")
 
@@ -282,38 +296,32 @@ class BagTests(UiFixture):
         self.assertIn("**0** / 99,999", fields["🍬 할로윈 재화"])
         self.assertEqual(fields["🎒 물품"], "비어 있어요 🕸️")
         self.assertNotIn("👑 역할", fields)
-        self.assertNotIn("교환 가능", fields["✨ 경험치"])
+        self.assertNotIn("✨ 경험치", fields)
 
     async def test_candy_bar_scales_with_the_cap(self):
         from theme import candy_bar
-        self.assertEqual(candy_bar(0), "⬛" * 10)
-        self.assertEqual(candy_bar(CANDY_MAX), "🟧" * 10)
-        self.assertEqual(candy_bar(CANDY_MAX // 2), "🟧" * 5 + "⬛" * 5)
+        self.assertEqual(candy_bar(0, CANDY_MAX), "⬛" * 10)
+        self.assertEqual(candy_bar(CANDY_MAX, CANDY_MAX), "🟧" * 10)
+        self.assertEqual(candy_bar(CANDY_MAX // 2, CANDY_MAX), "🟧" * 5 + "⬛" * 5)
+        self.assertEqual(candy_bar(50, 100), "🟧" * 5 + "⬛" * 5)
+        self.assertEqual(candy_bar(500, 100), "🟧" * 10)                                # 최대를 낮춰도 칸이 넘치지 않는다.
 
     async def test_the_bag_is_private_and_the_panel_button_opens_it(self):
         interaction = self.w.interaction()
         await send_bag(interaction)
         embed, kwargs = sent_embed(interaction)
         self.assertTrue(kwargs["ephemeral"])
-        self.assertIsInstance(kwargs["view"], BagView)
+        self.assertIsNone(kwargs.get("view"))                                      # 가방에는 버튼이 없다(경험치 교환 제거).
         panel_click = self.w.interaction()
         await ShopPanelView().on_bag(panel_click)
         self.assertEqual(sent_embed(panel_click)[0].title, "🎒 user7의 가방")
 
-    async def test_exchange_through_the_bag(self):
-        self.store.add_exp(100, 7, 45000)
-        view = BagView()
-        interaction = self.w.interaction()
-        await view.children[0].callback(interaction)
-        self.assertIsInstance(interaction.response.send_modal.await_args.args[0], ExchangeModal)
-        for text, ok in (("2", True), ("0", False), ("abc", False), ("１", False), ("", False), ("5", False)):
-            modal = self.modal(ExchangeModal, text=text)
-            interaction = self.w.interaction()
-            await modal.on_submit(interaction)
-            embed, kwargs = sent_embed(interaction)
-            self.assertEqual(embed.title == "🎃 완료!", ok, text)
-            self.assertTrue(kwargs["ephemeral"])
-        self.assertEqual(self.store.wallet(100, 7), (30, 15000))
+    async def test_the_bag_uses_the_servers_currency(self):
+        self.store.set_currency(100, emoji="💎", name="젬", max=200)
+        self.store.add_candy(100, 7, 60)
+        fields = {f.name: f.value for f in bag_for(self.w.bot, self.w.member).fields}
+        self.assertIn("**60** / 200", fields["💎 젬"])
+        self.assertTrue(fields["💎 젬"].endswith("🟧" * 3 + "⬛" * 7))                  # 30% → 3칸
 
 
 if __name__ == "__main__":

@@ -19,7 +19,13 @@ from store import Store
 
 BASE = Path(__file__).resolve().parent
 LOG = logging.getLogger("halloween")
-EXTENSIONS = ("cogs.economy", "cogs.admin", "cogs.shop", "cogs.dungeon", "cogs.dungeon_admin")
+EXTENSIONS = ("cogs.economy", "cogs.admin", "cogs.shop", "cogs.dungeon", "cogs.dungeon_admin",
+              "cogs.rules_admin", "cogs.content_admin")
+
+
+def env_flag(raw: str) -> bool:
+    """.env의 켜짐/꺼짐 값. 1·true·yes·on(대소문자 무관)이면 켜짐."""
+    return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
 def parse_guild_ids(raw: str) -> list[int]:
@@ -39,9 +45,13 @@ def parse_guild_ids(raw: str) -> list[int]:
 
 
 class HalloweenBot(commands.Bot):
-    def __init__(self, store: Store, guild_ids: list[int] | None = None, rng: random.Random | None = None):
-        intents = discord.Intents.default()          # 특권 인텐트(멤버·메시지 내용)는 필요 없어요.
-        super().__init__(command_prefix=commands.when_mentioned, intents=intents, help_command=None)
+    def __init__(self, store: Store, guild_ids: list[int] | None = None, rng: random.Random | None = None,
+                 members_intent: bool = False):
+        intents = discord.Intents.default()          # 기본은 특권 인텐트(멤버·메시지 내용)가 필요 없어요.
+        intents.members = members_intent             # 켜면 '역할 재화 지급'처럼 역할을 가진 사람 전체가 필요한 기능을 쓸 수 있어요.
+        # 시작할 때 모든 멤버를 미리 불러오지 않는다(필요할 때만 가져온다).
+        super().__init__(command_prefix=commands.when_mentioned, intents=intents, help_command=None,
+                         chunk_guilds_at_startup=False)
         self.store = store
         self.locks = Locks()
         self.rng = rng or random.Random()
@@ -85,11 +95,14 @@ def main():
     except ValueError as exc:
         sys.exit(str(exc))
     store = Store(BASE / os.getenv("DATABASE_PATH", "data/halloween.sqlite3"))
-    bot = HalloweenBot(store, guild_ids)
+    bot = HalloweenBot(store, guild_ids, members_intent=env_flag(os.getenv("MEMBERS_INTENT", "")))
     try:
         bot.run(token, log_handler=None)
     except discord.LoginFailure:
         sys.exit("토큰이 올바르지 않아요. 개발자 포털에서 토큰을 다시 확인해 주세요.")
+    except discord.PrivilegedIntentsRequired:
+        sys.exit(".env에서 MEMBERS_INTENT를 켰는데 개발자 포털에서 'Server Members Intent'가 꺼져 있어요. "
+                 "포털의 Bot 탭에서 켜거나, .env의 MEMBERS_INTENT를 지워 주세요.")
     finally:
         store.close()
 

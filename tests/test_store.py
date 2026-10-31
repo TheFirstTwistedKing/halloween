@@ -1,9 +1,9 @@
-"""규칙과 저장소 시험: 확률, 재화 상한, 교환, 물품·가방, 사고팔기, 패키지."""
+"""규칙과 저장소 시험: 확률, 재화 상한, 물품·가방, 사고팔기, 패키지, 재화·입장 물품·결과표 설정."""
 import random
 import unittest
 
-from store import (CANDY_MAX, DEFAULT_SETTINGS, EXCHANGE_CANDY, EXCHANGE_EXP, MAX_SHOP_ITEMS, PACKAGE_TABLE, Store, StoreError,
-                    roll_candy, roll_exp, roll_package_result, roll_package_spawn, valid_emoji, validate_settings)
+from store import (CANDY_MAX, DEFAULT_SETTINGS, MAX_SHOP_ITEMS, Store, StoreError, check_package_table, roll_candy,
+                   roll_package_result, roll_package_spawn, valid_emoji, validate_settings)
 
 
 class Scripted:
@@ -41,10 +41,19 @@ class ProbabilityTests(unittest.TestCase):
         self.assertFalse(roll_package_spawn({**cfg, "package_chance": 0}, Scripted([0.0])))
 
     def test_package_result_boundaries(self):
+        table = Store(":memory:").package_table(1)
         for value, expected in [(0.0, "none"), (0.5999, "none"), (0.60, "key"), (0.7999, "key"), (0.80, "candy"),
                                 (0.8999, "candy"), (0.90, "trash"), (0.9999, "trash")]:
-            self.assertEqual(roll_package_result(Scripted([value])), expected, value)
-        self.assertEqual(sum(p for _, p in PACKAGE_TABLE), 100)
+            self.assertEqual(roll_package_result(table, Scripted([value]))["id"], expected, value)
+        self.assertEqual(sum(e["weight"] for e in table), 100)
+
+    def test_package_result_uses_ratios_not_percentages(self):
+        table = [{"id": "a", "kind": "none", "weight": 1}, {"id": "b", "kind": "none", "weight": 3}]      # 합계 4
+        for value, expected in [(0.0, "a"), (0.2499, "a"), (0.25, "b"), (0.9999, "b")]:
+            self.assertEqual(roll_package_result(table, Scripted([value]))["id"], expected, value)
+        zero_tail = [{"id": "a", "kind": "none", "weight": 1}, {"id": "z", "kind": "none", "weight": 0}]
+        self.assertEqual(roll_package_result(zero_tail, Scripted([0.9999999]))["id"], "a")             # 확률 0인 칸은 나오지 않는다.
+        self.assertEqual(roll_package_result(zero_tail, Scripted([1.0]))["id"], "a")                   # 부동소수점 끝값에서도 마찬가지
 
     def test_large_sample_matches_the_stated_rates(self):
         rng, n = random.Random(20241031), 400_000
@@ -53,17 +62,12 @@ class ProbabilityTests(unittest.TestCase):
         self.assertAlmostEqual(gained / n, 0.50, delta=0.01)
         spawns = sum(1 for _ in range(1_000_000) if roll_package_spawn(cfg, rng))
         self.assertTrue(800 <= spawns <= 1200, spawns)                      # 기대 1000회(0.1%)
-        counts = {name: 0 for name, _ in PACKAGE_TABLE}
+        table = Store(":memory:").package_table(1)
+        counts = {e["id"]: 0 for e in table}
         for _ in range(n):
-            counts[roll_package_result(rng)] += 1
-        for name, percent in PACKAGE_TABLE:
-            self.assertAlmostEqual(counts[name] / n * 100, percent, delta=1.0, msg=name)
-
-    def test_exp_roll(self):
-        rng = random.Random(3)
-        values = [roll_exp(DEFAULT_SETTINGS, rng) for _ in range(1000)]
-        self.assertTrue(all(15 <= v <= 25 for v in values))
-
+            counts[roll_package_result(table, rng)["id"]] += 1
+        for e in table:
+            self.assertAlmostEqual(counts[e["id"]] / n * 100, e["weight"], delta=1.0, msg=e["id"])
 
 class SettingsTests(unittest.TestCase):
     def setUp(self):
@@ -82,7 +86,8 @@ class SettingsTests(unittest.TestCase):
         copy["channels"].append(99)
         self.assertEqual(self.store.settings(1)["channels"], [10, 20])        # 바깥에서 고쳐도 저장값은 그대로
         for bad in [dict(candy_chance=101), dict(candy_chance=-1), dict(candy_min=6, candy_max=5), dict(package_mode="x"),
-                    dict(package_seconds=5), dict(candy_cooldown=True), dict(reaction="yes"), dict(channels=["a"]), dict(exp_min=30)]:
+                    dict(package_seconds=5), dict(candy_cooldown=True), dict(reaction="yes"), dict(channels=["a"]), dict(currency_name=""), dict(currency_emoji="abc"),
+                    dict(currency_max=0), dict(entry_cost=0), dict(package_table=[{"id": "x"}])]:
             with self.assertRaises(ValueError, msg=str(bad)):
                 self.store.update_settings(1, **bad)
         with self.assertRaises(ValueError):
@@ -98,45 +103,81 @@ class WalletTests(unittest.TestCase):
     def test_candy_is_capped_and_never_negative(self):
         self.assertEqual(self.store.add_candy(1, 7, 5), 5)
         self.assertEqual(self.store.add_candy(1, 7, CANDY_MAX), CANDY_MAX - 5)   # 넘치는 만큼은 버려진다.
-        self.assertEqual(self.store.wallet(1, 7)[0], CANDY_MAX)
+        self.assertEqual(self.store.wallet(1, 7), CANDY_MAX)
         self.assertEqual(self.store.add_candy(1, 7, 3), 0)
         self.assertEqual(self.store.add_candy(1, 7, -CANDY_MAX - 500), -CANDY_MAX)
-        self.assertEqual(self.store.wallet(1, 7)[0], 0)
+        self.assertEqual(self.store.wallet(1, 7), 0)
 
     def test_servers_and_users_are_separate(self):
         self.store.add_candy(1, 7, 10)
-        self.assertEqual((self.store.wallet(2, 7), self.store.wallet(1, 8)), ((0, 0), (0, 0)))
+        self.assertEqual((self.store.wallet(2, 7), self.store.wallet(1, 8)), (0, 0))
 
-    def test_exp(self):
-        self.assertEqual(self.store.add_exp(1, 7, 20000), 20000)
-        self.assertEqual(self.store.add_exp(1, 7, -999999), -20000)
-        self.assertEqual(self.store.wallet(1, 7)[1], 0)
+    def test_there_is_no_exp_feature_any_more(self):
+        for gone in ("add_exp", "exchange_exp"):
+            self.assertFalse(hasattr(self.store, gone), gone)
+        self.assertNotIn("exp_min", DEFAULT_SETTINGS)
+        self.assertIsInstance(self.store.wallet(1, 7), int)
 
-    def test_exchange_15000_exp_for_15_candy(self):
-        self.store.add_exp(1, 7, 40000)
-        self.assertEqual(self.store.exchange_exp(1, 7, 1), (EXCHANGE_EXP, EXCHANGE_CANDY))
-        self.assertEqual(self.store.wallet(1, 7), (15, 25000))
-        self.assertEqual(self.store.exchange_exp(1, 7, 1), (15000, 15))
-        self.assertEqual(self.store.wallet(1, 7), (30, 10000))
+    def test_old_exp_data_and_settings_are_kept_but_ignored(self):
+        """예전 버전의 DB: 지갑의 exp 열과 설정의 exp_* 키는 그대로 두되 쓰지 않는다."""
+        import json
+        self.store.add_candy(1, 7, 5)
+        self.store.db.execute("UPDATE wallets SET exp=777 WHERE guild=1 AND user=7")
+        self.store.db.execute("INSERT INTO settings VALUES(1, ?)", (json.dumps({"candy_min": 2, "exp_min": 15, "exp_max": 25, "exp_cooldown": 60}),))
+        self.store.db.commit()
+        self.store._settings.clear()
+        cfg = self.store.settings(1)
+        self.assertEqual((cfg["candy_min"], "exp_min" in cfg), (2, False))
+        self.store.update_settings(1, candy_max=9)                                   # 저장해도 옛 키가 다시 살아나지 않는다.
+        self.assertNotIn("exp_max", json.loads(self.store.db.execute("SELECT data FROM settings WHERE guild=1").fetchone()["data"]))
+        self.assertEqual(self.store.db.execute("SELECT exp FROM wallets WHERE guild=1 AND user=7").fetchone()["exp"], 777)
+        self.assertEqual(self.store.wallet(1, 7), 5)
 
-    def test_exchange_failures_change_nothing(self):
-        self.store.add_exp(1, 7, 14999)
-        with self.assertRaisesRegex(StoreError, "EXP가 부족"):
-            self.store.exchange_exp(1, 7, 1)
-        for bad in (0, -1):
-            with self.assertRaises(StoreError):
-                self.store.exchange_exp(1, 7, bad)
-        self.assertEqual(self.store.wallet(1, 7), (0, 14999))
 
-    def test_exchange_respects_the_cap(self):
-        self.store.add_exp(1, 7, 10 * EXCHANGE_EXP)
-        self.store.add_candy(1, 7, CANDY_MAX - 20)                            # 여유 20 → 1번(15)은 되고 2번(30)은 안 된다.
-        with self.assertRaisesRegex(StoreError, "1번까지만"):
-            self.store.exchange_exp(1, 7, 2)
-        self.assertEqual(self.store.exchange_exp(1, 7, 1), (15000, 15))
-        with self.assertRaisesRegex(StoreError, "가득 차서"):
-            self.store.exchange_exp(1, 7, 1)
-        self.assertEqual(self.store.wallet(1, 7), (CANDY_MAX - 5, 9 * EXCHANGE_EXP))
+class CurrencyTests(unittest.TestCase):
+    def setUp(self):
+        self.store = Store(":memory:")
+
+    def test_default_currency_and_changes_are_per_server(self):
+        cur = self.store.currency(1)
+        self.assertEqual((cur.emoji, cur.name, cur.max), ("🍬", "할로윈 재화", CANDY_MAX))
+        self.store.set_currency(1, emoji="💎", name="젬", max=500)
+        self.assertEqual(tuple(self.store.currency(1)), ("💎", "젬", 500))
+        self.assertEqual(self.store.currency(2).name, "할로윈 재화")
+        self.assertEqual(self.store.currency(1).money(1234), "💎 1,234")
+
+    def test_the_max_is_used_everywhere(self):
+        self.store.set_currency(1, max=100)
+        self.assertEqual(self.store.add_candy(1, 7, 250), 100)
+        self.assertEqual(self.store.add_candy_many(1, [7, 8], 60), (2, 60, 1))        # 7은 이미 가득이라 0, 8은 60
+        self.assertEqual(self.store.wallet(1, 8), 60)
+        item = self.store.create_item(1, "물건", sell_price=50, sellable=True)
+        self.store.add_item(1, 8, item["id"], 1)
+        with self.assertRaisesRegex(StoreError, "최대"):
+            self.store.sell_item(1, 8, item["id"], 1)                                 # 60+50 > 100
+        with self.assertRaisesRegex(StoreError, "가격"):
+            self.store.create_item(1, "비싼 물건", buy_price=101, buyable=True)
+
+    def test_lowering_the_max_trims_holders_and_raising_does_not(self):
+        self.store.add_candy(1, 7, 900)
+        self.store.add_candy(1, 8, 50)
+        self.assertEqual(self.store.wallets_above(1, 100), 1)
+        cur, trimmed = self.store.set_currency(1, max=100)
+        self.assertEqual((cur.max, trimmed, self.store.wallet(1, 7), self.store.wallet(1, 8)), (100, 1, 100, 50))
+        self.assertEqual(self.store.set_currency(1, max=5000)[1], 0)
+        self.assertEqual(self.store.wallet(1, 7), 100)
+
+    def test_bad_values_are_refused_and_change_nothing(self):
+        self.store.add_candy(1, 7, 900)
+        for bad in (dict(emoji="abc"), dict(emoji=""), dict(name=" 젬"), dict(name="가" * 21), dict(max=0), dict(max=-5), dict(zzz=1)):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                self.store.set_currency(1, **bad)
+        self.assertEqual((self.store.wallet(1, 7), self.store.currency(1).name), (900, "할로윈 재화"))
+        with self.assertRaises(ValueError):
+            self.store.set_currency(1, max=10, emoji="abc")                           # 일부만 잘못돼도 지갑을 건드리지 않는다.
+        self.assertEqual(self.store.wallet(1, 7), 900)
+        self.store.set_currency(1, emoji="<:gem:123456789012345678>")                 # 서버 이모지는 허용
+        self.assertEqual(self.store.currency(1).emoji, "<:gem:123456789012345678>")
 
 
 class ItemTests(unittest.TestCase):
@@ -198,14 +239,42 @@ class ItemTests(unittest.TestCase):
         key = self.store.item(1, ids["key"])
         self.assertEqual((key["name"], key["emoji"], key["buyable"], key["sellable"]), ("열쇠", "🗝️", 0, 0))
         self.assertEqual(self.store.items(1, shop_only=True), [])              # 기본은 상점에 안 나온다.
-        with self.assertRaisesRegex(StoreError, "기본 물품의 이름"):
-            self.store.update_item(1, ids["key"], name="다른 이름")
-        with self.assertRaisesRegex(StoreError, "기본 물품"):
-            self.store.delete_item(1, ids["trash"])
+        renamed = self.store.update_item(1, ids["key"], name="황금 열쇠", emoji="🔑")       # 기본 물품도 이름·이모지를 바꿀 수 있다.
+        self.assertEqual((renamed["name"], renamed["emoji"]), ("황금 열쇠", "🔑"))
+        self.assertEqual(self.store.ensure_system_items(1), ids)                 # 바꿔도 다시 만들지 않는다.
+        with self.assertRaisesRegex(StoreError, "쓰는 설정"):
+            self.store.delete_item(1, ids["key"])                                # 던전 입장 물품이라 못 지운다.
+        with self.assertRaisesRegex(StoreError, "패키지 결과표"):
+            self.store.delete_item(1, ids["trash"])                              # 패키지 결과표가 쓰고 있다.
         self.store.update_item(1, ids["trash"], sellable=True, sell_price=2)   # 쓰레기를 팔 수 있게 하는 것은 가능
         self.assertEqual([r["name"] for r in self.store.items(1, shop_only=True)], ["쓰레기"])
         with self.assertRaisesRegex(StoreError, "같은 이름"):
-            self.store.create_item(1, "열쇠")
+            self.store.create_item(1, "황금 열쇠")
+
+    def test_default_items_can_be_deleted_once_nothing_uses_them_and_are_not_recreated(self):
+        ids = self.store.ensure_system_items(1)
+        self.store.update_settings(1, entry_item=None, package_table=[e for e in self.store.package_table(1) if e["id"] not in ("key", "trash")])
+        self.store.add_item(1, 7, ids["key"], 3)
+        self.assertEqual(self.store.delete_item(1, ids["key"]), 3)               # 가방에서도 사라진다.
+        self.store.delete_item(1, ids["trash"])
+        self.assertEqual(self.store.ensure_system_items(1), {})                  # 한 번 만든 기본 물품은 지워도 되살아나지 않는다.
+        self.assertEqual(self.store.items(1), [])
+        self.assertEqual(self.store.item_users(1, 12345), [])
+
+    def test_an_old_servers_existing_key_and_trash_are_reused_with_their_bags_intact(self):
+        """업데이트 전에 이미 열쇠·쓰레기가 만들어져 있고 가방에 들어 있는 서버: 같은 물품을 입장 물품·결과표로 이어받는다."""
+        with self.store.db:
+            cursor = self.store.db.execute("INSERT INTO items(guild, name, emoji, description, kind, system) VALUES(1,'열쇠','🗝️','옛 설명','item','key')")
+            self.store.db.execute("INSERT INTO items(guild, name, emoji, description, kind, system) VALUES(1,'쓰레기','🗑️','','item','trash')")
+        key_id = cursor.lastrowid
+        self.store.add_item(1, 7, key_id, 4)
+        self.assertEqual(self.store.settings(1)["seeded"], False)
+        self.assertEqual(self.store.ensure_system_items(1)["key"], key_id)
+        cfg = self.store.settings(1)
+        self.assertEqual((cfg["seeded"], cfg["entry_item"], cfg["entry_cost"]), (True, key_id, 1))
+        self.assertEqual(next(e for e in cfg["package_table"] if e["id"] == "key")["item"], key_id)
+        self.assertEqual(self.store.qty(1, 7, key_id), 4)
+        self.assertEqual(len(self.store.items(1)), 2)                          # 새로 만들지 않았다.
 
     def test_update(self):
         item = self.store.create_item(1, "초", buy_price=5, buyable=True)
@@ -238,7 +307,7 @@ class TradeTests(unittest.TestCase):
 
     def test_buy(self):
         self.assertEqual(self.store.buy_item(1, 7, self.item, 2), 60)
-        self.assertEqual((self.store.wallet(1, 7)[0], self.store.qty(1, 7, self.item)), (40, 2))
+        self.assertEqual((self.store.wallet(1, 7), self.store.qty(1, 7, self.item)), (40, 2))
 
     def test_buy_failures_change_nothing(self):
         with self.assertRaisesRegex(StoreError, "부족해요. 필요 🍬120"):
@@ -251,12 +320,12 @@ class TradeTests(unittest.TestCase):
         self.store.update_item(1, self.item, buyable=False)
         with self.assertRaisesRegex(StoreError, "살 수 없는"):
             self.store.buy_item(1, 7, self.item, 1)
-        self.assertEqual((self.store.wallet(1, 7)[0], self.store.qty(1, 7, self.item)), (100, 0))
+        self.assertEqual((self.store.wallet(1, 7), self.store.qty(1, 7, self.item)), (100, 0))
 
     def test_sell(self):
         self.store.add_item(1, 7, self.item, 5)
         self.assertEqual(self.store.sell_item(1, 7, self.item, 3), 30)
-        self.assertEqual((self.store.wallet(1, 7)[0], self.store.qty(1, 7, self.item)), (130, 2))
+        self.assertEqual((self.store.wallet(1, 7), self.store.qty(1, 7, self.item)), (130, 2))
 
     def test_sell_failures(self):
         with self.assertRaisesRegex(StoreError, "가진 수량이 모자라요"):
@@ -274,10 +343,10 @@ class TradeTests(unittest.TestCase):
         self.store.add_candy(1, 7, CANDY_MAX)                                   # 가득 참
         with self.assertRaisesRegex(StoreError, "넘어서 팔 수 없어요"):
             self.store.sell_item(1, 7, self.item, 1)
-        self.assertEqual((self.store.wallet(1, 7)[0], self.store.qty(1, 7, self.item)), (CANDY_MAX, 5))
+        self.assertEqual((self.store.wallet(1, 7), self.store.qty(1, 7, self.item)), (CANDY_MAX, 5))
         self.store.add_candy(1, 7, -10)                                         # 정확히 상한이 되는 판매는 가능
         self.assertEqual(self.store.sell_item(1, 7, self.item, 1), 10)
-        self.assertEqual(self.store.wallet(1, 7)[0], CANDY_MAX)
+        self.assertEqual(self.store.wallet(1, 7), CANDY_MAX)
 
     def test_role_items_are_not_traded_through_the_inventory(self):
         role = self.store.create_item(1, "VIP", kind="role", role_id=5, buy_price=10, buyable=True)["id"]
@@ -295,7 +364,7 @@ class TradeTests(unittest.TestCase):
 
     def test_spend_candy(self):
         self.store.spend_candy(1, 7, 40)
-        self.assertEqual(self.store.wallet(1, 7)[0], 60)
+        self.assertEqual(self.store.wallet(1, 7), 60)
         with self.assertRaises(StoreError):
             self.store.spend_candy(1, 7, 61)
 

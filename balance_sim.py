@@ -43,7 +43,7 @@ def play(rng, policy: str, bal: Balance) -> tuple[bool, int]:
             else:
                 held = bal.gear_by_key.get(run.shield)
                 better = held is None or (gear.guard or 0) > (held.guard or 0)
-            (dungeon.equip_pending if better else dungeon.discard_pending)(run)
+            (dungeon.equip_pending if better else dungeon.discard_pending)(run, bal)
         elif run.phase == "chest":
             dungeon.open_chest(run, rng, bal)
         elif run.in_battle:

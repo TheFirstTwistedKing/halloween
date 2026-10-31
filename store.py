@@ -6,33 +6,39 @@ import json
 import re
 import sqlite3
 from pathlib import Path
+from typing import NamedTuple
+
+from josa import i_ga
 
 import balance as balance_rules
 
 CANDY = "🍬"                     # 할로윈 재화의 아이콘
 CANDY_NAME = "할로윈 재화"
 CANDY_MAX = 99999                # 보유할 수 있는 최대 재화
-EXCHANGE_EXP = 15000             # 이만큼의 EXP를 내면
-EXCHANGE_CANDY = 15              # 이만큼의 재화를 살 수 있다
 MAX_SHOP_ITEMS = 25              # 선택창 한도(디스코드): 상점에 올릴 수 있는 물품 수
 QTY_MAX = 999                    # 한 번에 사고팔 수 있는 수량
 PACKAGE_CANDY = 50
-# 패키지를 뜯었을 때 결과(%) — 합계 100
-PACKAGE_TABLE = (("none", 60), ("key", 20), ("candy", 10), ("trash", 10))
+MAX_PACKAGE_ENTRIES = 20
 SYSTEM_ITEMS = {
     "key": ("열쇠", "🗝️", "어디에 쓰는지는 모르지만 왠지 소중해 보이는 낡은 열쇠예요."),
     "trash": ("쓰레기", "🗑️", "쓸모없어 보이는 쓰레기예요. 누군가는 사 갈지도 몰라요."),
 }
 DEFAULT_SETTINGS = {
-    "channels": [],              # 재화·EXP·패키지가 나오는 채널
+    "channels": [],              # 재화·패키지가 나오는 채널
     "candy_chance": 50.0,        # 채팅 한 번당 재화를 얻을 확률(%)
     "candy_min": 1, "candy_max": 5,
     "candy_cooldown": 3,         # 같은 사람이 재화를 다시 얻을 수 있기까지(초). 0이면 제한 없음
-    "exp_min": 15, "exp_max": 25, "exp_cooldown": 60,
     "package_chance": 0.1,       # 채팅 한 번당 패키지가 나올 확률(%)
     "package_mode": "all",       # all: 누구나 각자 한 번씩 / first: 먼저 뜯은 한 명만
     "package_seconds": 120,      # 패키지가 머무는 시간(초)
-    "reaction": True,            # 재화를 얻으면 메시지에 🍬 반응을 단다
+    "reaction": True,            # 재화를 얻으면 메시지에 재화 이모지 반응을 단다
+    "currency_emoji": CANDY, "currency_name": CANDY_NAME, "currency_max": CANDY_MAX,   # 재화 자체(/재화설정)
+    "seeded": False,             # 기본 물품(열쇠·쓰레기)과 기본 패키지 결과표를 한 번 만들었는지
+    "entry_item": None,          # 던전에 들어갈 때 내는 물품 id. None이면 무료 입장
+    "entry_cost": 1,             # 입장에 필요한 개수
+    "package_table": [],         # 패키지 결과표 [{id, kind(none|candy|item), item, amount, weight, emoji, title}]
+    "clear_rewards": [],         # 던전 클리어 때 추가로 주는 물품 [{id, item, amount, chance(%)}]. 재화·획득권은 /던전설정의 보상.* 항목
+    "dungeon_content": {},       # 던전 콘텐츠 {monsters|bosses|gear|consumables: [...]}. 없는 항목은 기본값 (balance.py)
     "dungeon": {},               # 던전 밸런스 중 관리자가 바꾼 값 {항목 이름: 숫자}. 비어 있으면 모두 기본값 (balance.py)
 }
 
@@ -57,12 +63,9 @@ def validate_settings(cfg: dict) -> None:
     number("package_chance", 0, 100)
     number("candy_min", 0, 1000, True)
     number("candy_max", 0, 1000, True)
-    number("exp_min", 0, 100000, True)
-    number("exp_max", 0, 100000, True)
     number("candy_cooldown", 0, 3600, True)
-    number("exp_cooldown", 0, 3600, True)
     number("package_seconds", 10, 3600, True)
-    if cfg["candy_min"] > cfg["candy_max"] or cfg["exp_min"] > cfg["exp_max"]:
+    if cfg["candy_min"] > cfg["candy_max"]:
         raise ValueError("최소값이 최대값보다 클 수 없어요.")
     if cfg["package_mode"] not in ("all", "first"):
         raise ValueError("패키지 방식은 all 또는 first여야 해요.")
@@ -72,6 +75,20 @@ def validate_settings(cfg: dict) -> None:
     if not isinstance(dungeon, dict) or len(dungeon) > 500 or any(
             not isinstance(k, str) or isinstance(v, bool) or not isinstance(v, (int, float)) for k, v in dungeon.items()):
         raise ValueError("던전 밸런스 설정이 올바르지 않아요.")
+    if not valid_emoji(cfg["currency_emoji"]):
+        raise ValueError("재화 이모지는 😀 같은 이모지 하나이거나 서버 이모지여야 해요.")
+    if not isinstance(cfg["currency_name"], str) or not 1 <= len(cfg["currency_name"]) <= 20 or cfg["currency_name"] != cfg["currency_name"].strip():
+        raise ValueError("재화 이름은 앞뒤 공백 없이 1~20자여야 해요.")
+    number("currency_max", 1, 10**9, True)
+    if cfg["entry_item"] is not None and (isinstance(cfg["entry_item"], bool) or not isinstance(cfg["entry_item"], int)):
+        raise ValueError("입장 물품 설정이 올바르지 않아요.")
+    number("entry_cost", 1, 99, True)
+    if not isinstance(cfg["seeded"], bool):
+        raise ValueError("seeded 값이 올바르지 않아요.")
+    check_package_table(cfg["package_table"])
+    check_clear_rewards(cfg["clear_rewards"])
+    if not isinstance(cfg["dungeon_content"], dict):
+        raise ValueError("던전 콘텐츠 설정이 올바르지 않아요.")
     channels = cfg["channels"]
     if not isinstance(channels, list) or len(channels) > 100 or any(isinstance(c, bool) or not isinstance(c, int) for c in channels):
         raise ValueError("이벤트 채널 목록이 올바르지 않아요.")
@@ -85,22 +102,74 @@ def roll_candy(cfg: dict, rng) -> int:
     return rng.randint(cfg["candy_min"], cfg["candy_max"])
 
 
-def roll_exp(cfg: dict, rng) -> int:
-    return rng.randint(cfg["exp_min"], cfg["exp_max"])
-
-
 def roll_package_spawn(cfg: dict, rng) -> bool:
     return cfg["package_chance"] > 0 and rng.random() * 100 < cfg["package_chance"]
 
 
-def roll_package_result(rng) -> str:
-    """꽝(none) 60%, 열쇠(key) 20%, 재화 50(candy) 10%, 쓰레기(trash) 10%."""
-    draw, edge = rng.random() * 100, 0
-    for result, percent in PACKAGE_TABLE:
-        edge += percent
+def check_package_table(table) -> None:
+    """패키지 결과표가 올바른지 검사한다(비어 있는 표는 아직 만들기 전이라 허용)."""
+    if not isinstance(table, list) or len(table) > MAX_PACKAGE_ENTRIES:
+        raise ValueError(f"패키지 결과표가 올바르지 않아요. (최대 {MAX_PACKAGE_ENTRIES}칸)")
+    ids = set()
+    for e in table:
+        if not isinstance(e, dict) or not isinstance(e.get("id"), str) or e["id"] in ids or e.get("kind") not in ("none", "candy", "item"):
+            raise ValueError("패키지 결과표가 올바르지 않아요.")
+        ids.add(e["id"])
+        w, a = e.get("weight"), e.get("amount", 1)
+        if isinstance(w, bool) or not isinstance(w, (int, float)) or not 0 <= w <= 1000 or w != w:
+            raise ValueError("패키지 결과의 확률은 0~1000이어야 해요.")
+        if isinstance(a, bool) or not isinstance(a, int) or not 1 <= a <= 99999:
+            raise ValueError("패키지 결과의 개수는 1~99,999여야 해요.")
+        if e["kind"] == "item" and (isinstance(e.get("item"), bool) or not isinstance(e.get("item"), int)):
+            raise ValueError("패키지 결과의 물품이 올바르지 않아요.")
+        for field in ("emoji", "title"):
+            if e.get(field) is not None and not isinstance(e[field], str):
+                raise ValueError("패키지 결과의 이름·이모지가 올바르지 않아요.")
+    if table and sum(e["weight"] for e in table) <= 0:
+        raise ValueError("패키지 결과의 확률이 전부 0이에요. 하나는 0보다 커야 해요.")
+
+
+MAX_CLEAR_REWARDS = 10
+
+
+def check_clear_rewards(rewards) -> None:
+    if not isinstance(rewards, list) or len(rewards) > MAX_CLEAR_REWARDS:
+        raise ValueError(f"클리어 보상이 올바르지 않아요. (최대 {MAX_CLEAR_REWARDS}개)")
+    ids = set()
+    for r in rewards:
+        if not isinstance(r, dict) or not isinstance(r.get("id"), str) or r["id"] in ids:
+            raise ValueError("클리어 보상이 올바르지 않아요.")
+        ids.add(r["id"])
+        item, amount, chance = r.get("item"), r.get("amount"), r.get("chance")
+        if isinstance(item, bool) or not isinstance(item, int):
+            raise ValueError("클리어 보상의 물품이 올바르지 않아요.")
+        if isinstance(amount, bool) or not isinstance(amount, int) or not 1 <= amount <= 99999:
+            raise ValueError("클리어 보상의 개수는 1~99,999여야 해요.")
+        if isinstance(chance, bool) or not isinstance(chance, (int, float)) or not 0 <= chance <= 100 or chance != chance:
+            raise ValueError("클리어 보상의 확률은 0~100(%)이어야 해요.")
+
+
+def roll_package_result(table, rng) -> dict:
+    """결과표에서 확률(비율)대로 한 칸을 뽑는다. 확률의 합이 100일 필요는 없다."""
+    total = sum(e["weight"] for e in table)
+    draw, edge = rng.random() * total, 0
+    for entry in table:
+        edge += entry["weight"]
         if draw < edge:
-            return result
-    return PACKAGE_TABLE[-1][0]
+            return entry
+    return next(e for e in reversed(table) if e["weight"] > 0)
+
+
+class Currency(NamedTuple):
+    emoji: str
+    name: str
+    max: int
+
+    def money(self, amount: int) -> str:
+        return f"{self.emoji} {amount:,}"
+
+
+DEFAULT_CURRENCY = Currency(CANDY, CANDY_NAME, CANDY_MAX)
 
 
 # ---------------------------------------------------------------- 저장소
@@ -152,7 +221,7 @@ class Store:
             row = self.db.execute("SELECT data FROM settings WHERE guild=?", (guild,)).fetchone()
             cached = copy.deepcopy(DEFAULT_SETTINGS)
             if row:
-                cached.update(json.loads(row["data"]))
+                cached.update({k: v for k, v in json.loads(row["data"]).items() if k in DEFAULT_SETTINGS})   # 예전 버전의 exp_* 같은 옛 키는 버린다
             self._settings[guild] = cached
         return copy.deepcopy(cached)
 
@@ -173,58 +242,78 @@ class Store:
         """이 서버의 던전 밸런스(기본값 위에 관리자가 바꾼 값을 덮어쓴 것). 설정이 바뀔 때까지 캐시한다."""
         cached = self._balances.get(guild)
         if cached is None:
-            cached = self._balances[guild] = balance_rules.Balance.build(self.settings(guild)["dungeon"])
+            cfg = self.settings(guild)
+            cached = self._balances[guild] = balance_rules.Balance.build(cfg["dungeon"], cfg["dungeon_content"])
         return cached
 
     # ---- 지갑 ----
-    def wallet(self, guild: int, user: int) -> tuple[int, int]:
-        row = self.db.execute("SELECT candy, exp FROM wallets WHERE guild=? AND user=?", (guild, user)).fetchone()
-        return (row["candy"], row["exp"]) if row else (0, 0)
+    def currency(self, guild: int) -> Currency:
+        """이 서버의 재화(이모지·이름·최대 보유량)."""
+        cfg = self._settings.get(guild) or self.settings(guild)
+        return Currency(cfg["currency_emoji"], cfg["currency_name"], cfg["currency_max"])
+
+    def set_currency(self, guild: int, **changes) -> tuple[Currency, int]:
+        """재화의 이모지·이름·최대 보유량(emoji/name/max)을 바꾼다. 최대를 낮추면 그보다 많이 가진 사람은 새 최대로 맞춰진다.
+        (새 재화, 줄어든 사람 수)를 돌려준다."""
+        mapping = {"emoji": "currency_emoji", "name": "currency_name", "max": "currency_max"}
+        if changes.keys() - mapping.keys():
+            raise ValueError("알 수 없는 재화 설정이에요.")
+        cfg = self.settings(guild)
+        cfg.update({mapping[k]: v for k, v in changes.items()})
+        validate_settings(cfg)                      # 잘못된 값이면 여기서 막아서 지갑을 건드리지 않는다.
+        trimmed = 0
+        with self.db:
+            if "max" in changes:
+                trimmed = self.db.execute("UPDATE wallets SET candy=? WHERE guild=? AND candy>?",
+                                          (changes["max"], guild, changes["max"])).rowcount
+            self.db.execute("INSERT INTO settings VALUES(?,?) ON CONFLICT(guild) DO UPDATE SET data=excluded.data",
+                            (guild, json.dumps(cfg, ensure_ascii=False)))
+        self._settings[guild] = copy.deepcopy(cfg)
+        self._balances.pop(guild, None)
+        return self.currency(guild), trimmed
+
+    def wallets_above(self, guild: int, limit: int) -> int:
+        """재화를 limit보다 많이 가진 사람 수(최대 보유량을 낮추면 줄어드는 사람 수)."""
+        return self.db.execute("SELECT COUNT(*) AS n FROM wallets WHERE guild=? AND candy>?", (guild, limit)).fetchone()["n"]
+
+    def wallet(self, guild: int, user: int) -> int:
+        row = self.db.execute("SELECT candy FROM wallets WHERE guild=? AND user=?", (guild, user)).fetchone()
+        return row["candy"] if row else 0
 
     def _ensure_wallet(self, guild, user):
         self.db.execute("INSERT OR IGNORE INTO wallets(guild, user) VALUES(?,?)", (guild, user))
 
     def add_candy(self, guild: int, user: int, amount: int) -> int:
-        """재화를 더하고 실제로 바뀐 양을 돌려준다. 최대 보유량(99,999)을 넘는 만큼은 버려지고, 0 아래로는 내려가지 않는다."""
+        """재화를 더하고 실제로 바뀐 양을 돌려준다. 최대 보유량을 넘는 만큼은 버려지고, 0 아래로는 내려가지 않는다."""
         with self.db:
             self._ensure_wallet(guild, user)
             old = self.db.execute("SELECT candy FROM wallets WHERE guild=? AND user=?", (guild, user)).fetchone()["candy"]
-            new = min(CANDY_MAX, max(0, old + amount))
+            new = min(self.currency(guild).max, max(0, old + amount))
             self.db.execute("UPDATE wallets SET candy=? WHERE guild=? AND user=?", (new, guild, user))
         return new - old
 
-    def add_exp(self, guild: int, user: int, amount: int) -> int:
+    def add_candy_many(self, guild: int, users, amount: int) -> tuple[int, int, int]:
+        """여러 명에게 같은 양의 재화를 한 번에 더한다(전부 한 번의 저장이라 수천 명도 빠르고, 중간에 멈춰도 일부만 반영되지 않는다).
+        각자 최대 보유량과 0을 넘지 않게 맞춘다. (대상 수, 실제로 바뀐 재화의 합, 요청한 양만큼 바뀌지 못한 사람 수)를 돌려준다."""
+        users = list(dict.fromkeys(users))
+        total = partial = 0
+        top = self.currency(guild).max
         with self.db:
-            self._ensure_wallet(guild, user)
-            old = self.db.execute("SELECT exp FROM wallets WHERE guild=? AND user=?", (guild, user)).fetchone()["exp"]
-            new = max(0, old + amount)
-            self.db.execute("UPDATE wallets SET exp=? WHERE guild=? AND user=?", (new, guild, user))
-        return new - old
-
-    def exchange_exp(self, guild: int, user: int, batches: int) -> tuple[int, int]:
-        """EXP 15,000 → 재화 15를 batches번. (쓴 EXP, 받은 재화)를 돌려준다. 최대 보유량을 넘기는 교환은 거절한다."""
-        if batches < 1:
-            raise StoreError("교환 수량은 1 이상이어야 해요.")
-        cost, gain = batches * EXCHANGE_EXP, batches * EXCHANGE_CANDY
-        with self.db:
-            self._ensure_wallet(guild, user)
-            candy, exp = self.wallet(guild, user)
-            if exp < cost:
-                raise StoreError(f"EXP가 부족해요. 필요 {cost:,} · 보유 {exp:,}")
-            if candy + gain > CANDY_MAX:
-                room = (CANDY_MAX - candy) // EXCHANGE_CANDY
-                raise StoreError(f"{CANDY_NAME}은 최대 {CANDY_MAX:,}개까지 가질 수 있어요. "
-                                 f"지금은 {room}번까지만 교환할 수 있어요." if room else
-                                 f"{CANDY_NAME}이 가득 차서 더 교환할 수 없어요. (최대 {CANDY_MAX:,}개)")
-            self.db.execute("UPDATE wallets SET candy=candy+?, exp=exp-? WHERE guild=? AND user=?", (gain, cost, guild, user))
-        return cost, gain
+            for user in users:
+                self._ensure_wallet(guild, user)
+                old = self.db.execute("SELECT candy FROM wallets WHERE guild=? AND user=?", (guild, user)).fetchone()["candy"]
+                new = min(top, max(0, old + amount))
+                self.db.execute("UPDATE wallets SET candy=? WHERE guild=? AND user=?", (new, guild, user))
+                total += new - old
+                partial += new - old != amount
+        return len(users), total, partial
 
     # ---- 물품 ----
-    @staticmethod
-    def _check_prices(buyable, sellable, buy_price, sell_price):
+    def _check_prices(self, guild, buyable, sellable, buy_price, sell_price):
+        top = self.currency(guild).max
         for price in (buy_price, sell_price):
-            if isinstance(price, bool) or not isinstance(price, int) or not 0 <= price <= CANDY_MAX:
-                raise StoreError(f"가격은 0~{CANDY_MAX:,} 사이의 정수여야 해요.")
+            if isinstance(price, bool) or not isinstance(price, int) or not 0 <= price <= top:
+                raise StoreError(f"가격은 0~{top:,} 사이의 정수여야 해요.")
         if buyable and buy_price < 1:
             raise StoreError("구입을 켜려면 구매가를 1 이상으로 정해 주세요.")
         if sellable and sell_price < 1:
@@ -239,19 +328,50 @@ class Store:
         if len(description) > 200:
             raise StoreError("설명은 200자까지예요.")
 
-    def ensure_system_items(self, guild: int) -> dict[str, int]:
-        """열쇠·쓰레기를 서버에 만든다(처음 한 번). 기본은 상점에 올라가지 않고 가방에만 쌓인다."""
+    def ensure_defaults(self, guild: int) -> None:
+        """서버마다 한 번: 기본 물품(열쇠·쓰레기), 던전 입장 물품(열쇠), 기본 패키지 결과표를 만든다.
+        그 뒤로는 관리자가 이름·이모지를 바꾸거나 지워도 다시 만들지 않는다. (예전 버전이 이미 만든 열쇠·쓰레기는 그대로 쓴다.)"""
+        cfg = self.settings(guild)
+        if cfg["seeded"]:
+            return
         with self.db:
             for key, (name, emoji, description) in SYSTEM_ITEMS.items():
                 self.db.execute("INSERT OR IGNORE INTO items(guild, name, emoji, description, kind, system) "
                                 "VALUES(?,?,?,?,'item',?)", (guild, name, emoji, description, key))
+        ids = {row["system"]: row["id"] for row in
+               self.db.execute("SELECT id, system FROM items WHERE guild=? AND system IS NOT NULL", (guild,)).fetchall()}
+        self.update_settings(guild, seeded=True, entry_item=ids["key"], entry_cost=1, package_table=[
+            {"id": "none", "kind": "none", "weight": 60, "amount": 1, "emoji": "👻", "title": "꽝"},
+            {"id": "key", "kind": "item", "item": ids["key"], "weight": 20, "amount": 1},
+            {"id": "candy", "kind": "candy", "weight": 10, "amount": PACKAGE_CANDY},
+            {"id": "trash", "kind": "item", "item": ids["trash"], "weight": 10, "amount": 1}])
+
+    def ensure_system_items(self, guild: int) -> dict[str, int]:
+        """기본 물품 중 아직 남아 있는 것의 id({'key': ..., 'trash': ...}). 관리자가 지웠다면 그 항목은 빠진다."""
+        self.ensure_defaults(guild)
         rows = self.db.execute("SELECT id, system FROM items WHERE guild=? AND system IS NOT NULL", (guild,)).fetchall()
         return {row["system"]: row["id"] for row in rows}
+
+    def package_table(self, guild: int) -> list[dict]:
+        self.ensure_defaults(guild)
+        return self.settings(guild)["package_table"]
+
+    def item_users(self, guild: int, item_id: int) -> list[str]:
+        """이 물품을 쓰고 있는 설정(던전 입장, 패키지 결과). 쓰는 곳이 있으면 지울 수 없다."""
+        cfg = self.settings(guild)
+        out = []
+        if cfg["entry_item"] == item_id:
+            out.append("던전 입장 물품(`/던전입장물품`)")
+        if any(e["kind"] == "item" and e.get("item") == item_id for e in cfg["package_table"]):
+            out.append("패키지 결과표(`/패키지결과 목록`)")
+        if any(r["item"] == item_id for r in cfg["clear_rewards"]):
+            out.append("던전 클리어 보상(`/던전보상 목록`)")
+        return out
 
     def create_item(self, guild, name, *, emoji="🎃", description="", kind="item", role_id=None,
                     buy_price=0, sell_price=0, buyable=False, sellable=False):
         self._check_text(name, emoji, description)
-        self._check_prices(buyable, sellable, buy_price, sell_price)
+        self._check_prices(guild, buyable, sellable, buy_price, sell_price)
         if kind == "role" and role_id is None:
             raise StoreError("역할 물품에는 역할이 필요해요.")
         total = self.db.execute("SELECT COUNT(*) AS n FROM items WHERE guild=? AND (buyable=1 OR sellable=1)", (guild,)).fetchone()["n"]
@@ -287,9 +407,7 @@ class Store:
         merged.update(changes)
         self._check_text(merged["name"], merged["emoji"], merged["description"])
         merged["buyable"], merged["sellable"] = bool(merged["buyable"]), bool(merged["sellable"])
-        self._check_prices(merged["buyable"], merged["sellable"], merged["buy_price"], merged["sell_price"])
-        if row["system"] and merged["name"] != row["name"]:
-            raise StoreError("기본 물품의 이름은 바꿀 수 없어요.")
+        self._check_prices(guild, merged["buyable"], merged["sellable"], merged["buy_price"], merged["sell_price"])
         listed = self.db.execute("SELECT COUNT(*) AS n FROM items WHERE guild=? AND (buyable=1 OR sellable=1) AND id<>?",
                                  (guild, item_id)).fetchone()["n"]
         if (merged["buyable"] or merged["sellable"]) and listed >= MAX_SHOP_ITEMS:
@@ -310,11 +428,13 @@ class Store:
 
     def delete_item(self, guild: int, item_id: int) -> int:
         """물품을 지우고, 사람들의 가방에서도 뺀다. 가방에서 사라진 개수를 돌려준다."""
+        self.ensure_defaults(guild)
         row = self.item(guild, item_id)
         if row is None:
             raise StoreError("그런 물품이 없어요.")
-        if row["system"]:
-            raise StoreError("기본 물품(열쇠·쓰레기)은 지울 수 없어요. 상점에서 빼려면 구매·판매를 꺼 주세요.")
+        users = self.item_users(guild, item_id)
+        if users:
+            raise StoreError("이 물품을 쓰는 설정이 있어서 지울 수 없어요: " + ", ".join(users) + ". 먼저 그쪽을 바꿔 주세요.")
         with self.db:
             lost = self.db.execute("SELECT COALESCE(SUM(qty), 0) AS n FROM inventory WHERE guild=? AND item=?", (guild, item_id)).fetchone()["n"]
             self.db.execute("DELETE FROM inventory WHERE guild=? AND item=?", (guild, item_id))
@@ -352,9 +472,9 @@ class Store:
             raise StoreError("지금은 살 수 없는 물품이에요.")
         total = item["buy_price"] * qty
         with self.db:
-            candy, _ = self.wallet(guild, user)
+            cur, candy = self.currency(guild), self.wallet(guild, user)
             if candy < total:
-                raise StoreError(f"{CANDY_NAME}이 부족해요. 필요 {CANDY}{total:,} · 보유 {CANDY}{candy:,}")
+                raise StoreError(f"{i_ga(cur.name)} 부족해요. 필요 {cur.emoji}{total:,} · 보유 {cur.emoji}{candy:,}")
             self._ensure_wallet(guild, user)
             self.db.execute("UPDATE wallets SET candy=candy-? WHERE guild=? AND user=?", (total, guild, user))
             self.add_item(guild, user, item_id, qty)
@@ -370,9 +490,9 @@ class Store:
             have = self.qty(guild, user, item_id)
             if have < qty:
                 raise StoreError(f"가진 수량이 모자라요. 보유 {have}개")
-            candy, _ = self.wallet(guild, user)
-            if candy + total > CANDY_MAX:
-                raise StoreError(f"{CANDY_NAME}이 최대({CANDY_MAX:,}개)를 넘어서 팔 수 없어요. 먼저 재화를 써 주세요.")
+            cur, candy = self.currency(guild), self.wallet(guild, user)
+            if candy + total > cur.max:
+                raise StoreError(f"{i_ga(cur.name)} 최대({cur.max:,}개)를 넘어서 팔 수 없어요. 먼저 재화를 써 주세요.")
             self.add_item(guild, user, item_id, -qty)
             self._ensure_wallet(guild, user)
             self.db.execute("UPDATE wallets SET candy=candy+? WHERE guild=? AND user=?", (total, guild, user))
@@ -390,9 +510,9 @@ class Store:
 
     def spend_candy(self, guild: int, user: int, amount: int):
         with self.db:
-            candy, _ = self.wallet(guild, user)
+            cur, candy = self.currency(guild), self.wallet(guild, user)
             if candy < amount:
-                raise StoreError(f"{CANDY_NAME}이 부족해요. 필요 {CANDY}{amount:,} · 보유 {CANDY}{candy:,}")
+                raise StoreError(f"{i_ga(cur.name)} 부족해요. 필요 {cur.emoji}{amount:,} · 보유 {cur.emoji}{candy:,}")
             self._ensure_wallet(guild, user)
             self.db.execute("UPDATE wallets SET candy=candy-? WHERE guild=? AND user=?", (amount, guild, user))
 
@@ -466,20 +586,26 @@ class Store:
         return row["data"] if row else None
 
     def enter_dungeon(self, guild: int, user: int, new_data: str) -> tuple[str, bool]:
-        """진행 중인 던전이 있으면 그대로 돌려주고(열쇠 없음), 없으면 🗝️ 열쇠 1개를 내고 new_data로 새로 시작한다.
-        (던전 JSON, 새로 시작했는지)를 돌려준다. 열쇠가 없으면 StoreError."""
+        """진행 중인 던전이 있으면 그대로 돌려주고(입장 물품 없음), 없으면 입장 물품을 내고 new_data로 새로 시작한다.
+        입장 물품이 없음으로 설정돼 있으면 무료다. (던전 JSON, 새로 시작했는지)를 돌려준다. 물품이 모자라면 StoreError."""
         existing = self.dungeon_run(guild, user)
         if existing is not None:
             return existing, False
-        key_id = self.ensure_system_items(guild)["key"]          # 이 안에서 따로 커밋하므로 아래 거래 밖에서 먼저 한다.
-        with self.db:                                              # 열쇠 차감과 던전 생성은 한 덩어리
-            row = self.db.execute("SELECT qty FROM inventory WHERE guild=? AND user=? AND item=?", (guild, user, key_id)).fetchone()
-            if row is None:
-                raise StoreError("🗝️ 열쇠가 없어요. 패키지에서 열쇠를 찾아보세요!")
-            if row["qty"] > 1:
-                self.db.execute("UPDATE inventory SET qty=qty-1 WHERE guild=? AND user=? AND item=?", (guild, user, key_id))
-            else:
-                self.db.execute("DELETE FROM inventory WHERE guild=? AND user=? AND item=?", (guild, user, key_id))
+        self.ensure_defaults(guild)                              # 이 안에서 따로 커밋하므로 아래 거래 밖에서 먼저 한다.
+        cfg = self.settings(guild)
+        entry, cost = cfg["entry_item"], cfg["entry_cost"]
+        with self.db:                                              # 입장 물품 차감과 던전 생성은 한 덩어리
+            if entry is not None:
+                item = self.item(guild, entry)
+                row = self.db.execute("SELECT qty FROM inventory WHERE guild=? AND user=? AND item=?", (guild, user, entry)).fetchone()
+                have = row["qty"] if row else 0
+                if have < cost:
+                    label = f"{item['emoji']} {item['name']}" if item else "입장 물품"
+                    raise StoreError(f"{i_ga(label)} {cost}개 필요해요. (보유 {have}개) 패키지 등에서 찾아보세요!")
+                if have > cost:
+                    self.db.execute("UPDATE inventory SET qty=qty-? WHERE guild=? AND user=? AND item=?", (cost, guild, user, entry))
+                else:
+                    self.db.execute("DELETE FROM inventory WHERE guild=? AND user=? AND item=?", (guild, user, entry))
             self.db.execute("INSERT INTO dungeons VALUES(?,?,?)", (guild, user, new_data))
         return new_data, True
 
@@ -488,7 +614,7 @@ class Store:
         with self.db:
             self.db.execute("UPDATE dungeons SET data=? WHERE guild=? AND user=?", (data, guild, user))
 
-    def end_dungeon(self, guild: int, user: int, *, candy: int = 0, tickets: int = 0) -> tuple[int, int] | None:
+    def end_dungeon(self, guild: int, user: int, *, candy: int = 0, tickets: int = 0, items=()) -> tuple[int, int] | None:
         """던전을 끝내고 기록을 지운다. 보상(재화는 최대 보유량까지)을 한 번에 준다.
         (실제로 받은 재화, 지금 가진 획득권 수)를 돌려준다. 이미 끝난 던전이면 None이고 보상도 없다."""
         with self.db:
@@ -498,8 +624,12 @@ class Store:
             if candy:
                 self._ensure_wallet(guild, user)
                 old = self.db.execute("SELECT candy FROM wallets WHERE guild=? AND user=?", (guild, user)).fetchone()["candy"]
-                gained = min(CANDY_MAX, old + candy) - old
+                gained = min(self.currency(guild).max, old + candy) - old
                 self.db.execute("UPDATE wallets SET candy=? WHERE guild=? AND user=?", (old + gained, guild, user))
+            for item_id, amount in items:                         # 그 사이 지워진 물품은 건너뛴다(가방에 남지 않게).
+                if self.db.execute("SELECT 1 FROM items WHERE guild=? AND id=?", (guild, item_id)).fetchone():
+                    self.db.execute("INSERT INTO inventory VALUES(?,?,?,?) ON CONFLICT(guild,user,item) DO UPDATE SET qty=qty+excluded.qty",
+                                    (guild, user, item_id, amount))
             if tickets:
                 self.db.execute("INSERT INTO tickets VALUES(?,?,?) ON CONFLICT(guild,user) DO UPDATE SET count=count+excluded.count",
                                 (guild, user, tickets))

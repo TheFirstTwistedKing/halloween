@@ -163,6 +163,8 @@ def advance(run: Run, rng, bal: Balance | None = None) -> list[str]:
         return run.events
     run.room += 1
     run.kind, run.enemy = roll_room(rng, run.room, bal), None
+    if run.kind in ("monster", "boss") and not (bal.bosses if run.kind == "boss" else bal.monsters):
+        run.kind = "empty"                               # 관리자가 몬스터를 모두 지웠다면(검사를 통과한 설정이면 없는 일) 빈 방으로 둔다.
     if run.kind in ("monster", "boss"):
         table = bal.bosses if run.kind == "boss" else bal.monsters
         monster = table[rng.randint(0, len(table) - 1)]
@@ -302,10 +304,24 @@ def open_chest(run: Run, rng, bal: Balance | None = None) -> tuple[Gear, Consuma
     return gear, item, run.events
 
 
-def equip_pending(run: Run) -> list[str]:
-    """상자에서 나온 장비를 장착한다. 같은 칸에 있던 장비는 사라진다."""
-    gear = run.gear_pending
+def _pending(run: Run, bal: Balance) -> Gear | None:
+    """상자에서 나와 정하지 못한 장비. 그 사이 관리자가 장비를 지웠다면 대기만 풀고(앞으로 못 가는 일이 없도록) None."""
+    if not run.pending_gear:
+        return None
+    gear = bal.gear_by_key.get(run.pending_gear)
     if gear is None:
+        run.pending_gear = None
+    return gear
+
+
+def equip_pending(run: Run, bal: Balance | None = None) -> list[str]:
+    """상자에서 나온 장비를 장착한다. 같은 칸에 있던 장비는 사라진다."""
+    had = run.pending_gear
+    gear = _pending(run, bal or DEFAULT)
+    if gear is None:
+        if had:                                          # 그 사이 지워진 장비: 오류로 막지 않고 대기만 풀어 앞으로 갈 수 있게 한다.
+            run.events = ["❔ 그 장비는 사라졌어요. 앞으로 나아갈 수 있어요."]
+            return run.events
         raise DungeonError("장착할 장비가 없어요.")
     if gear.slot == "shield":
         run.shield = gear.key
@@ -316,9 +332,13 @@ def equip_pending(run: Run) -> list[str]:
     return run.events
 
 
-def discard_pending(run: Run) -> list[str]:
-    gear = run.gear_pending
+def discard_pending(run: Run, bal: Balance | None = None) -> list[str]:
+    had = run.pending_gear
+    gear = _pending(run, bal or DEFAULT)
     if gear is None:
+        if had:
+            run.events = ["❔ 그 장비는 이미 사라졌어요. 앞으로 나아갈 수 있어요."]
+            return run.events
         raise DungeonError("버릴 장비가 없어요.")
     run.pending_gear = None
     run.events = [f"🗑️ {gear.emoji} **{gear.name}**을(를) 버렸어요."]

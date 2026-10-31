@@ -255,7 +255,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.store.save_dungeon(G, U, json.dumps(data))
         done = await service.act(self.store, self.locks, Scripted(randoms=[0.0], ints=[777]), G, U, run.rev, "advance")
         self.assertEqual((done.ended, done.reward.candy, done.reward.ticket), ("clear", 777, False))
-        self.assertEqual(self.store.wallet(G, U)[0], 777)
+        self.assertEqual(self.store.wallet(G, U), 777)
 
 
 class AdminCommandTests(unittest.IsolatedAsyncioTestCase):
@@ -281,27 +281,32 @@ class AdminCommandTests(unittest.IsolatedAsyncioTestCase):
         return (embed.description or "") + "\n".join(f.value for f in embed.fields)
 
     async def test_regular_members_are_refused_everywhere_and_nothing_changes(self):
-        calls = [(DungeonAdmin.set_param, ("몬스터.슬라임.체력", 5.0)), (DungeonAdmin.show, ()),
-                 (DungeonAdmin.reset, ("몬스터.슬라임.체력",)), (DungeonAdmin.reset, ()), (DungeonAdmin.simulate, (100,))]
-        self.store.update_settings(G, dungeon={"몬스터.슬라임.체력": 400})
+        calls = [(DungeonAdmin.set_param, ("일반.최대체력", 500.0)), (DungeonAdmin.show, ()),
+                 (DungeonAdmin.reset, ("일반.최대체력",)), (DungeonAdmin.reset, ()), (DungeonAdmin.simulate, (100,))]
+        self.store.update_settings(G, dungeon={"일반.최대체력": 400})
         for command, args in calls:
             interaction = self.ask(admin=False)
             await self.run_cmd(command, interaction, *args)
             self.assertIn("관리자만", self.text(interaction), command.name)
             interaction.response.defer.assert_not_awaited()
-        self.assertEqual(self.store.settings(G)["dungeon"], {"몬스터.슬라임.체력": 400})
+        self.assertEqual(self.store.settings(G)["dungeon"], {"일반.최대체력": 400})
 
     async def test_set_changes_the_value_and_reports_before_and_after(self):
+        i = await self.run_cmd(DungeonAdmin.set_param, self.ask(), "일반.최대체력", 1500.0)
+        self.assertIn("1,000 → **1,500**", self.text(i))
+        self.assertEqual(self.store.settings(G)["dungeon"], {"일반.최대체력": 1500})
+        self.assertEqual(self.store.balance(G).max_hp, 1500)
+
+    async def test_monster_gear_and_item_numbers_are_edited_with_their_own_commands(self):
         i = await self.run_cmd(DungeonAdmin.set_param, self.ask(), "몬스터.슬라임.체력", 300.0)
-        self.assertIn("270 → **300**", self.text(i))
-        self.assertEqual(self.store.settings(G)["dungeon"], {"몬스터.슬라임.체력": 300})
-        self.assertEqual([m.hp for m in self.store.balance(G).monsters if m.key == "slime"], [300])
+        self.assertIn("/몬스터", self.text(i))
+        self.assertEqual(self.store.settings(G)["dungeon"], {})
 
     async def test_set_back_to_default_removes_the_record_and_same_value_is_a_noop(self):
-        await self.run_cmd(DungeonAdmin.set_param, self.ask(), "몬스터.슬라임.체력", 300.0)
-        await self.run_cmd(DungeonAdmin.set_param, self.ask(), "몬스터.슬라임.체력", 270.0)
+        await self.run_cmd(DungeonAdmin.set_param, self.ask(), "일반.최대체력", 1500.0)
+        await self.run_cmd(DungeonAdmin.set_param, self.ask(), "일반.최대체력", 1000.0)
         self.assertEqual(self.store.settings(G)["dungeon"], {})
-        i = await self.run_cmd(DungeonAdmin.set_param, self.ask(), "몬스터.슬라임.체력", 270.0)
+        i = await self.run_cmd(DungeonAdmin.set_param, self.ask(), "일반.최대체력", 1000.0)
         self.assertIn("이미", self.text(i))
 
     async def test_bad_input_is_explained_and_nothing_is_saved(self):
@@ -319,14 +324,14 @@ class AdminCommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_show_lists_changed_values_and_whole_groups(self):
         i = await self.run_cmd(DungeonAdmin.show, self.ask())
         self.assertIn("모두 기본값", self.text(i))
-        await self.run_cmd(DungeonAdmin.set_param, self.ask(), "몬스터.슬라임.체력", 300.0)
+        await self.run_cmd(DungeonAdmin.set_param, self.ask(), "일반.최대체력", 1500.0)
         i = await self.run_cmd(DungeonAdmin.show, self.ask())
-        self.assertIn("몬스터.슬라임.체력", self.text(i))
-        group = type("C", (), {"value": "몬스터"})()
+        self.assertIn("일반.최대체력", self.text(i))
+        group = type("C", (), {"value": "일반"})()
         i = await self.run_cmd(DungeonAdmin.show, self.ask(), group)
         body = self.text(i)
-        self.assertIn("`몬스터.슬라임.체력` **300** ✏️ 기본 270", body)
-        self.assertIn("`몬스터.마녀.공격` **135**", body)
+        self.assertIn("`일반.최대체력` **1,500** ✏️ 기본 1,000", body)
+        self.assertIn("`일반.맨손공격력` **20**", body)
 
     def test_every_group_renders_within_discord_limits(self):
         for group in balance.GROUPS:
@@ -342,12 +347,12 @@ class AdminCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(lines[0].endswith("✏️"))
 
     async def test_reset_one_and_reset_all_with_confirmation(self):
-        await self.run_cmd(DungeonAdmin.set_param, self.ask(), "몬스터.슬라임.체력", 300.0)
-        await self.run_cmd(DungeonAdmin.set_param, self.ask(), "몬스터.마녀.공격", 100.0)
-        i = await self.run_cmd(DungeonAdmin.reset, self.ask(), "몬스터.슬라임.체력")
-        self.assertIn("300 → 기본값 **270**", self.text(i))
-        self.assertEqual(self.store.settings(G)["dungeon"], {"몬스터.마녀.공격": 100})
-        i = await self.run_cmd(DungeonAdmin.reset, self.ask(), "몬스터.슬라임.체력")
+        await self.run_cmd(DungeonAdmin.set_param, self.ask(), "일반.최대체력", 1500.0)
+        await self.run_cmd(DungeonAdmin.set_param, self.ask(), "일반.맨손공격력", 30.0)
+        i = await self.run_cmd(DungeonAdmin.reset, self.ask(), "일반.최대체력")
+        self.assertIn("1,500 → 기본값 **1,000**", self.text(i))
+        self.assertEqual(self.store.settings(G)["dungeon"], {"일반.맨손공격력": 30})
+        i = await self.run_cmd(DungeonAdmin.reset, self.ask(), "일반.최대체력")
         self.assertIn("이미 기본값", self.text(i))
         i = await self.run_cmd(DungeonAdmin.reset, self.ask(), "없는.항목")
         self.assertIn("항목이 없어요", self.text(i))
@@ -355,28 +360,26 @@ class AdminCommandTests(unittest.IsolatedAsyncioTestCase):
         i = await self.run_cmd(DungeonAdmin.reset, self.ask())
         view = i.response.send_message.await_args.kwargs["view"]
         self.assertIsInstance(view, ConfirmResetAll)
-        self.assertEqual(self.store.settings(G)["dungeon"], {"몬스터.마녀.공격": 100})
+        self.assertEqual(self.store.settings(G)["dungeon"], {"일반.맨손공격력": 30})
         stranger = self.ask(uid=99)
         self.assertFalse(await view.interaction_check(stranger))
         await view.cancel(self.ask())
-        self.assertEqual(self.store.settings(G)["dungeon"], {"몬스터.마녀.공격": 100})
+        self.assertEqual(self.store.settings(G)["dungeon"], {"일반.맨손공격력": 30})
         confirm = self.ask()
         await ConfirmResetAll(self.w.bot, 7).confirm(confirm)
         self.assertEqual(self.store.settings(G)["dungeon"], {})
 
     async def test_autocomplete_finds_by_typed_text_and_shows_current_and_default(self):
-        await self.run_cmd(DungeonAdmin.set_param, self.ask(), "몬스터.슬라임.체력", 300.0)
-        choices = param_choices(self.store, G, "슬라임")
-        self.assertEqual({c.value for c in choices}, {"몬스터.슬라임.체력", "몬스터.슬라임.공격", "몬스터.슬라임.회피",
-                                                     "보스.거대 슬라임.체력", "보스.거대 슬라임.공격"})        # 보스 '거대 슬라임'도 포함
+        await self.run_cmd(DungeonAdmin.set_param, self.ask(), "일반.최대체력", 1500.0)
+        choices = param_choices(self.store, G, "최대")
+        self.assertEqual({c.value for c in choices}, {"일반.최대체력", "보상.최대"})
         hp = next(c for c in choices if c.value.endswith("체력"))
-        self.assertEqual(hp.name, "✏️ 몬스터.슬라임.체력 = 300 (기본 270)")
+        self.assertEqual(hp.name, "✏️ 일반.최대체력 = 1,500 (기본 1,000)")
         self.assertLessEqual(len(param_choices(self.store, G, "")), 25)
-        self.assertEqual({c.value for c in param_choices(self.store, G, "슬라임 체력")}, set())  # 글자가 이어져 있어야 찾는다(공백만 무시)
-        self.assertEqual({c.value for c in param_choices(self.store, G, "슬라임.체력")}, {"몬스터.슬라임.체력", "보스.거대 슬라임.체력"})
-        self.assertEqual({c.value for c in param_choices(self.store, G, "몬스터.슬라임.체력")}, {"몬스터.슬라임.체력"})
-        self.assertEqual({c.value for c in param_choices(self.store, G, "몬스터. 슬라임.체 력")}, {"몬스터.슬라임.체력"})
-        for c in param_choices(self.store, G, "장비"):
+        self.assertEqual({c.value for c in param_choices(self.store, G, "일반. 최 대체력")}, {"일반.최대체력"})
+        self.assertEqual({c.value for c in param_choices(self.store, G, "슬라임")}, set())     # 몬스터 수치는 /몬스터 명령으로 바꾼다.
+        self.assertEqual({c.value for c in param_choices(self.store, G, "장비")}, set())
+        for c in param_choices(self.store, G, "방"):
             self.assertLessEqual(len(c.name), 100)
             self.assertLessEqual(len(c.value), 100)
 
@@ -388,12 +391,9 @@ class AdminCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all("클리어" in f.value for f in embed.fields[:3]))
         # 이 서버만 몬스터를 거의 못 이길 수준으로 만들면 클리어율이 떨어진다
         easy = balance_sim.simulate(self.store.balance(G), 300, seed=1)
-        for m in dungeon.MONSTERS + dungeon.BOSSES:
-            prefix = "보스" if m.boss else "몬스터"
-            await self.run_cmd(DungeonAdmin.set_param, self.ask(), f"{prefix}.{m.name}.공격", 5000.0)
+        await self.run_cmd(DungeonAdmin.set_param, self.ask(), "일반.최대체력", 100.0)
         hard = balance_sim.simulate(self.store.balance(G), 300, seed=1)
         self.assertLess(hard["attack"]["clear"], easy["attack"]["clear"])
-        self.assertEqual(hard["attack"]["clear"], 0.0)
 
 
 class ScreenTests(unittest.IsolatedAsyncioTestCase):

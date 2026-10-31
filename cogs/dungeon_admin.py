@@ -22,6 +22,8 @@ def param_choices(store, guild_id: int, current: str) -> list[Choice]:
     changed = balance.clean(store.settings(guild_id)["dungeon"])
     out = []
     for param in PARAMS.values():
+        if param.group not in balance.SCALAR_GROUPS:        # 몬스터·장비·소모품은 /몬스터 /장비 /소모품으로 편집한다
+            continue
         if needle not in param.key.replace(" ", "").lower():
             continue
         now = changed.get(param.key, param.default)
@@ -99,9 +101,12 @@ class DungeonAdmin(commands.Cog):
     @app_commands.guild_only()
     @app_commands.default_permissions(administrator=True)
     @app_commands.rename(key="항목", value="값")
-    @app_commands.describe(key="바꿀 항목 (예: 몬스터.슬라임.체력, 방어.회복률, 방3.잡몹)", value="새 값 (숫자)")
+    @app_commands.describe(key="바꿀 항목 (예: 일반.최대체력, 방어.회복률, 방3.잡몹)", value="새 값 (숫자)")
     async def set_param(self, interaction: discord.Interaction, key: str, value: float):
         if not await require_admin(interaction):
+            return
+        if key in PARAMS and PARAMS[key].group not in balance.SCALAR_GROUPS:
+            await self._deny(interaction, "몬스터·보스·장비·소모품은 `/몬스터` `/장비` `/소모품` 명령으로 바꿔요. (`/던전목록`에서 볼 수 있어요)")
             return
         new_value, problem = balance.check_value(key, value)
         if problem:
@@ -134,7 +139,7 @@ class DungeonAdmin(commands.Cog):
     @app_commands.guild_only()
     @app_commands.default_permissions(administrator=True)
     @app_commands.rename(group="분류")
-    @app_commands.choices(group=[Choice(name=g, value=g) for g in balance.GROUPS])
+    @app_commands.choices(group=[Choice(name=g, value=g) for g in balance.SCALAR_GROUPS])
     async def show(self, interaction: discord.Interaction, group: Choice[str] | None = None):
         if not await require_admin(interaction):
             return
@@ -145,7 +150,7 @@ class DungeonAdmin(commands.Cog):
                 body = f"기본값에서 바꾼 항목 **{len(changed)}개**\n" + "\n".join(lines)
             else:
                 body = "바꾼 항목이 없어요. 모두 기본값이에요."
-            body += "\n\n분류를 고르면 전체 값을 볼 수 있어요: " + ", ".join(balance.GROUPS)
+            body += "\n\n분류를 고르면 전체 값을 볼 수 있어요: " + ", ".join(balance.SCALAR_GROUPS) + "\n몬스터·장비·소모품은 `/던전목록`"
             title = "🏚️ 던전 밸런스 — 바꾼 항목"
         else:
             title, body = f"🏚️ 던전 밸런스 — {group.value}", "\n".join(settings_lines(group.value, changed))

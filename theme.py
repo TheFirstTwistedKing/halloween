@@ -7,6 +7,7 @@ from store import DEFAULT_CURRENCY, Currency
 
 ORANGE = 0xFF7518
 PURPLE = 0x6A4C93
+GOLD = 0xF1C40F
 GREEN = 0x7BC043
 RED = 0xC0392B
 FOOTER = "🕸️ Happy Halloween"
@@ -102,8 +103,12 @@ def bag_embed(name: str, *, candy: int, items, roles: list[str], tickets: int = 
     return embed
 
 
-def package_embed(mode: str, seconds: int) -> discord.Embed:
+def package_embed(mode: str, seconds: int, pile: int = 0) -> discord.Embed:
+    """패키지가 나타났다는 메시지. pile이 0보다 크면 변이한 '패키지 더미'(뜯으면 결과가 pile개)다."""
     rule = "가장 먼저 뜯는 **한 명**이 가져가요!" if mode == "first" else "누구나 **한 번씩** 뜯을 수 있어요!"
+    if pile:
+        return make_embed("📦📦📦 패키지 더미가 나타났어요!",
+                          f"상자가 변이해서 **더미**로 쌓여 있어요! 뜯으면 **{pile}개**가 나와요.\n{rule}\n⏳ {seconds}초 동안만 머물러요.", color=GOLD)
     return make_embed("📦 패키지가 나타났어요!", f"수상한 상자예요… 뜯어볼까요?\n{rule}\n⏳ {seconds}초 동안만 머물러요.",
                       color=PURPLE)
 
@@ -119,6 +124,26 @@ def entry_icon_title(entry: dict, store, guild_id: int) -> tuple[str, str]:
     else:
         emoji, title = "👻", "꽝"
     return entry.get("emoji") or emoji, entry.get("title") or title
+
+
+def package_pile_text(entries: list[dict | None], gains: list[int], store, guild_id: int) -> tuple[str, str]:
+    """패키지 더미를 뜯은 결과: (제목, 설명). 결과마다 한 줄이고, 재화가 최대 보유량 때문에 덜 들어왔다면 그것도 알려 준다."""
+    cur = store.currency(guild_id)
+    lines = []
+    for number, (entry, gained) in enumerate(zip(entries, gains), 1):
+        if entry is None:
+            lines.append(f"`{number}` 📦 사라진 결과")
+            continue
+        emoji, title = entry_icon_title(entry, store, guild_id)
+        line = f"`{number}` {emoji} {title}"
+        if entry["kind"] == "none":
+            line += " — 텅 비어 있었어요"
+        elif entry["kind"] == "candy" and gained != entry["amount"]:
+            line += f" — {cur.emoji} {gained:,}개만 받았어요(최대 보유량)"
+        lines.append(line)
+    candy = sum(gains)
+    footer = f"\n\n{cur.emoji} 재화 합계 **+{candy:,}** · 나머지는 가방에 넣어 둘게요." if candy else "\n\n받은 물품은 가방에 넣어 둘게요."
+    return f"📦📦📦 패키지 더미! ({len(entries)}개)", "\n".join(lines) + footer
 
 
 def package_result_text(entry: dict | None, store, guild_id: int, gained: int = 0) -> tuple[str, str]:

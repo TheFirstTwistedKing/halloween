@@ -35,9 +35,11 @@ class ChatFixture(unittest.IsolatedAsyncioTestCase):
     def wallet(self, uid=7):
         return self.w.store.wallet(100, uid)
 
-    def roll(self, candy=0.9, amount=3, package=0.9):
-        """한 번의 채팅이 쓰는 난수: 재화 확률 → (성공하면 재화량) → 패키지 확률."""
+    def roll(self, candy=0.9, amount=3, package=0.9, pile=0.99):
+        """한 번의 채팅이 쓰는 난수: 재화 확률 → (성공하면 재화량) → 패키지 확률 → (패키지가 나타나면) 더미 변이 확률(기본은 변이 안 함)."""
         self.rng.randoms += [candy, package] if candy is not None else [package]
+        if package * 100 < 0.1:
+            self.rng.randoms.append(pile)
         if candy is not None and candy * 100 < 50:
             self.rng.ints.append(amount)
 
@@ -186,7 +188,7 @@ class ReactionTests(ChatFixture):
 
 class PackageSpawnTests(ChatFixture):
     async def test_a_package_appears_in_the_same_channel(self):
-        self.rng.randoms += [0.9, 0.0005]                    # 재화 없음, 패키지 0.05% < 0.1%
+        self.rng.randoms += [0.9, 0.0005, 0.99]              # 재화 없음, 패키지 0.05% < 0.1%, 더미로 변이하지 않음
         self.rng.ints.append(20)
         await self.chat()
         (sent,) = self.channel.sent
@@ -204,7 +206,7 @@ class PackageSpawnTests(ChatFixture):
 
     async def test_mode_and_duration_come_from_the_settings(self):
         self.w.store.update_settings(100, package_mode="first", package_seconds=30)
-        self.rng.randoms += [0.9, 0.0]
+        self.rng.randoms += [0.9, 0.0, 0.99]                 # 재화 없음, 패키지 나타남, 더미 아님
         self.rng.ints.append(20)
         await self.chat()
         self.assertIn("한 명", self.channel.sent[0]["embed"].description)
@@ -226,7 +228,7 @@ class PackageSpawnTests(ChatFixture):
         other = self.w.channel(401)
         self.w.store.update_settings(100, channels=[400, 401])
         self.w.store.create_package(100, 401, 777, expires=1100.0, mode="all")
-        self.rng.randoms += [0.9, 0.0]
+        self.rng.randoms += [0.9, 0.0, 0.99]                 # 재화 없음, 패키지 나타남, 더미 아님
         self.rng.ints.append(20)
         await self.chat()
         self.assertEqual(len(self.channel.sent), 1)
@@ -239,7 +241,7 @@ class PackageSpawnTests(ChatFixture):
 
     async def test_a_send_failure_leaves_no_record(self):
         self.channel.send.side_effect = discord.Forbidden(NS(status=403, reason="x"), "no")
-        self.rng.randoms += [0.9, 0.0]
+        self.rng.randoms += [0.9, 0.0, 0.99]                 # 재화 없음, 패키지 나타남, 더미 아님
         self.rng.ints.append(20)
         with self.assertLogs("halloween", level="WARNING"):
             await self.chat()

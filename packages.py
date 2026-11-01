@@ -33,6 +33,10 @@ class PackageView(discord.ui.View):
             embed=theme.make_embed("🚪 그냥 두었어요", "마음이 바뀌면 [뜯기]를 눌러도 돼요.", color=theme.PURPLE), ephemeral=True)
 
 
+def wait_text(seconds: float) -> str:
+    return f"방금 패키지를 뜯었어요. **{max(1, int(-(-seconds // 1)))}초** 뒤에 다시 뜯을 수 있어요."
+
+
 def apply_reward(store, guild_id: int, user_id: int, entry: dict) -> int:
     """결과표의 한 칸을 가방에 넣는다. 받은 재화 수(재화가 아니면 0)를 돌려준다. 물품이 그 사이 지워졌다면 아무것도 주지 않는다."""
     if entry["kind"] == "candy":
@@ -57,15 +61,21 @@ async def spawn(client, message, cfg) -> discord.Message | None:
 async def open_package(interaction: discord.Interaction):
     client, store = interaction.client, interaction.client.store
     now = time.time()
+    cooldown = store.settings(interaction.guild_id)["package_cooldown"]
+    left = store.package_wait(interaction.guild_id, interaction.user.id, now, cooldown)
+    if left > 0 and not store.has_opened(interaction.message.id, interaction.user.id):     # 쿨타임 중이면 주사위도 굴리지 않는다.
+        await interaction.response.send_message(embed=theme.notice(wait_text(left), False), ephemeral=True)
+        return
     table = store.package_table(interaction.guild_id)
     if not table or sum(e["weight"] for e in table) <= 0:      # 표가 비었다면(관리자가 직접 고치지 않는 한 없는 일) 꽝으로 둔다.
         table = [{"id": "none", "kind": "none", "weight": 1, "amount": 1}]
     entry = roll_package_result(table, client.rng)
-    status = store.open_package(interaction.message.id, interaction.user.id, entry["id"], now)
+    status = store.open_package(interaction.message.id, interaction.user.id, entry["id"], now, cooldown)
     if status != "ok":
         text = {"again": "이미 이 패키지를 뜯었어요. 다음 패키지를 기다려 보세요!",
                 "closed": "한발 늦었어요. 이미 다른 분이 뜯었어요!",
-                "gone": "패키지가 이미 사라졌어요."}[status]
+                "gone": "패키지가 이미 사라졌어요.",
+                "wait": wait_text(store.package_wait(interaction.guild_id, interaction.user.id, now, cooldown))}[status]
         await interaction.response.send_message(embed=theme.notice(text, False), ephemeral=True)
         return
     gained = apply_reward(store, interaction.guild_id, interaction.user.id, entry)

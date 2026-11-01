@@ -487,9 +487,16 @@ def sell(run: Run, picks, mode: str = "all", bal: Balance | None = None) -> tupl
     return total, sold
 
 
-def roll_guard(rng, bal: Balance | None = None) -> bool:
-    """방어 버튼의 가드 성공 여부."""
-    return rng.random() * 100 < (bal or DEFAULT).guard_chance
+def guard_success_percent(run: Run | None, bal: Balance | None = None) -> int:
+    """지금 방어할 때 가드에 성공할 확률(%). 낀 방패에 성공률이 정해져 있으면 그것, 아니면 서버 기본(방어.성공확률)."""
+    bal = bal or DEFAULT
+    shield = _shield(run, bal) if run is not None else None
+    return shield.guard_chance if shield and shield.guard_chance is not None else bal.guard_chance
+
+
+def roll_guard(rng, bal: Balance | None = None, run: Run | None = None) -> bool:
+    """방어 버튼의 가드 성공 여부. run을 주면 낀 방패의 가드 성공률을 쓴다."""
+    return rng.random() * 100 < guard_success_percent(run, bal)
 
 
 def roll_clear_reward(rng, bal: Balance | None = None) -> tuple[int, bool]:

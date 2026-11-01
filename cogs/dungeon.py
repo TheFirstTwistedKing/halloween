@@ -164,9 +164,8 @@ async def respond(interaction: discord.Interaction, client, rev: int, action: st
                   from_confirm: bool = False):
     """버튼 하나를 서비스에 넘기고, 결과에 맞게 화면을 바꾼다."""
     bal = client.store.balance(interaction.guild_id)
-    guard_ok = dungeon.roll_guard(client.rng, bal) if action == "defend" else False
     outcome = await service.act(client.store, client.locks, client.rng, interaction.guild_id, interaction.user.id,
-                                rev, action, arg, guard_ok)
+                                rev, action, arg)
     if not outcome.ok:                                   # 지난 화면·할 수 없는 행동: 화면은 그대로 두고 알려 준다.
         await interaction.response.send_message(embed=theme.notice(outcome.text, False), ephemeral=True)
         return

@@ -60,7 +60,7 @@ async def enter(store: Store, locks, guild_id: int, user_id: int) -> Outcome:
 
 
 async def act(store: Store, locks, rng, guild_id: int, user_id: int, rev: int, action: str,
-              arg: str | None = None, guard_ok: bool = False) -> Outcome:
+              arg: str | None = None, guard_ok: bool | None = None) -> Outcome:
     """버튼 하나를 처리한다. rev는 그 버튼이 붙어 있던 화면의 번호."""
     if action not in ACTIONS:
         return Outcome(False, "알 수 없는 행동이에요.")
@@ -127,7 +127,7 @@ async def peek(store: Store, guild_id: int, user_id: int) -> Run | None:
     return run
 
 
-def _apply(run: Run, rng, action: str, arg: str | None, guard_ok: bool, bal) -> str | None:
+def _apply(run: Run, rng, action: str, arg: str | None, guard_ok: bool | None, bal) -> str | None:
     """행동을 규칙에 적용한다. 할 수 없는 행동이면 이유를 돌려준다."""
     if action == "quit":
         run.phase, run.enemy = "quit", None
@@ -139,7 +139,8 @@ def _apply(run: Run, rng, action: str, arg: str | None, guard_ok: bool, bal) -> 
     elif action == "defend":
         if run.phase != "battle":
             return "지금은 싸울 상대가 없어요."
-        dungeon.player_defend(run, bool(guard_ok), bal)
+        ok = dungeon.roll_guard(rng, bal, run) if guard_ok is None else bool(guard_ok)       # 따로 정해 주지 않으면 낀 방패의 성공률로 굴린다
+        dungeon.player_defend(run, ok, bal)
     elif action == "item":
         dungeon.use_consumable(run, arg or "", bal)
     elif action == "chest":

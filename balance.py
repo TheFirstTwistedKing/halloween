@@ -50,6 +50,7 @@ class Gear:
     reflect: int | None = None   # 가드 성공 시 반사 피해(%). 없으면 REFLECT_BASE
     description: str = ""
     sell_price: int = 0          # 던전 안에서 팔 때 받는 재화(개당). 0이면 팔 수 없다.
+    guard_chance: int | None = None  # 방패: 이 방패로 방어할 때 가드에 성공할 확률(%). 없으면 서버 기본(방어.성공확률)
 
 
 @dataclass(frozen=True)
@@ -89,6 +90,8 @@ def describe_gear(gear: Gear) -> str:
             parts.append(f"대상 회피 확률 {gear.dodge}%로 변환")
         return ", ".join(parts)
     parts = [f"가드 피해 감소 {gear.guard}%"] if gear.guard is not None else []
+    if gear.guard_chance is not None:
+        parts.append(f"가드 성공률 {gear.guard_chance}%")
     if gear.reflect is not None:
         parts.append(f"가드 성공 시 {gear.reflect}% 반사")
     return ", ".join(parts)
@@ -230,19 +233,20 @@ def check_entity(section: str, data) -> tuple[object | None, str | None]:
         if problem:
             return None, problem
         extra = {}
-        for field_name, high in (("dodge", 95), ("guard", 100), ("reflect", 500)):
+        for field_name, high in (("dodge", 95), ("guard", 100), ("reflect", 500), ("guard_chance", 100)):
             extra[field_name], problem = _num(data, field_name, 0, high, None, none_ok=True)
             if problem:
                 return None, problem
         if slot == "weapon":
-            extra["guard"] = extra["reflect"] = None
+            extra["guard"] = extra["reflect"] = extra["guard_chance"] = None
         else:
             n["attack"] = n["crit"] = 0
             extra["dodge"] = None
             if extra["guard"] is None:
                 return None, "방패에는 가드(피해 감소 %)가 필요해요."
         gear = Gear(key, name, emoji, slot, tier, n["weight"], attack=n["attack"], crit=n["crit"], dodge=extra["dodge"],
-                    guard=extra["guard"], reflect=extra["reflect"], sell_price=n["sell_price"])
+                    guard=extra["guard"], reflect=extra["reflect"], sell_price=n["sell_price"],
+                    guard_chance=extra["guard_chance"])
         return replace(gear, description=describe_gear(gear)), None
     n, problem = numbers(("heal", 0, 100000, 0), ("regen", 0, 100000, 0), ("regen_turns", 0, 1000, 0),
                          ("sell_price", 0, SELL_MAX, SELL_DEFAULT[tier]))
@@ -523,11 +527,12 @@ def validate(overrides: dict, content=None) -> str | None:
 def warnings(bal: Balance) -> list[str]:
     """값 자체는 허용되지만 게임을 깨뜨릴 수 있는 조합을 알려 준다."""
     out = []
-    chance = bal.guard_chance / 100
-    shields = [("방패 없음", bal.guard_base, bal.guard_heal)] + [(g.name, g.guard, bal.guard_heal) for g in bal.gear if g.slot == "shield"]
+    shields = [("방패 없음", bal.guard_base, bal.guard_heal, bal.guard_chance)] + [
+        (g.name, g.guard, bal.guard_heal, bal.guard_chance if g.guard_chance is None else g.guard_chance) for g in bal.gear if g.slot == "shield"]
     farmable = []
     for monster in bal.monsters + bal.bosses:
-        for name, guard, heal_rate in shields:
+        for name, guard, heal_rate, percent in shields:
+            chance = percent / 100
             heal = monster.damage * heal_rate // 100
             expected = chance * (heal - reduce_damage(monster.damage, guard)) - (1 - chance) * monster.damage
             if expected >= 0 and monster.damage > 0:
@@ -537,4 +542,7 @@ def warnings(bal: Balance) -> list[str]:
                    + (" 외" if len(farmable) > 4 else "") + "). '방어.회복률'이나 '방어.성공확률'을 낮추는 걸 고려해 보세요.")
     if bal.guard_chance == 0:
         out.append("⚠️ 방어 성공 확률이 0%라 방어가 쓸모없어요.")
+    zero = [g.name for g in bal.gear if g.slot == "shield" and g.guard_chance == 0]
+    if zero:
+        out.append("⚠️ 가드 성공률이 0%인 방패가 있어요(" + ", ".join(zero[:4]) + "). 끼면 방어가 쓸모없어요.")
     return out

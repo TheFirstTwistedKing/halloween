@@ -197,7 +197,7 @@ def first_package_table(ids: dict) -> list[dict]:
         {"id": "trash", "kind": "item", "item": ids["trash"], "weight": 10, "amount": 1}]
 
 
-def _package_table(ids: dict, new_ids: dict) -> list[dict]:
+def default_package_table(ids: dict, new_ids: dict) -> list[dict]:
     """버전 1의 기본 패키지 결과표(가중치 합 100이라 가중치가 곧 퍼센트). 값어치가 높을수록 드물고, 쓸모없거나 손해인 물품은 흔하다."""
     table = [
         {"id": "none", "kind": "none", "weight": 40, "amount": 1, "emoji": "👻", "title": "꽝"},
@@ -400,6 +400,25 @@ class Store:
         - 쓰레기는 아직 손대지 않았을 때만(판매 꺼짐·판매가 0) 판매가 범위를 정한다.
         - 결과표는 예전 기본값 그대로일 때만 새 기본값으로 바꾼다. 관리자가 손댄 표는 건드리지 않는다(물품만 만들어 둔다).
         - 상점에는 최대 MAX_SHOP_ITEMS개까지만 올라가서, 넘치는 물품은 판매를 꺼 둔 채로 만든다(/물품수정으로 켤 수 있다)."""
+        new_ids = self._ensure_new_items(guild)
+        with self.db:
+            listed = self.db.execute("SELECT COUNT(*) AS n FROM items WHERE guild=? AND (buyable=1 OR sellable=1)", (guild,)).fetchone()["n"]
+            trash = self.db.execute("SELECT * FROM items WHERE guild=? AND system='trash'", (guild,)).fetchone()
+            if (trash and not trash["sellable"] and not trash["buyable"] and trash["sell_price"] == 0
+                    and trash["sell_max"] is None and listed < MAX_SHOP_ITEMS):
+                self.db.execute("UPDATE items SET sell_price=?, sell_max=?, sellable=1 WHERE guild=? AND id=?",
+                                (*TRASH_SELL, guild, trash["id"]))
+        cfg = self.settings(guild)
+        ids = {row["system"]: row["id"] for row in
+               self.db.execute("SELECT id, system FROM items WHERE guild=? AND system IN ('key','trash')", (guild,)).fetchall()}
+        table = cfg["package_table"]
+        if "key" in ids and "trash" in ids and table == first_package_table(ids):
+            table = default_package_table(ids, new_ids)
+        self.update_settings(guild, seed_version=SEED_VERSION, package_table=table)
+
+    def _ensure_new_items(self, guild: int) -> dict[str, int]:
+        """패키지 물품 7종 중 없는 것을 만든다. 시스템 이름이나 같은 이름의 물품이 이미 있으면 그걸 그대로 쓰고 값은 건드리지 않는다.
+        상점 25칸이 차면 남은 물품은 판매가 꺼진 채 만든다. {시스템 이름: 물품 id}를 돌려준다."""
         listed = self.db.execute("SELECT COUNT(*) AS n FROM items WHERE guild=? AND (buyable=1 OR sellable=1)", (guild,)).fetchone()["n"]
         new_ids = {}
         with self.db:
@@ -413,18 +432,28 @@ class Store:
                         "VALUES(?,?,?,?,'item',?,?,?,?) RETURNING id", (guild, name, emoji, description, low, high, int(sellable), system)).fetchone()
                     listed += sellable
                 new_ids[system] = row["id"]
-            trash = self.db.execute("SELECT * FROM items WHERE guild=? AND system='trash'", (guild,)).fetchone()
-            if (trash and not trash["sellable"] and not trash["buyable"] and trash["sell_price"] == 0
-                    and trash["sell_max"] is None and listed < MAX_SHOP_ITEMS):
-                self.db.execute("UPDATE items SET sell_price=?, sell_max=?, sellable=1 WHERE guild=? AND id=?",
-                                (*TRASH_SELL, guild, trash["id"]))
-        cfg = self.settings(guild)
-        ids = {row["system"]: row["id"] for row in
-               self.db.execute("SELECT id, system FROM items WHERE guild=? AND system IN ('key','trash')", (guild,)).fetchall()}
-        table = cfg["package_table"]
-        if "key" in ids and "trash" in ids and table == first_package_table(ids):
-            table = _package_table(ids, new_ids)
-        self.update_settings(guild, seed_version=SEED_VERSION, package_table=table)
+        return new_ids
+
+    def apply_default_package_table(self, guild: int) -> list[dict]:
+        """패키지 결과표를 지금의 기본 확률표로 통째로 바꾼다(관리자가 손댄 표여도). 표에 필요한 물품(열쇠·쓰레기·새 물품 7종) 중 없는 것은 만들고,
+        있는 것은 이름·가격을 그대로 둔다. 가방·지갑·다른 설정은 건드리지 않는다. 새 표를 돌려준다."""
+        self.ensure_defaults(guild)
+        with self.db:
+            for key, (name, emoji, description) in SYSTEM_ITEMS.items():
+                has = (self.db.execute("SELECT 1 FROM items WHERE guild=? AND system=?", (guild, key)).fetchone()
+                       or self.db.execute("SELECT 1 FROM items WHERE guild=? AND lower(name)=lower(?)", (guild, name)).fetchone())
+                if not has:
+                    self.db.execute("INSERT INTO items(guild, name, emoji, description, kind, system) VALUES(?,?,?,?,'item',?)",
+                                    (guild, name, emoji, description, key))
+        new_ids = self._ensure_new_items(guild)
+        ids = {}
+        for key, (name, _emoji, _description) in SYSTEM_ITEMS.items():
+            row = (self.db.execute("SELECT id FROM items WHERE guild=? AND system=?", (guild, key)).fetchone()
+                   or self.db.execute("SELECT id FROM items WHERE guild=? AND lower(name)=lower(?)", (guild, name)).fetchone())
+            ids[key] = row["id"]
+        table = default_package_table(ids, new_ids)
+        self.update_settings(guild, package_table=table)
+        return table
 
     def ensure_system_items(self, guild: int) -> dict[str, int]:
         """기본 물품 중 아직 남아 있는 것의 id({'key': ..., 'trash': ...}). 관리자가 지웠다면 그 항목은 빠진다."""

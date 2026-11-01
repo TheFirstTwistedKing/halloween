@@ -120,7 +120,7 @@ class CommandTests(RoleGrantFixture):
         self.assertIn("**2명**", embed.description)                     # 봇과 다른 역할 사람은 빠진다
         self.assertIn("🍬 60", embed.description)                        # 총 60
         self.assertIsInstance(kwargs["view"], ConfirmRoleGrant)
-        self.assertTrue(kwargs["ephemeral"])
+        self.assertFalse(kwargs["ephemeral"])
         self.assertEqual(self.candy(self.guest1, self.guest2, self.plain, self.robot), [0, 0, 0, 0])
 
     async def test_confirming_pays_only_role_holders_and_reports(self):

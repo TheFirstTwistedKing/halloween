@@ -5,6 +5,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import theme
+from owner import owner_only
 from access import require_admin
 from josa import eun_neun, i_ga
 
@@ -38,7 +39,7 @@ class ConfirmRoleGrant(discord.ui.View):
         self.add_item(no)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return interaction.user.id == self.admin_id
+        return await owner_only(interaction, self.admin_id)
 
     async def confirm(self, interaction: discord.Interaction):
         self.stop()
@@ -98,16 +99,16 @@ class Admin(commands.Cog):
         store, gid = self.bot.store, interaction.guild_id
         channels = store.settings(gid)["channels"]
         if channel.id in channels:
-            await interaction.response.send_message(embed=theme.notice(f"{channel.mention}은(는) 이미 이벤트 채널이에요.", False), ephemeral=True)
+            await interaction.response.send_message(embed=theme.notice(f"{channel.mention}은(는) 이미 이벤트 채널이에요.", False), ephemeral=False)
             return
         if len(channels) >= 100:
-            await interaction.response.send_message(embed=theme.notice("이벤트 채널은 최대 100개예요.", False), ephemeral=True)
+            await interaction.response.send_message(embed=theme.notice("이벤트 채널은 최대 100개예요.", False), ephemeral=False)
             return
         store.update_settings(gid, channels=[*channels, channel.id])
         perms = channel.permissions_for(interaction.guild.me)
         warn = "" if perms.view_channel and perms.send_messages and perms.embed_links else (
             "\n⚠️ 봇이 이 채널에서 메시지를 보내거나 임베드를 올릴 수 없어요. **패키지가 나오려면** 채널 권한을 확인해 주세요.")
-        await interaction.response.send_message(embed=theme.notice(f"{channel.mention}에서 재화·패키지가 나와요.{warn}"), ephemeral=True)
+        await interaction.response.send_message(embed=theme.notice(f"{channel.mention}에서 재화·패키지가 나와요.{warn}"), ephemeral=False)
 
     @app_commands.command(name="이벤트채널제거", description="이벤트 채널에서 뺍니다 (관리자)")
     @app_commands.guild_only()
@@ -119,10 +120,10 @@ class Admin(commands.Cog):
         store, gid = self.bot.store, interaction.guild_id
         channels = store.settings(gid)["channels"]
         if channel.id not in channels:
-            await interaction.response.send_message(embed=theme.notice(f"{channel.mention}은(는) 이벤트 채널이 아니에요.", False), ephemeral=True)
+            await interaction.response.send_message(embed=theme.notice(f"{channel.mention}은(는) 이벤트 채널이 아니에요.", False), ephemeral=False)
             return
         store.update_settings(gid, channels=[c for c in channels if c != channel.id])
-        await interaction.response.send_message(embed=theme.notice(f"{channel.mention}을(를) 이벤트 채널에서 뺐어요."), ephemeral=True)
+        await interaction.response.send_message(embed=theme.notice(f"{channel.mention}을(를) 이벤트 채널에서 뺐어요."), ephemeral=False)
 
     @app_commands.command(name="이벤트채널목록", description="이벤트 채널 목록을 봅니다 (관리자)")
     @app_commands.guild_only()
@@ -130,7 +131,7 @@ class Admin(commands.Cog):
     async def list_channels(self, interaction: discord.Interaction):
         if not await require_admin(interaction):
             return
-        await interaction.response.send_message(embed=settings_embed(self.bot.store.settings(interaction.guild_id)), ephemeral=True)
+        await interaction.response.send_message(embed=settings_embed(self.bot.store.settings(interaction.guild_id)), ephemeral=False)
 
     # ---------------------------------------------------------------- 설정
     @app_commands.command(name="이벤트설정", description="확률·쿨타임·패키지 방식을 바꿔요. 비워 두면 현재 설정을 보여줘요 (관리자)")
@@ -165,9 +166,9 @@ class Admin(commands.Cog):
             try:
                 self.bot.store.update_settings(gid, **changes)
             except ValueError as exc:
-                await interaction.response.send_message(embed=theme.notice(str(exc), False), ephemeral=True)
+                await interaction.response.send_message(embed=theme.notice(str(exc), False), ephemeral=False)
                 return
-        await interaction.response.send_message(embed=settings_embed(self.bot.store.settings(gid)), ephemeral=True)
+        await interaction.response.send_message(embed=settings_embed(self.bot.store.settings(gid)), ephemeral=False)
 
     # ---------------------------------------------------------------- 지급
     @staticmethod
@@ -183,13 +184,13 @@ class Admin(commands.Cog):
         if not await require_admin(interaction):
             return
         if problem := self._bad_target(target):
-            await interaction.response.send_message(embed=theme.notice(problem, False), ephemeral=True)
+            await interaction.response.send_message(embed=theme.notice(problem, False), ephemeral=False)
             return
         changed = self.bot.store.add_candy(interaction.guild_id, target.id, amount)
         store, gid = self.bot.store, interaction.guild_id
         now, cur = store.wallet(gid, target.id), store.currency(gid)
         await interaction.response.send_message(
-            embed=theme.notice(f"{target.mention}의 {i_ga(cur.name)} {changed:+,}만큼 바뀌었어요. (지금 {cur.money(now)})"), ephemeral=True)
+            embed=theme.notice(f"{target.mention}의 {i_ga(cur.name)} {changed:+,}만큼 바뀌었어요. (지금 {cur.money(now)})"), ephemeral=False)
 
     @app_commands.command(name="역할재화지급", description="그 역할을 가진 모든 사람에게 재화를 주거나(+) 회수해요(−) (관리자)")
     @app_commands.guild_only()
@@ -201,19 +202,19 @@ class Admin(commands.Cog):
         if not await require_admin(interaction):
             return
         if amount == 0:
-            await interaction.response.send_message(embed=theme.notice("수량이 0이면 바뀌는 게 없어요.", False), ephemeral=True)
+            await interaction.response.send_message(embed=theme.notice("수량이 0이면 바뀌는 게 없어요.", False), ephemeral=False)
             return
         if not self.bot.intents.members:
-            await interaction.response.send_message(embed=theme.notice(NO_MEMBERS_INTENT, False), ephemeral=True)
+            await interaction.response.send_message(embed=theme.notice(NO_MEMBERS_INTENT, False), ephemeral=False)
             return
-        await interaction.response.defer(ephemeral=True)                 # 멤버가 많으면 가져오는 데 시간이 걸린다.
+        await interaction.response.defer(ephemeral=False)                 # 멤버가 많으면 가져오는 데 시간이 걸린다.
         try:
             ids = await role_member_ids(interaction.guild, role)
         except discord.HTTPException:
-            await interaction.followup.send(embed=theme.notice("서버 멤버 목록을 가져오지 못했어요. 잠시 뒤에 다시 해 주세요.", False), ephemeral=True)
+            await interaction.followup.send(embed=theme.notice("서버 멤버 목록을 가져오지 못했어요. 잠시 뒤에 다시 해 주세요.", False), ephemeral=False)
             return
         if not ids:
-            await interaction.followup.send(embed=theme.notice(f"{role.mention} 역할을 가진 사람이 없어요. (봇은 제외돼요)", False), ephemeral=True)
+            await interaction.followup.send(embed=theme.notice(f"{role.mention} 역할을 가진 사람이 없어요. (봇은 제외돼요)", False), ephemeral=False)
             return
         verb = "회수" if amount < 0 else "지급"
         cur = self.bot.store.currency(interaction.guild_id)
@@ -221,7 +222,7 @@ class Admin(commands.Cog):
                 f"총 {cur.money(abs(amount) * len(ids))} · 봇은 제외했어요.\n"
                 f"{eun_neun(cur.name)} 사람마다 0~{cur.max:,}개 안으로 맞춰져요. 버튼을 눌러야 실제로 {verb}돼요.")
         await interaction.followup.send(embed=theme.make_embed(f"🎁 역할 재화 {verb}", body, color=theme.RED if amount < 0 else theme.ORANGE),
-                                        view=ConfirmRoleGrant(self.bot, interaction.user.id, role.name, ids, amount), ephemeral=True)
+                                        view=ConfirmRoleGrant(self.bot, interaction.user.id, role.name, ids, amount), ephemeral=False)
 
     @app_commands.command(name="물품지급", description="물품을 가방에 넣어 주거나(+) 회수해요(−) (관리자)")
     @app_commands.guild_only()
@@ -237,12 +238,12 @@ class Admin(commands.Cog):
         problem = self._bad_target(target) or ("그런 물품이 없어요." if row is None else
                                                "역할은 지급할 수 없어요. 상점에서 사거나 직접 부여해 주세요." if row["kind"] == "role" else None)
         if problem:
-            await interaction.response.send_message(embed=theme.notice(problem, False), ephemeral=True)
+            await interaction.response.send_message(embed=theme.notice(problem, False), ephemeral=False)
             return
         changed = store.add_item(gid, target.id, row["id"], amount)
         await interaction.response.send_message(
             embed=theme.notice(f"{target.mention}의 {row['emoji']} {row['name']}이(가) {changed:+,}개 바뀌었어요. "
-                               f"(지금 ×{store.qty(gid, target.id, row['id'])})"), ephemeral=True)
+                               f"(지금 ×{store.qty(gid, target.id, row['id'])})"), ephemeral=False)
 
     @give_item.autocomplete("item")
     async def give_item_autocomplete(self, interaction: discord.Interaction, current: str):

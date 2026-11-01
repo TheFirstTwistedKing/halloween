@@ -10,6 +10,7 @@ from discord.ext import commands
 import balance
 import balance_sim
 import theme
+from owner import owner_only
 from access import require_admin
 from balance import PARAMS, ROOM_KINDS, fmt
 
@@ -75,7 +76,7 @@ class ConfirmResetAll(discord.ui.View):
         self.add_item(no)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return interaction.user.id == self.admin_id
+        return await owner_only(interaction, self.admin_id)
 
     async def confirm(self, interaction: discord.Interaction):
         self.stop()
@@ -96,7 +97,7 @@ class DungeonAdmin(commands.Cog):
         self.bot = bot
 
     async def _deny(self, interaction, text):
-        await interaction.response.send_message(embed=theme.notice(text, False), ephemeral=True)
+        await interaction.response.send_message(embed=theme.notice(text, False), ephemeral=False)
 
     def _changed(self, guild_id: int) -> dict:
         return balance.clean(self.bot.store.settings(guild_id)["dungeon"])
@@ -138,7 +139,7 @@ class DungeonAdmin(commands.Cog):
             lines.append(f"┕ {param.note}")
         lines += balance.warnings(store.balance(gid))
         lines.append("지금 진행 중인 던전에도 바로 적용돼요(이미 나온 몬스터의 체력·공격은 그대로). `/던전시뮬`로 결과를 확인해 보세요.")
-        await interaction.response.send_message(embed=theme.notice("\n".join(lines)), ephemeral=True)
+        await interaction.response.send_message(embed=theme.notice("\n".join(lines)), ephemeral=False)
 
     @app_commands.command(name="던전설정확인", description="던전 밸런스의 현재 값을 봐요. 분류를 고르면 그 분류만 보여줘요 (관리자)")
     @app_commands.guild_only()
@@ -163,7 +164,7 @@ class DungeonAdmin(commands.Cog):
         embed = theme.make_embed(title, body[:4000], color=theme.PURPLE)
         for warning in balance.warnings(self.bot.store.balance(interaction.guild_id)):
             embed.add_field(name="주의", value=warning, inline=False)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.response.send_message(embed=embed, ephemeral=False)
 
     # ---------------------------------------------------------------- 되돌리기
     @app_commands.command(name="던전설정초기화", description="던전 밸런스를 기본값으로 되돌려요. 항목을 비우면 전부 되돌려요 (관리자)")
@@ -182,7 +183,7 @@ class DungeonAdmin(commands.Cog):
                 return
             await interaction.response.send_message(
                 embed=theme.make_embed("♻️ 모두 기본값으로 되돌릴까요?", f"바꾼 항목 **{len(changed)}개**가 모두 기본값으로 돌아가요.", color=theme.RED),
-                view=ConfirmResetAll(self.bot, interaction.user.id), ephemeral=True)
+                view=ConfirmResetAll(self.bot, interaction.user.id), ephemeral=False)
             return
         if key not in PARAMS:
             await self._deny(interaction, "그런 항목이 없어요. 항목 이름은 자동완성에서 골라 주세요.")
@@ -193,7 +194,7 @@ class DungeonAdmin(commands.Cog):
         old = changed.pop(key)
         store.update_settings(gid, dungeon=changed)
         await interaction.response.send_message(
-            embed=theme.notice(f"♻️ **{key}**: {fmt(old)} → 기본값 **{fmt(PARAMS[key].default)}**"), ephemeral=True)
+            embed=theme.notice(f"♻️ **{key}**: {fmt(old)} → 기본값 **{fmt(PARAMS[key].default)}**"), ephemeral=False)
 
     # ---------------------------------------------------------------- 시뮬레이션
     @app_commands.command(name="던전시뮬", description="지금 밸런스로 던전을 컴퓨터가 대신 돌려 클리어율을 어림잡아요 (관리자)")
@@ -205,7 +206,7 @@ class DungeonAdmin(commands.Cog):
         if not await require_admin(interaction):
             return
         bal = self.bot.store.balance(interaction.guild_id)
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=False)
         result = await asyncio.to_thread(balance_sim.simulate, bal, runs)
         embed = theme.make_embed(f"🧪 던전 시뮬레이션 — 방식마다 {runs:,}판", color=theme.PURPLE)
         for entry in result.values():
@@ -217,7 +218,7 @@ class DungeonAdmin(commands.Cog):
             embed.add_field(name="주의", value=warning, inline=False)
         embed.add_field(name="참고", inline=False,
                         value="컴퓨터가 정해진 방식으로 플레이한 어림값이에요. 실제 유저는 장비·아이템을 덜 알뜰하게 써서 보통 더 낮게 나와요.")
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        await interaction.followup.send(embed=embed, ephemeral=False)
 
     @set_param.autocomplete("key")
     @reset.autocomplete("key")

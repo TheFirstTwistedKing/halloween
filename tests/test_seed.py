@@ -1,6 +1,7 @@
 """패키지 물품 7종·음수/범위 판매가·기본 확률표, 운영 중인 서버의 이전, 옛 슬래시 명령어 정리 시험."""
 import sqlite3
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace as NS
@@ -411,6 +412,120 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(len(store.items(5)), 9)
         self.assertEqual(sum(e["weight"] for e in store.settings(5)["package_table"]), 100)
         self.assertEqual(first_package_table({"key": 1, "trash": 2})[0]["weight"], 60)         # 처음 표는 그대로 보관(이전 판정용)
+
+
+class ApplyDefaultTableTests(unittest.IsolatedAsyncioTestCase):
+    """옛 서버의 관리자가 손댄 결과표는 자동 이전이 건드리지 않는다. 그럴 때 /패키지결과 기본값으로 직접 새 표를 적용한다."""
+
+    async def asyncSetUp(self):
+        from cogs.rules_admin import RulesAdmin
+        from unittest import mock
+        import cogs.rules_admin as rules_module
+        self.w = World()
+        self.store = self.w.store
+        self.cog = RulesAdmin(self.w.bot)
+        self.w.channel(400)
+        patcher = mock.patch.object(rules_module, "refresh_panels", new=AsyncMock(return_value=1))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.ids = self.store.ensure_system_items(G)
+        custom = [{"id": "none", "kind": "none", "weight": 90, "amount": 1}, {"id": "key", "kind": "item", "item": self.ids["key"], "weight": 10, "amount": 1}]
+        self.store.update_settings(G, package_table=custom)                 # 관리자가 손댄 표(자동 이전은 이걸 건드리지 않았다)
+        self.custom = custom
+
+    async def asyncTearDown(self):
+        await self.w.close()
+
+    async def ask_default(self, admin=True):
+        from cogs.rules_admin import RulesAdmin
+        i = self.w.interaction(admin=admin)
+        await RulesAdmin.package_default.callback(self.cog, i)
+        return i
+
+    async def press(self, i):
+        view = i.response.send_message.await_args.kwargs["view"]
+        press = self.w.interaction(admin=True)
+        await view.confirm(press)
+        return press
+
+    def text(self, i):
+        embed = i.response.send_message.await_args.kwargs["embed"]
+        return (embed.title or "") + (embed.description or "")
+
+    async def test_the_preview_shows_the_new_table_and_changes_nothing_until_confirmed(self):
+        i = await self.ask_default()
+        text = self.text(i)
+        for needle in ("지금 결과표 **2칸**", "꽝 40%", "열쇠 14%", "마녀 모자 5.5%", "뱀파이어맛 와인 0.5%", "수상한 액체가 담긴 병 4%", "가방·재화·상점·던전 설정은 바뀌지 않아요"):
+            self.assertIn(needle, text)
+        self.assertEqual(self.store.settings(G)["package_table"], self.custom)
+
+    async def test_confirming_replaces_a_customized_table_with_the_default(self):
+        press = await self.press(await self.ask_default())
+        table = self.store.settings(G)["package_table"]
+        self.assertEqual((len(table), sum(e["weight"] for e in table)), (11, 100))
+        self.assertIn("11칸", press.response.edit_message.await_args.kwargs["embed"].description)
+        by_id = {e["id"]: e for e in table}
+        for system, name, *_ in NEW_ITEMS:
+            self.assertEqual(self.store.item(G, by_id[system]["item"])["name"], name)
+
+    async def test_it_makes_only_the_missing_items_and_keeps_existing_ones_untouched(self):
+        mine = self.store.item_by_name(G, "마녀 모자")
+        self.store.update_item(G, mine["id"], sell_price=999)                  # 관리자가 값을 바꿔 둔 물품
+        moon = self.store.item_by_name(G, "달 조각")
+        with self.store.db:
+            self.store.db.execute("DELETE FROM items WHERE id=?", (moon["id"],))      # 지워진 물품
+        before = {r["name"]: r["id"] for r in self.store.items(G)}
+        await self.press(await self.ask_default())
+        after = {r["name"]: r["id"] for r in self.store.items(G)}
+        self.assertEqual(self.store.item_by_name(G, "마녀 모자")["sell_price"], 999)       # 기존 물품은 그대로
+        self.assertEqual(after["마녀 모자"], before["마녀 모자"])
+        self.assertIn("달 조각", after)                                                   # 없던 것만 새로 만든다
+        self.assertEqual(self.store.item_by_name(G, "달 조각")["sell_price"], 300)
+        self.assertEqual(len(after), len(before) + 1)
+
+    async def test_wallets_bags_and_other_settings_are_not_touched(self):
+        self.store.add_candy(G, U, 321)
+        self.store.add_item(G, U, self.ids["key"], 4)
+        self.store.update_settings(G, entry_cost=3, channels=[400])
+        await self.press(await self.ask_default())
+        cfg = self.store.settings(G)
+        self.assertEqual((self.store.wallet(G, U), self.store.qty(G, U, self.ids["key"])), (321, 4))
+        self.assertEqual((cfg["entry_cost"], cfg["channels"], cfg["entry_item"]), (3, [400], self.ids["key"]))
+
+    async def test_it_recreates_the_key_and_trash_if_the_admin_had_deleted_them(self):
+        self.store.update_settings(G, entry_item=None, package_table=[{"id": "none", "kind": "none", "weight": 1, "amount": 1}])
+        with self.store.db:
+            self.store.db.execute("DELETE FROM items WHERE system IN ('key','trash') AND guild=?", (G,))
+        await self.press(await self.ask_default())
+        names = [r["name"] for r in self.store.items(G)]
+        self.assertEqual((names.count("열쇠"), names.count("쓰레기")), (1, 1))
+        self.assertEqual(len(self.store.settings(G)["package_table"]), 11)
+
+    async def test_pressing_twice_is_the_same_as_once(self):
+        await self.press(await self.ask_default())
+        first = (self.store.settings(G)["package_table"], len(self.store.items(G)))
+        await self.press(await self.ask_default())
+        self.assertEqual((self.store.settings(G)["package_table"], len(self.store.items(G))), first)
+
+    async def test_only_admins_and_only_the_admin_who_asked_can_confirm(self):
+        i = await self.ask_default(admin=False)
+        self.assertIn("관리자만", self.text(i))
+        self.assertEqual(self.store.settings(G)["package_table"], self.custom)
+        i = await self.ask_default()
+        view = i.response.send_message.await_args.kwargs["view"]
+        self.assertTrue(await view.interaction_check(self.w.interaction(uid=7, admin=True)))
+        self.assertFalse(await view.interaction_check(self.w.interaction(uid=8, admin=True)))
+
+    async def test_the_new_table_really_drops_the_new_items_in_a_package(self):
+        from packages import open_package
+        await self.press(await self.ask_default())
+        self.store.create_package(G, 400, 9001, time.time() + 600, "all")
+        self.w.bot.rng.randoms.append(0.9999)                                             # 표의 맨 끝 = 수상한 액체가 담긴 병
+        i = self.w.interaction(uid=5, message_id=9001)
+        await open_package(i)
+        self.assertIn("수상한 액체가 담긴 병", i.response.send_message.await_args.kwargs["embed"].title)
+        bottle = self.store.item_by_name(G, "수상한 액체가 담긴 병")
+        self.assertEqual(self.store.qty(G, 5, bottle["id"]), 1)
 
 
 class PurgeTests(unittest.IsolatedAsyncioTestCase):

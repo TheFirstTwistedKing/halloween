@@ -67,7 +67,7 @@ class ShopPanelView(discord.ui.View):
 
     async def on_bag(self, interaction: discord.Interaction):
         from views import send_bag
-        await send_bag(interaction)
+        await send_bag(interaction, ephemeral=True)       # 상점 패널은 여러 사람이 쓰는 공용 메시지라 가방은 누른 사람에게만 보인다.
 
 
 def build_panel(store, guild, *, with_emoji: bool = True):

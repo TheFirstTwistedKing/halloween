@@ -72,7 +72,7 @@ class AdminOnlyTests(CommandFixture):
             await command.callback(cog, interaction, *args, **(rest[0] if rest else {}))
             text, kwargs = self.reply(interaction)
             self.assertIn("관리자만", text, command.name)
-            self.assertTrue(kwargs["ephemeral"], command.name)                  # 거절 메시지는 본인에게만 보인다.
+            self.assertFalse(kwargs["ephemeral"], command.name)                 # 명령어의 응답은 거절 메시지까지 모두가 볼 수 있다.
         after = (self.store.settings(100), [tuple(r) for r in self.store.items(100)], self.store.wallet(100, 8),
                  self.store.shops(100))
         self.assertEqual(before, after)
@@ -130,7 +130,7 @@ class SettingsCommandTests(CommandFixture):
         interaction = await self.call(Admin.settings, self.admin, self.ask())
         embed, kwargs = sent_embed(interaction)
         text = "\n".join(f"{f.name} {f.value}" for f in embed.fields)
-        self.assertTrue(kwargs["ephemeral"])
+        self.assertFalse(kwargs["ephemeral"])
         self.assertIn("**50%** 확률로 **1~5**개", text)
         self.assertIn("**0.1%** 확률 · 누구나 한 번씩 · 120초", text)
         self.assertIn("아직 없어요", text)
@@ -248,7 +248,7 @@ class ItemManagementTests(CommandFixture):
     async def test_add_item_and_the_panel_refresh(self):
         interaction = await self.call(Shop.add_item, self.shop, self.ask(), "호박 초", True, False, 30, 0, "은은해요", "🕯️")
         embed, kwargs = sent_embed(interaction)
-        self.assertTrue(kwargs["ephemeral"])
+        self.assertFalse(kwargs["ephemeral"])
         self.assertIn("🕯️ **호박 초**을(를) 등록했어요.", embed.description)
         self.assertIn("구입 ✅ 🍬 30 · 판매 ❌", embed.description)
         item = self.store.item_by_name(100, "호박 초")
@@ -406,7 +406,7 @@ class EconomyCommandTests(CommandFixture):
         interaction = await self.call(Economy.help, self.economy, self.ask(admin=False))
         embed, kwargs = sent_embed(interaction)
         text = "\n".join(f"{f.name} {f.value}" for f in embed.fields)
-        self.assertTrue(kwargs["ephemeral"])
+        self.assertFalse(kwargs["ephemeral"])
         self.assertIn("아직 정해지지 않았어요", text)
         self.assertIn("**50%** 확률로 **1~5**개", text)
         self.assertIn("**0.1%** 확률로 패키지", text)
@@ -426,7 +426,7 @@ class EconomyCommandTests(CommandFixture):
         interaction = await self.call(Economy.bag, self.economy, self.ask(admin=False))
         embed, kwargs = sent_embed(interaction)
         self.assertEqual(embed.title, "🎒 user7의 가방")
-        self.assertTrue(kwargs["ephemeral"])
+        self.assertFalse(kwargs["ephemeral"])                                      # /가방은 모두가 본다(조작은 본인만).
 
     async def test_the_exp_commands_are_gone(self):
         self.assertFalse(hasattr(Economy, "exchange"))

@@ -5,7 +5,8 @@ import discord
 
 import services
 import theme
-from panel import display_name
+from owner import owner_only
+from panel import display_name, partial_emoji
 from store import QTY_MAX
 
 
@@ -20,14 +21,49 @@ def bag_for(client, member) -> discord.Embed:
                            tickets=store.tickets(guild.id, member.id), cur=store.currency(guild.id))
 
 
-async def send_bag(interaction: discord.Interaction):
-    await interaction.response.send_message(embed=bag_for(interaction.client, interaction.user), ephemeral=True)
+async def send_bag(interaction: discord.Interaction, ephemeral: bool = False):
+    """가방을 보여 준다. /가방 명령어는 모두가 볼 수 있게(ephemeral=False), 상점 패널의 [가방] 버튼은 누른 사람에게만 보이게 한다.
+    팔 수 있는 물품이 있으면 판매 선택창이 붙는다(연 사람만 조작할 수 있다)."""
+    view = BagView(interaction.client, interaction.user)
+    extra = {"view": view} if view.children else {}
+    await interaction.response.send_message(embed=bag_for(interaction.client, interaction.user), ephemeral=ephemeral, **extra)
+
+
+class BagView(discord.ui.View):
+    """가방 화면의 판매 선택창. 가방에 있는 물품 중 팔 수 있는 것을 골라 수량을 적으면 바로 팔고, 같은 가방 메시지가 새 내용으로 바뀐다."""
+
+    def __init__(self, client, member):
+        super().__init__(timeout=300)
+        self.client, self.member = client, member
+        store, guild_id = client.store, member.guild.id
+        cur = store.currency(guild_id)
+        options = [discord.SelectOption(label=f"{row['name']} ×{row['qty']:,}"[:100], value=str(row["id"]), emoji=partial_emoji(row["emoji"]),
+                                        description=f"개당 판매 {theme.sell_text(row, cur, plain=True)}"[:100])
+                   for row in store.inventory(guild_id, member.id) if row["sellable"]]
+        if options:
+            select = discord.ui.Select(placeholder="💰 팔 물품을 골라요", options=options[:25], row=0)
+            select.callback = self.on_pick
+            self.add_item(select)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await owner_only(interaction, self.member.id)
+
+    async def on_pick(self, interaction: discord.Interaction):
+        try:
+            item = self.client.store.item(interaction.guild_id, int(interaction.data["values"][0]))
+        except (ValueError, KeyError, IndexError):
+            item = None
+        if item is None or item["kind"] != "item" or not item["sellable"]:
+            await interaction.response.send_message(embed=theme.notice("이제 팔 수 없는 물품이에요.", False), ephemeral=True)
+            return
+        await interaction.response.send_modal(QuantityModal("sell", item["id"], f"{item['name']} 판매", bag=True))
 
 
 class QuantityModal(discord.ui.Modal):
-    def __init__(self, action: str, item_id: int, title: str):
+    def __init__(self, action: str, item_id: int, title: str, *, bag: bool = False):
+        """bag=True면 가방에서 연 입력창이다: 결과를 따로 보내지 않고 그 가방 메시지를 새 내용(과 결과)으로 바꾼다."""
         super().__init__(title=title[:45])
-        self.action, self.item_id = action, item_id
+        self.action, self.item_id, self.bag = action, item_id, bag
         self.amount = discord.ui.TextInput(label=f"수량 (1~{QTY_MAX})", default="1", min_length=1, max_length=len(str(QTY_MAX)))
         self.add_item(self.amount)
 
@@ -45,6 +81,12 @@ class QuantityModal(discord.ui.Modal):
             result = await services.buy(client.store, client.locks, interaction.user, item, int(text))
         else:
             result = await services.sell(client.store, client.locks, interaction.user, item, int(text), client.rng)
+        if self.bag:
+            embed = bag_for(client, interaction.user)
+            embed.description = ("✅ " if result.ok else "❌ ") + result.text
+            view = BagView(client, interaction.user)
+            await interaction.response.edit_message(embed=embed, **({"view": view} if view.children else {"view": None}))
+            return
         await interaction.response.send_message(embed=theme.notice(result.text, result.ok), ephemeral=True)
 
 
@@ -76,7 +118,7 @@ class DetailView(discord.ui.View):
                                   cur=store.currency(guild.id))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return interaction.user.id == self.member.id
+        return await owner_only(interaction, self.member.id)
 
     async def start(self, interaction: discord.Interaction, action: str):
         item = self.client.store.item(interaction.guild_id, self.item_id)

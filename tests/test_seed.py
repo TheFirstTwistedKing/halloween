@@ -67,7 +67,8 @@ class DefaultsTests(unittest.TestCase):
         self.assertEqual(sorted(good, key=lambda k: PRICES[k][0]), good)
         self.assertEqual([w[k] for k in good], sorted((w[k] for k in good), reverse=True))
         self.assertEqual(w["witch_hat"], w["ghost_cloth"])                           # 같은 값(100)은 같은 확률
-        self.assertEqual(w["vampire_wine"], min(w.values()))                         # 가장 비싼 물품이 가장 드물다
+        self.assertEqual(w["vampire_wine"], min(v for k, v in w.items() if k != "revive"))   # 가장 비싼 물품이 가장 드물다(부활권은 따로 0.1%)
+        self.assertEqual(w["revive"], 0.1)
         for bad in ("broken_glass", "trash"):                                        # 손해/쓸모없는 물품은 값나가는 물품보다 흔하다
             self.assertTrue(all(w[bad] > w[k] for k in ("jack_o_lantern", "moon_shard", "vampire_wine")), bad)
         self.assertGreater(w["broken_glass"], w["witch_hat"])
@@ -352,30 +353,34 @@ class MigrationTests(unittest.TestCase):
         store = self.open()
         store.ensure_defaults(100)
         names = [r["name"] for r in store.items(100)]
-        self.assertEqual(names, ["열쇠", "쓰레기", *(item[1] for item in NEW_ITEMS)])
+        self.assertEqual(names, ["열쇠", "쓰레기", *(item[1] for item in NEW_ITEMS), "부활권"])
         trash = store.item_by_name(100, "쓰레기")
         self.assertEqual((trash["sellable"], trash["sell_price"], trash["sell_max"]), (1, -20, 20))
         table = store.settings(100)["package_table"]
-        self.assertEqual((sum(e["weight"] for e in table), len(table)), (100, 11))
+        self.assertEqual((round(sum(e["weight"] for e in table), 6), len(table)), (100, 12))
         self.assertEqual(next(e for e in table if e["id"] == "key")["item"], 1)                # 기존 열쇠를 이어받는다
         self.assertEqual(next(e for e in table if e["id"] == "trash")["item"], 2)
         snapshot = (store.items(100), store.settings(100)["package_table"])
         store.ensure_defaults(100)
         store.ensure_defaults(100)
-        self.assertEqual(len(store.items(100)), 9)                                          # 여러 번 열어도 한 번만
+        self.assertEqual(len(store.items(100)), 10)                                         # 여러 번 열어도 한 번만
         self.assertEqual(store.settings(100)["package_table"], snapshot[1])
         reopened = Store(Path(self.dir.name) / "old.sqlite3")                                # 다시 켜도 그대로
         self.addCleanup(reopened.close)
         reopened.ensure_defaults(100)
-        self.assertEqual(len(reopened.items(100)), 9)
+        self.assertEqual(len(reopened.items(100)), 10)
         self.assertEqual(reopened.settings(100)["seed_version"], SEED_VERSION)
 
     def test_a_table_the_admin_changed_is_left_alone_but_the_items_are_still_made(self):
         custom = [{"id": "none", "kind": "none", "weight": 90, "amount": 1}, {"id": "key", "kind": "item", "item": 1, "weight": 10, "amount": 1}]
         store = self.open(custom_table=custom)
         store.ensure_defaults(100)
-        self.assertEqual(store.settings(100)["package_table"], custom)
-        self.assertEqual(len(store.items(100)), 9)                                          # 물품은 만들어 둬서 /패키지결과 추가로 넣을 수 있다
+        table = store.settings(100)["package_table"]
+        self.assertEqual(table[:2], custom)                                                 # 관리자가 정한 칸과 비율은 그대로 두고
+        revive = store.revive_item(100)
+        self.assertEqual([(e["id"], e["item"]) for e in table[2:]], [("revive", revive["id"])])   # 부활권만 덧붙인다
+        self.assertAlmostEqual(table[2]["weight"] / sum(e["weight"] for e in table), 0.001, places=6)   # 몫이 0.1%
+        self.assertEqual(len(store.items(100)), 10)                                         # 물품은 만들어 둬서 /패키지결과 추가로 넣을 수 있다
 
     def test_a_trash_the_admin_already_made_sellable_keeps_its_price(self):
         store = self.open(trash_sellable=True)
@@ -396,21 +401,21 @@ class MigrationTests(unittest.TestCase):
         store = self.open(shop_items=MAX_SHOP_ITEMS - 2)
         store.ensure_defaults(100)
         self.assertEqual(len(store.items(100, shop_only=True)), MAX_SHOP_ITEMS)                # 상점은 25칸이 꽉 찼다
-        self.assertEqual(len(store.items(100)), 2 + (MAX_SHOP_ITEMS - 2) + 7)                  # 물품은 7종 모두 만들었다
+        self.assertEqual(len(store.items(100)), 2 + (MAX_SHOP_ITEMS - 2) + 7 + 1)              # 물품은 7종과 부활권을 모두 만들었다(부활권은 상점에 올리지 않는다)
         new_names = [item[1] for item in NEW_ITEMS]
         sellable = [r["name"] for r in store.items(100) if r["name"] in new_names and r["sellable"]]
         self.assertEqual(sellable, new_names[:2])                                              # 남은 2칸에 앞의 두 물품만 판매가 켜졌고
         self.assertEqual(len([r for r in store.items(100) if r["name"] in new_names and not r["sellable"]]), 5)   # 나머지 5종은 꺼진 채다.
         self.assertEqual(store.item_by_name(100, "쓰레기")["sellable"], 0)                      # 자리가 없어 쓰레기도 그대로
         table = store.settings(100)["package_table"]
-        self.assertEqual(len(table), 11)                                                       # 결과표에는 모두 들어가 뜯으면 가방에 들어온다
+        self.assertEqual(len(table), 12)                                                       # 결과표에는 모두 들어가 뜯으면 가방에 들어온다
 
     def test_a_brand_new_server_gets_the_new_defaults_directly(self):
         store = Store(":memory:")
         self.addCleanup(store.close)
         store.ensure_defaults(5)
-        self.assertEqual(len(store.items(5)), 9)
-        self.assertEqual(sum(e["weight"] for e in store.settings(5)["package_table"]), 100)
+        self.assertEqual(len(store.items(5)), 10)
+        self.assertAlmostEqual(sum(e["weight"] for e in store.settings(5)["package_table"]), 100)
         self.assertEqual(first_package_table({"key": 1, "trash": 2})[0]["weight"], 60)         # 처음 표는 그대로 보관(이전 판정용)
 
 
@@ -455,15 +460,15 @@ class ApplyDefaultTableTests(unittest.IsolatedAsyncioTestCase):
     async def test_the_preview_shows_the_new_table_and_changes_nothing_until_confirmed(self):
         i = await self.ask_default()
         text = self.text(i)
-        for needle in ("지금 결과표 **2칸**", "꽝 40%", "열쇠 14%", "마녀 모자 5.5%", "뱀파이어맛 와인 0.5%", "수상한 액체가 담긴 병 4%", "가방·재화·상점·던전 설정은 바뀌지 않아요"):
+        for needle in ("지금 결과표 **2칸**", "꽝 39.9%", "열쇠 14%", "마녀 모자 5.5%", "뱀파이어맛 와인 0.5%", "수상한 액체가 담긴 병 4%", "부활권 0.1%", "가방·재화·상점·던전 설정은 바뀌지 않아요"):
             self.assertIn(needle, text)
         self.assertEqual(self.store.settings(G)["package_table"], self.custom)
 
     async def test_confirming_replaces_a_customized_table_with_the_default(self):
         press = await self.press(await self.ask_default())
         table = self.store.settings(G)["package_table"]
-        self.assertEqual((len(table), sum(e["weight"] for e in table)), (11, 100))
-        self.assertIn("11칸", press.response.edit_message.await_args.kwargs["embed"].description)
+        self.assertEqual((len(table), round(sum(e["weight"] for e in table), 6)), (12, 100))
+        self.assertIn("12칸", press.response.edit_message.await_args.kwargs["embed"].description)
         by_id = {e["id"]: e for e in table}
         for system, name, *_ in NEW_ITEMS:
             self.assertEqual(self.store.item(G, by_id[system]["item"])["name"], name)
@@ -499,7 +504,7 @@ class ApplyDefaultTableTests(unittest.IsolatedAsyncioTestCase):
         await self.press(await self.ask_default())
         names = [r["name"] for r in self.store.items(G)]
         self.assertEqual((names.count("열쇠"), names.count("쓰레기")), (1, 1))
-        self.assertEqual(len(self.store.settings(G)["package_table"]), 11)
+        self.assertEqual(len(self.store.settings(G)["package_table"]), 12)
 
     async def test_pressing_twice_is_the_same_as_once(self):
         await self.press(await self.ask_default())
@@ -520,7 +525,7 @@ class ApplyDefaultTableTests(unittest.IsolatedAsyncioTestCase):
         from packages import open_package
         await self.press(await self.ask_default())
         self.store.create_package(G, 400, 9001, time.time() + 600, "all")
-        self.w.bot.rng.randoms.append(0.9999)                                             # 표의 맨 끝 = 수상한 액체가 담긴 병
+        self.w.bot.rng.randoms.append(0.9985)                                             # 부활권 바로 앞 = 수상한 액체가 담긴 병
         i = self.w.interaction(uid=5, message_id=9001)
         await open_package(i)
         self.assertIn("수상한 액체가 담긴 병", i.response.send_message.await_args.kwargs["embed"].title)

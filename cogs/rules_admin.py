@@ -12,7 +12,7 @@ from access import require_admin
 from cogs.admin import item_choices
 from confirm import Confirm
 from panel import refresh_panels
-from store import (MAX_CLEAR_REWARDS, MAX_PACKAGE_ENTRIES, NEW_ITEMS, PACKAGE_CANDY, StoreError, default_package_table,
+from store import (MAX_CLEAR_REWARDS, MAX_PACKAGE_ENTRIES, NEW_ITEMS, PACKAGE_CANDY, REVIVE_ITEM, StoreError, default_package_table,
                    valid_emoji)
 
 Choice = app_commands.Choice
@@ -143,12 +143,12 @@ class RulesAdmin(commands.Cog):
         store, gid = self.bot.store, interaction.guild_id
         store.ensure_defaults(gid)
         names = {"none": "꽝", "key": "열쇠", "candy": f"{store.currency(gid).name} {PACKAGE_CANDY}", "trash": "쓰레기",
-                 **{item[0]: item[1] for item in NEW_ITEMS}}
-        preview = default_package_table({"key": 0, "trash": 0}, {item[0]: 0 for item in NEW_ITEMS})
+                 **{item[0]: item[1] for item in NEW_ITEMS}, "revive": REVIVE_ITEM[0]}
+        preview = default_package_table({"key": 0, "trash": 0}, {item[0]: 0 for item in NEW_ITEMS}, revive_id=-1)
         lines = " · ".join(f"{names[e['id']]} {e['weight']:g}%" for e in preview)
         now = len(store.package_table(gid))
         text = (f"지금 결과표 **{now}칸**이 모두 사라지고 아래 기본 확률표로 바뀌어요. 직접 바꾼 확률·이름·아이콘도 기본값이 돼요.\n\n{lines}\n\n"
-                "• 열쇠·쓰레기·새 물품 7종 중 **없는 것만 만들어요**(있는 물품의 이름·가격은 그대로예요).\n"
+                "• 열쇠·쓰레기·새 물품 7종·부활권 중 **없는 것만 만들어요**(있는 물품의 이름·가격은 그대로예요).\n"
                 "• 가방·재화·상점·던전 설정은 바뀌지 않아요.\n• 쓰레기의 판매가는 `/물품수정`으로 따로 고쳐요.")
         await interaction.response.send_message(
             embed=theme.make_embed("📦 기본 확률표로 바꿀까요?", text, color=theme.RED),

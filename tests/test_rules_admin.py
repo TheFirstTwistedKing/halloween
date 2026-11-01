@@ -264,7 +264,7 @@ class PackageCommandTests(RulesFixture):
         items = await self.cog.pkg_item_autocomplete(self.ask(), "열")
         self.assertEqual([c.value for c in items], ["열쇠"])
         entry = await self.cog.entry_autocomplete(self.ask(), "")
-        self.assertEqual({c.value for c in entry}, {"열쇠", "쓰레기", *(item[1] for item in NEW_ITEMS)})
+        self.assertEqual({c.value for c in entry}, {"열쇠", "쓰레기", "부활권", *(item[1] for item in NEW_ITEMS)})
 
     def test_package_lines_note_unnormalized_totals(self):
         lines = package_lines(self.store, G)

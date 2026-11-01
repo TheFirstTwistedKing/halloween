@@ -15,6 +15,7 @@ Choice = app_commands.Choice
 TIERS = [Choice(name=t, value=t) for t in TIER_ORDER]
 SLOTS = [Choice(name="무기", value="weapon"), Choice(name="방패", value="shield")]
 LIST_CHOICES = [Choice(name=SECTION_LABELS[s], value=s) for s in SECTIONS]
+WEIGHT_HELP = "상자에서 나올 비율. 소수도 돼요(예: 0.5, 0.05). 다른 것들과의 비율로 계산하고 높을수록 자주 나와요"
 SELL_HELP = "던전 안에서 팔 때 받는 재화(개당). 0이면 팔 수 없어요. 비우면 그대로(추가할 땐 등급별 기본값)"
 SELL_TARGETS = [Choice(name="장비와 소모품 모두", value="both"), Choice(name="장비만", value="gear"), Choice(name="소모품만", value="consumables")]
 PERMS = dict(guild_only=True, default_permissions=discord.Permissions(administrator=True))
@@ -104,12 +105,12 @@ class ContentAdmin(commands.Cog):
     @gear.command(name="추가", description="장비를 새로 만들어요 (관리자)")
     @app_commands.rename(name="이름", emoji="이모지", slot="종류", tier="등급", weight="등장", attack="공격력", crit="크리티컬",
                          dodge="회피변환", guard="가드", reflect="반사", sell_price="판매가")
-    @app_commands.describe(slot="무기 / 방패", weight="상자에서 나올 비율(좋을수록 낮게)", attack="무기: 공격 피해 추가", crit="무기: 크리티컬(2배) 확률(%)",
+    @app_commands.describe(slot="무기 / 방패", weight=WEIGHT_HELP, attack="무기: 공격 피해 추가", crit="무기: 크리티컬(2배) 확률(%)",
                            dodge="무기: 잡몹의 회피 확률을 이 값으로 바꿔요(%)", guard="방패: 가드 성공 시 피해 감소(%)(필수)",
                            reflect="방패: 가드 성공 시 반사 피해(%)", sell_price=SELL_HELP)
     @app_commands.choices(slot=SLOTS, tier=TIERS)
     async def gear_add(self, interaction: discord.Interaction, name: str, emoji: str, slot: Choice[str], tier: Choice[str],
-                       weight: app_commands.Range[int, 0, 1000], attack: app_commands.Range[int, 0, 100000] = 0,
+                       weight: app_commands.Range[float, 0, 1000], attack: app_commands.Range[int, 0, 100000] = 0,
                        crit: app_commands.Range[int, 0, 100] = 0, dodge: app_commands.Range[int, 0, 95] | None = None,
                        guard: app_commands.Range[int, 0, 100] | None = None, reflect: app_commands.Range[int, 0, 500] | None = None,
                        sell_price: app_commands.Range[int, 0, SELL_MAX] | None = None):
@@ -125,10 +126,10 @@ class ContentAdmin(commands.Cog):
     @gear.command(name="수정", description="장비의 값을 고쳐요. 바꿀 것만 적으세요 (-1은 해제) (관리자)")
     @app_commands.rename(target="대상", new_name="새이름", emoji="이모지", tier="등급", weight="등장", attack="공격력", crit="크리티컬",
                          dodge="회피변환", guard="가드", reflect="반사", sell_price="판매가")
-    @app_commands.describe(sell_price=SELL_HELP)
+    @app_commands.describe(weight=WEIGHT_HELP, sell_price=SELL_HELP)
     @app_commands.choices(tier=TIERS)
     async def gear_edit(self, interaction: discord.Interaction, target: str, new_name: str | None = None, emoji: str | None = None,
-                        tier: Choice[str] | None = None, weight: app_commands.Range[int, 0, 1000] | None = None,
+                        tier: Choice[str] | None = None, weight: app_commands.Range[float, 0, 1000] | None = None,
                         attack: app_commands.Range[int, 0, 100000] | None = None, crit: app_commands.Range[int, 0, 100] | None = None,
                         dodge: app_commands.Range[int, -1, 95] | None = None, guard: app_commands.Range[int, 0, 100] | None = None,
                         reflect: app_commands.Range[int, -1, 500] | None = None,
@@ -161,11 +162,11 @@ class ContentAdmin(commands.Cog):
     @potion.command(name="추가", description="소모품을 새로 만들어요. 회복량·전체회복·지속회복 중 하나를 정해요 (관리자)")
     @app_commands.rename(name="이름", emoji="이모지", tier="등급", weight="등장", heal="회복량", full="전체회복", regen="지속회복량", turns="지속턴",
                          sell_price="판매가")
-    @app_commands.describe(weight="상자에서 나올 비율", heal="한 번에 회복하는 HP", full="HP를 전부 회복", regen="턴마다 회복하는 HP", turns="지속 회복이 이어지는 턴 수",
+    @app_commands.describe(weight=WEIGHT_HELP, heal="한 번에 회복하는 HP", full="HP를 전부 회복", regen="턴마다 회복하는 HP", turns="지속 회복이 이어지는 턴 수",
                            sell_price=SELL_HELP)
     @app_commands.choices(tier=TIERS)
     async def potion_add(self, interaction: discord.Interaction, name: str, emoji: str, tier: Choice[str],
-                         weight: app_commands.Range[int, 0, 1000], heal: app_commands.Range[int, 0, 100000] = 0, full: bool = False,
+                         weight: app_commands.Range[float, 0, 1000], heal: app_commands.Range[int, 0, 100000] = 0, full: bool = False,
                          regen: app_commands.Range[int, 0, 100000] = 0, turns: app_commands.Range[int, 0, 1000] = 0,
                          sell_price: app_commands.Range[int, 0, SELL_MAX] | None = None):
         def go():
@@ -179,10 +180,10 @@ class ContentAdmin(commands.Cog):
     @potion.command(name="수정", description="소모품의 값을 고쳐요. 효과를 바꾸면 이전 효과는 사라져요 (관리자)")
     @app_commands.rename(target="대상", new_name="새이름", emoji="이모지", tier="등급", weight="등장", heal="회복량", full="전체회복",
                          regen="지속회복량", turns="지속턴", sell_price="판매가")
-    @app_commands.describe(sell_price=SELL_HELP)
+    @app_commands.describe(weight=WEIGHT_HELP, sell_price=SELL_HELP)
     @app_commands.choices(tier=TIERS)
     async def potion_edit(self, interaction: discord.Interaction, target: str, new_name: str | None = None, emoji: str | None = None,
-                          tier: Choice[str] | None = None, weight: app_commands.Range[int, 0, 1000] | None = None,
+                          tier: Choice[str] | None = None, weight: app_commands.Range[float, 0, 1000] | None = None,
                           heal: app_commands.Range[int, 1, 100000] | None = None, full: bool | None = None,
                           regen: app_commands.Range[int, 1, 100000] | None = None, turns: app_commands.Range[int, 1, 1000] | None = None,
                           sell_price: app_commands.Range[int, 0, SELL_MAX] | None = None):

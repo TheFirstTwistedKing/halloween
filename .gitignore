@@ -1,0 +1,14 @@
+# 비밀 값: 봇 토큰이 들어 있는 .env는 절대 올리지 않는다
+.env
+
+# 운영 데이터(재화·가방·상점·던전 진행): 호스트에서 쌓이는 파일이라 저장소로 덮어쓰면 안 된다
+data/*.sqlite3
+data/*.sqlite3-wal
+data/*.sqlite3-shm
+data/*.db
+
+# 파이썬 캐시·가상환경
+__pycache__/
+*.pyc
+.venv/
+venv/

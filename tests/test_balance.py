@@ -251,7 +251,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.store.update_settings(G, dungeon={"보상.최소": 777, "보상.최대": 777, "보상.획득권확률": 0})
         run = (await service.enter(self.store, self.locks, G, U)).run
         data = json.loads(run.to_json())
-        data.update(room=dungeon.ROOMS, phase="cleared")
+        data.update(floor=dungeon.FLOORS, room=dungeon.ROOMS, phase="cleared")          # 마지막 층의 보스를 막 이긴 상태
         self.store.save_dungeon(G, U, json.dumps(data))
         done = await service.act(self.store, self.locks, Scripted(randoms=[0.0], ints=[777]), G, U, run.rev, "advance")
         self.assertEqual((done.ended, done.reward.candy, done.reward.ticket), ("clear", 777, False))
@@ -455,14 +455,21 @@ class SimulatorTests(unittest.TestCase):
         self.assertEqual(a, b)
         self.assertEqual(set(a), {"attack", "mixed", "defend"})
         for entry in a.values():
-            self.assertTrue(0 <= entry["clear"] <= 1 and 1 <= entry["avg_room"] <= 10)
+            self.assertTrue(0 <= entry["clear"] <= 1 and 1 <= entry["avg_room"] <= dungeon.FLOORS * dungeon.ROOMS)   # 처음부터 센 방 번호
             self.assertAlmostEqual(entry["clear"] + sum(entry["deaths"].values()), 1.0, places=9)
 
-    def test_matches_the_numbers_we_measured_by_hand(self):
-        """기본값에서 공격만 하면 약 70%, 방어를 섞으면 90% 안팎(손으로 따로 돌려 본 결과와 같은 범위)."""
-        result = balance_sim.simulate(Balance.build({}), 2000, seed=11)
+    def test_one_floor_matches_the_numbers_we_measured_by_hand(self):
+        """층수를 1로 하면 예전 던전(방 10개)과 같다: 공격만 하면 약 70%, 방어를 섞으면 90% 안팎(손으로 따로 돌려 본 결과와 같은 범위)."""
+        result = balance_sim.simulate(Balance.build({"일반.층수": 1}), 2000, seed=11)
         self.assertTrue(0.62 < result["attack"]["clear"] < 0.80, result["attack"]["clear"])
         self.assertTrue(0.82 < result["mixed"]["clear"] < 0.96, result["mixed"]["clear"])
+
+    def test_the_default_ten_floors_are_hard_but_possible(self):
+        """기본값(10층, 층당 +4%)은 어렵지만 깰 수 있다. 사람은 이 어림값보다 낮게 나온다."""
+        result = balance_sim.simulate(Balance.build({}), 1500, seed=11)
+        self.assertTrue(0.15 < result["attack"]["clear"] < 0.45, result["attack"]["clear"])
+        self.assertTrue(0.35 < result["mixed"]["clear"] < 0.65, result["mixed"]["clear"])
+        self.assertTrue(0.50 < result["defend"]["clear"] < 0.82, result["defend"]["clear"])
 
     def test_extreme_values_move_the_result_the_right_way(self):
         base = balance_sim.simulate(Balance.build({}), 400, seed=3)["attack"]["clear"]

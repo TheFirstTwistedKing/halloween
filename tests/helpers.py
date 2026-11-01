@@ -24,6 +24,15 @@ class Scripted:
         return self.ints.pop(0) if self.ints else low
 
 
+def pin_first_table(store, guild=100):
+    """패키지를 뜯는 방식(누가·몇 번·무엇을 받나)을 보는 시험은 확률 경계가 쉬운 처음 기본 표(꽝 60 · 열쇠 20 · 재화 10 · 쓰레기 10)로 고정한다.
+    지금의 기본 표 자체는 test_seed.py에서 따로 시험한다."""
+    from store import first_package_table
+    store.ensure_defaults(guild)
+    ids = store.ensure_system_items(guild)
+    store.update_settings(guild, package_table=first_package_table(ids))
+
+
 class FakeRole:
     def __init__(self, role_id, position=1, permissions=None, managed=False, default=False, name="역할"):
         self.id, self.position, self.managed, self.default, self.name = role_id, position, managed, default, name

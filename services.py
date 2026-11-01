@@ -87,7 +87,7 @@ async def _buy_role(store: Store, member, item) -> Result:
     return Result(True, f"{money(price, store.currency(guild.id))}을 내고 {item['emoji']} {role.mention} 역할을 받았어요!")
 
 
-async def sell(store: Store, locks: Locks, member, item, qty: int) -> Result:
+async def sell(store: Store, locks: Locks, member, item, qty: int, rng=None) -> Result:
     guild = member.guild
     async with locks.get(guild.id, member.id):
         item = store.item(guild.id, item["id"])
@@ -96,10 +96,15 @@ async def sell(store: Store, locks: Locks, member, item, qty: int) -> Result:
                 raise StoreError("이제 상점에 없는 물품이에요.")
             if item["kind"] == "role":
                 return await _sell_role(store, member, item)
-            total = store.sell_item(guild.id, member.id, item["id"], qty)
+            total = store.sell_item(guild.id, member.id, item["id"], qty, rng)
         except StoreError as exc:
             return Result(False, str(exc))
-        return Result(True, f"{item['emoji']} **{item['name']}** ×{qty}을(를) 팔고 {money(total, store.currency(guild.id))}을 받았어요.")
+        cur, what = store.currency(guild.id), f"{item['emoji']} **{item['name']}** ×{qty}"
+        if total < 0:
+            return Result(True, f"{what}을(를) 처리하면서 {money(-total, cur)}을 냈어요.")
+        if total == 0:
+            return Result(True, f"{what}을(를) 팔았지만 이번에는 받은 재화가 없어요. ({money(0, cur)})")
+        return Result(True, f"{what}을(를) 팔고 {money(total, cur)}을 받았어요.")
 
 
 async def _sell_role(store: Store, member, item) -> Result:

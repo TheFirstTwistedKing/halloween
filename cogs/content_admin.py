@@ -8,13 +8,15 @@ from discord.ext import commands
 import content
 import theme
 from access import require_admin
-from balance import SECTION_LABELS, SECTIONS, TIER_ORDER
+from balance import SECTION_LABELS, SECTIONS, SELL_MAX, TIER_ORDER
 from confirm import Confirm
 
 Choice = app_commands.Choice
 TIERS = [Choice(name=t, value=t) for t in TIER_ORDER]
 SLOTS = [Choice(name="무기", value="weapon"), Choice(name="방패", value="shield")]
 LIST_CHOICES = [Choice(name=SECTION_LABELS[s], value=s) for s in SECTIONS]
+SELL_HELP = "던전 안에서 팔 때 받는 재화(개당). 0이면 팔 수 없어요. 비우면 그대로(추가할 땐 등급별 기본값)"
+SELL_TARGETS = [Choice(name="장비와 소모품 모두", value="both"), Choice(name="장비만", value="gear"), Choice(name="소모품만", value="consumables")]
 PERMS = dict(guild_only=True, default_permissions=discord.Permissions(administrator=True))
 
 
@@ -101,34 +103,39 @@ class ContentAdmin(commands.Cog):
 
     @gear.command(name="추가", description="장비를 새로 만들어요 (관리자)")
     @app_commands.rename(name="이름", emoji="이모지", slot="종류", tier="등급", weight="등장", attack="공격력", crit="크리티컬",
-                         dodge="회피변환", guard="가드", reflect="반사")
+                         dodge="회피변환", guard="가드", reflect="반사", sell_price="판매가")
     @app_commands.describe(slot="무기 / 방패", weight="상자에서 나올 비율(좋을수록 낮게)", attack="무기: 공격 피해 추가", crit="무기: 크리티컬(2배) 확률(%)",
                            dodge="무기: 잡몹의 회피 확률을 이 값으로 바꿔요(%)", guard="방패: 가드 성공 시 피해 감소(%)(필수)",
-                           reflect="방패: 가드 성공 시 반사 피해(%)")
+                           reflect="방패: 가드 성공 시 반사 피해(%)", sell_price=SELL_HELP)
     @app_commands.choices(slot=SLOTS, tier=TIERS)
     async def gear_add(self, interaction: discord.Interaction, name: str, emoji: str, slot: Choice[str], tier: Choice[str],
                        weight: app_commands.Range[int, 0, 1000], attack: app_commands.Range[int, 0, 100000] = 0,
                        crit: app_commands.Range[int, 0, 100] = 0, dodge: app_commands.Range[int, 0, 95] | None = None,
-                       guard: app_commands.Range[int, 0, 100] | None = None, reflect: app_commands.Range[int, 0, 500] | None = None):
+                       guard: app_commands.Range[int, 0, 100] | None = None, reflect: app_commands.Range[int, 0, 500] | None = None,
+                       sell_price: app_commands.Range[int, 0, SELL_MAX] | None = None):
         def go():
-            entity = content.add(self.bot.store, interaction.guild_id, "gear", dict(
-                name=name, emoji=emoji.strip(), slot=slot.value, tier=tier.value, weight=weight, attack=attack, crit=crit,
-                dodge=dodge, guard=guard, reflect=reflect))
+            data = dict(name=name, emoji=emoji.strip(), slot=slot.value, tier=tier.value, weight=weight, attack=attack, crit=crit,
+                        dodge=dodge, guard=guard, reflect=reflect)
+            if sell_price is not None:                  # 비우면 등급별 기본 판매가
+                data["sell_price"] = sell_price
+            entity = content.add(self.bot.store, interaction.guild_id, "gear", data)
             return "gear", self._entity_dict(entity)
         await self._run(interaction, go, "➕ 만들었어요.")
 
     @gear.command(name="수정", description="장비의 값을 고쳐요. 바꿀 것만 적으세요 (-1은 해제) (관리자)")
     @app_commands.rename(target="대상", new_name="새이름", emoji="이모지", tier="등급", weight="등장", attack="공격력", crit="크리티컬",
-                         dodge="회피변환", guard="가드", reflect="반사")
+                         dodge="회피변환", guard="가드", reflect="반사", sell_price="판매가")
+    @app_commands.describe(sell_price=SELL_HELP)
     @app_commands.choices(tier=TIERS)
     async def gear_edit(self, interaction: discord.Interaction, target: str, new_name: str | None = None, emoji: str | None = None,
                         tier: Choice[str] | None = None, weight: app_commands.Range[int, 0, 1000] | None = None,
                         attack: app_commands.Range[int, 0, 100000] | None = None, crit: app_commands.Range[int, 0, 100] | None = None,
                         dodge: app_commands.Range[int, -1, 95] | None = None, guard: app_commands.Range[int, 0, 100] | None = None,
-                        reflect: app_commands.Range[int, -1, 500] | None = None):
+                        reflect: app_commands.Range[int, -1, 500] | None = None,
+                        sell_price: app_commands.Range[int, 0, SELL_MAX] | None = None):
         def go():
             changes = dict(name=new_name, emoji=emoji and emoji.strip(), tier=tier and tier.value, weight=weight, attack=attack,
-                           crit=crit, guard=guard)
+                           crit=crit, guard=guard, sell_price=sell_price)
             changes = {k: v for k, v in changes.items() if v is not None}
             if dodge is not None:                       # -1은 '해제'(None)
                 changes["dodge"] = None if dodge < 0 else dodge
@@ -152,28 +159,35 @@ class ContentAdmin(commands.Cog):
     potion = app_commands.Group(name="소모품", description="던전 소모품(회복 아이템)을 더하고 빼고 바꿔요 (관리자)", **PERMS)
 
     @potion.command(name="추가", description="소모품을 새로 만들어요. 회복량·전체회복·지속회복 중 하나를 정해요 (관리자)")
-    @app_commands.rename(name="이름", emoji="이모지", tier="등급", weight="등장", heal="회복량", full="전체회복", regen="지속회복량", turns="지속턴")
-    @app_commands.describe(weight="상자에서 나올 비율", heal="한 번에 회복하는 HP", full="HP를 전부 회복", regen="턴마다 회복하는 HP", turns="지속 회복이 이어지는 턴 수")
+    @app_commands.rename(name="이름", emoji="이모지", tier="등급", weight="등장", heal="회복량", full="전체회복", regen="지속회복량", turns="지속턴",
+                         sell_price="판매가")
+    @app_commands.describe(weight="상자에서 나올 비율", heal="한 번에 회복하는 HP", full="HP를 전부 회복", regen="턴마다 회복하는 HP", turns="지속 회복이 이어지는 턴 수",
+                           sell_price=SELL_HELP)
     @app_commands.choices(tier=TIERS)
     async def potion_add(self, interaction: discord.Interaction, name: str, emoji: str, tier: Choice[str],
                          weight: app_commands.Range[int, 0, 1000], heal: app_commands.Range[int, 0, 100000] = 0, full: bool = False,
-                         regen: app_commands.Range[int, 0, 100000] = 0, turns: app_commands.Range[int, 0, 1000] = 0):
+                         regen: app_commands.Range[int, 0, 100000] = 0, turns: app_commands.Range[int, 0, 1000] = 0,
+                         sell_price: app_commands.Range[int, 0, SELL_MAX] | None = None):
         def go():
-            entity = content.add(self.bot.store, interaction.guild_id, "consumables", dict(
-                name=name, emoji=emoji.strip(), tier=tier.value, weight=weight, heal=heal, full=full, regen=regen, regen_turns=turns))
+            data = dict(name=name, emoji=emoji.strip(), tier=tier.value, weight=weight, heal=heal, full=full, regen=regen, regen_turns=turns)
+            if sell_price is not None:                  # 비우면 등급별 기본 판매가
+                data["sell_price"] = sell_price
+            entity = content.add(self.bot.store, interaction.guild_id, "consumables", data)
             return "consumables", self._entity_dict(entity)
         await self._run(interaction, go, "➕ 만들었어요.")
 
     @potion.command(name="수정", description="소모품의 값을 고쳐요. 효과를 바꾸면 이전 효과는 사라져요 (관리자)")
     @app_commands.rename(target="대상", new_name="새이름", emoji="이모지", tier="등급", weight="등장", heal="회복량", full="전체회복",
-                         regen="지속회복량", turns="지속턴")
+                         regen="지속회복량", turns="지속턴", sell_price="판매가")
+    @app_commands.describe(sell_price=SELL_HELP)
     @app_commands.choices(tier=TIERS)
     async def potion_edit(self, interaction: discord.Interaction, target: str, new_name: str | None = None, emoji: str | None = None,
                           tier: Choice[str] | None = None, weight: app_commands.Range[int, 0, 1000] | None = None,
                           heal: app_commands.Range[int, 1, 100000] | None = None, full: bool | None = None,
-                          regen: app_commands.Range[int, 1, 100000] | None = None, turns: app_commands.Range[int, 1, 1000] | None = None):
+                          regen: app_commands.Range[int, 1, 100000] | None = None, turns: app_commands.Range[int, 1, 1000] | None = None,
+                          sell_price: app_commands.Range[int, 0, SELL_MAX] | None = None):
         def go():
-            changes = dict(name=new_name, emoji=emoji and emoji.strip(), tier=tier and tier.value, weight=weight)
+            changes = dict(name=new_name, emoji=emoji and emoji.strip(), tier=tier and tier.value, weight=weight, sell_price=sell_price)
             changes = {k: v for k, v in changes.items() if v is not None}
             if full:                                    # 효과는 하나만: 새 효과를 정하면 이전 효과를 지운다.
                 changes.update(full=True, heal=0, regen=0, regen_turns=0)
@@ -198,6 +212,32 @@ class ContentAdmin(commands.Cog):
     @potion_delete.autocomplete("target")
     async def potion_names(self, interaction: discord.Interaction, current: str):
         return names_for(self.bot.store, interaction.guild_id, ("consumables",), current) if interaction.guild_id else []
+
+    # ---------------------------------------------------------------- 판매가 일괄 설정
+    @app_commands.command(name="던전판매가", description="던전 장비·소모품의 판매가를 한꺼번에 바꿔요. 0이면 팔 수 없어요 (관리자)")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.rename(price="가격", target="대상", tier="등급")
+    @app_commands.describe(price="개당 판매가(재화). 0이면 팔 수 없어요", target="어느 쪽을 바꿀까요? (비우면 둘 다)",
+                           tier="이 등급만 바꿔요 (비우면 모든 등급)")
+    @app_commands.choices(target=SELL_TARGETS, tier=TIERS)
+    async def sell_price_bulk(self, interaction: discord.Interaction, price: app_commands.Range[int, 0, SELL_MAX],
+                              target: Choice[str] | None = None, tier: Choice[str] | None = None):
+        if not await require_admin(interaction):
+            return
+        which = target.value if target else "both"
+        sections = ("gear", "consumables") if which == "both" else (which,)
+        try:
+            changed = content.set_sell_price(self.bot.store, interaction.guild_id, sections, price, tier.value if tier else None)
+        except content.ContentError as exc:
+            await self._deny(interaction, str(exc))
+            return
+        cur = self.bot.store.currency(interaction.guild_id)
+        parts = " · ".join(f"{SECTION_LABELS[sec]} {count}개" for sec, count in changed.items())
+        scope = f"{tier.value} 등급 " if tier else ""
+        result = "이제 팔 수 없어요." if price == 0 else f"개당 {cur.money(price)}에 팔 수 있어요."
+        await interaction.response.send_message(embed=theme.notice(
+            f"💰 {scope}{parts}의 판매가를 바꿨어요. {result}\n하나씩 고치려면 `/장비 수정` `/소모품 수정`의 판매가를 쓰세요."), ephemeral=True)
 
     # ---------------------------------------------------------------- 목록 · 초기화
     @app_commands.command(name="던전목록", description="던전의 몬스터·보스·장비·소모품을 모두 봐요 (관리자)")

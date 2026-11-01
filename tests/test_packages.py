@@ -11,17 +11,20 @@ import packages
 from packages import PKG_OPEN_ID, PKG_SKIP_ID, PackageView, apply_reward, finalize_due, open_package
 from panel import SHOP_BAG_ID, SHOP_SELECT_ID, ShopPanelView
 from store import CANDY_MAX, PACKAGE_CANDY
-from tests.helpers import Scripted, World
+from tests.helpers import Scripted, World, pin_first_table
 
 NOW = time.time()
 
 
 class PackageFixture(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        global NOW
+        NOW = time.time()          # 시험마다 지금 시각으로 다시 잡는다(불러온 시각 기준이면 전체 시험이 10초를 넘길 때 패키지가 미리 만료된다).
         self.w = World()
         self.channel = self.w.channel(400)
         self.w.bot.get_channel = lambda cid: self.w.channels.get(cid)
         self.store = self.w.store
+        pin_first_table(self.store)
 
     async def asyncTearDown(self):
         await self.w.close()
@@ -217,6 +220,7 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
     async def test_a_package_posted_before_a_restart_can_still_be_opened(self):
         w = World()
         try:
+            pin_first_table(w.store)
             w.store.create_package(100, 400, 9001, NOW + 600, "all")
             restarted = World(Scripted([0.65]))                    # 봇을 다시 켠 것처럼 새 봇 객체
             restarted.store.db.close()

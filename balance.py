@@ -11,7 +11,10 @@ from dataclasses import asdict, dataclass, field, replace
 # ---------------------------------------------------------------- 기본값
 MAX_HP = 1000
 BASE_DAMAGE = 20                 # 맨손 공격력
-ROOMS = 10                       # 방은 10번(고정)
+ROOMS = 10                       # 한 층의 방은 10개(고정). 10번째 방은 미니 보스
+FLOORS = 10                      # 올라가야 하는 층 수. 마지막 층의 보스를 이기면 클리어
+FLOOR_SCALE = 4                  # 층이 하나 오를 때마다 몬스터·보스의 체력과 공격이 1층의 몇 %씩 늘어나는지
+FLOOR_HEAL = 50                  # 위 층으로 올라갈 때 잃은 HP의 몇 %를 회복하는지
 BASE_DODGE = 10                  # 잡몹 기본 회피 10% (보스는 회피 불가)
 GUARD_BASE = 60                  # 가드 성공 시 피해 60% 감소(방패가 없을 때)
 GUARD_CHANCE = 60                # 방어 버튼을 눌렀을 때 가드에 성공할 확률(%)
@@ -20,6 +23,8 @@ REFLECT_BASE = 30                # 가드 성공 시 그 공격 피해의 이 %�
 CLEAR_CANDY = (50, 150)          # 클리어 보상 재화(최소, 최대)
 TICKET_CHANCE = 10               # 클리어했을 때 히든 칭호 획득권이 나올 확률(%)
 TIER_ORDER = {"일반": 0, "희귀": 1, "전설": 2}
+SELL_DEFAULT = {"일반": 5, "희귀": 15, "전설": 50}     # 던전 장비·소모품의 기본 판매가(등급별). 0이면 팔 수 없다.
+SELL_MAX = 1_000_000_000
 
 ROOM_KINDS = (("chest", "상자"), ("empty", "빈방"), ("monster", "잡몹"), ("boss", "보스"))
 # 방 배치: 1~10번째 방 각각의 추첨표((종류, 가중치)). 홀수 방은 상자, 짝수 방은 빈 방 또는 잡몹, 마지막 방은 미니 보스.
@@ -43,6 +48,7 @@ class Gear:
     guard: int | None = None     # 가드 피해 감소(%)
     reflect: int | None = None   # 가드 성공 시 반사 피해(%). 없으면 REFLECT_BASE
     description: str = ""
+    sell_price: int = 0          # 던전 안에서 팔 때 받는 재화(개당). 0이면 팔 수 없다.
 
 
 @dataclass(frozen=True)
@@ -57,6 +63,7 @@ class Consumable:
     regen: int = 0               # 턴이 지날 때마다 회복하는 양
     regen_turns: int = 0
     description: str = ""
+    sell_price: int = 0          # 던전 안에서 팔 때 받는 재화(개당). 0이면 팔 수 없다.
 
 
 @dataclass(frozen=True)
@@ -94,11 +101,13 @@ def describe_item(item: Consumable) -> str:
 
 
 def _gear(*args, **kwargs) -> Gear:
+    kwargs.setdefault("sell_price", SELL_DEFAULT[args[4]])        # args[4]는 등급
     gear = Gear(*args, **kwargs)
     return replace(gear, description=describe_gear(gear))
 
 
 def _item(*args, **kwargs) -> Consumable:
+    kwargs.setdefault("sell_price", SELL_DEFAULT[args[3]])        # args[3]은 등급
     item = Consumable(*args, **kwargs)
     return replace(item, description=describe_item(item))
 
@@ -192,7 +201,8 @@ def check_entity(section: str, data) -> tuple[object | None, str | None]:
         slot = data.get("slot")
         if slot not in ("weapon", "shield"):
             return None, "장비 종류는 무기·방패 중 하나여야 해요."
-        n, problem = numbers(("weight", 0, 1000, 0), ("attack", 0, 100000, 0), ("crit", 0, 100, 0))
+        n, problem = numbers(("weight", 0, 1000, 0), ("attack", 0, 100000, 0), ("crit", 0, 100, 0),
+                             ("sell_price", 0, SELL_MAX, SELL_DEFAULT[tier]))
         if problem:
             return None, problem
         extra = {}
@@ -208,9 +218,10 @@ def check_entity(section: str, data) -> tuple[object | None, str | None]:
             if extra["guard"] is None:
                 return None, "방패에는 가드(피해 감소 %)가 필요해요."
         gear = Gear(key, name, emoji, slot, tier, n["weight"], attack=n["attack"], crit=n["crit"], dodge=extra["dodge"],
-                    guard=extra["guard"], reflect=extra["reflect"])
+                    guard=extra["guard"], reflect=extra["reflect"], sell_price=n["sell_price"])
         return replace(gear, description=describe_gear(gear)), None
-    n, problem = numbers(("weight", 0, 1000, 0), ("heal", 0, 100000, 0), ("regen", 0, 100000, 0), ("regen_turns", 0, 1000, 0))
+    n, problem = numbers(("weight", 0, 1000, 0), ("heal", 0, 100000, 0), ("regen", 0, 100000, 0), ("regen_turns", 0, 1000, 0),
+                         ("sell_price", 0, SELL_MAX, SELL_DEFAULT[tier]))
     if problem:
         return None, problem
     full = data.get("full", False)
@@ -226,7 +237,8 @@ def check_entity(section: str, data) -> tuple[object | None, str | None]:
         return None, "회복량·전체 회복·지속 회복 중 하나는 있어야 해요."
     else:
         n["regen_turns"] = 0
-    item = Consumable(key, name, emoji, tier, n["weight"], heal=n["heal"], full=full, regen=n["regen"], regen_turns=n["regen_turns"])
+    item = Consumable(key, name, emoji, tier, n["weight"], heal=n["heal"], full=full, regen=n["regen"], regen_turns=n["regen_turns"],
+                      sell_price=n["sell_price"])
     return replace(item, description=describe_item(item)), None
 
 
@@ -248,6 +260,11 @@ def clean_content(content) -> dict[str, tuple]:
             items.append(entity)
         out[section] = tuple(items)
     return out
+
+
+def floor_scaled(value: int, floor: int, percent: int) -> int:
+    """floor층에서의 능력치. 1층은 그대로, 한 층 오를 때마다 percent%씩(1층 기준) 늘어난다(반올림)."""
+    return (value * (100 + percent * (max(floor, 1) - 1)) + 50) // 100
 
 
 def reduce_damage(damage: int, percent: int) -> int:
@@ -284,6 +301,9 @@ def _build_params() -> dict[str, Param]:
     add("방어.기본피해감소", "일반", GUARD_BASE, 0, 100, note="방패가 없을 때 가드 성공 시 피해 감소(%)")
     add("방어.회복률", "일반", GUARD_HEAL, 0, 500, note="가드 성공 시 그 공격 피해의 몇 %만큼 HP를 회복할지. 높으면 방어만 반복해 HP를 채울 수 있어요")
     add("방어.기본반사", "일반", REFLECT_BASE, 0, 500, note="방패가 없을 때 가드 성공 시 반사 피해(%)")
+    add("일반.층수", "일반", FLOORS, 1, 100, note="올라가야 하는 층 수(한 층은 방 10개). 마지막 층의 보스를 이기면 클리어")
+    add("일반.층당강화", "일반", FLOOR_SCALE, 0, 200, note="층이 하나 오를 때마다 몬스터·보스의 체력과 공격이 1층의 몇 %씩 늘어날지(0이면 그대로)")
+    add("일반.층이동회복", "일반", FLOOR_HEAL, 0, 100, note="위 층으로 올라갈 때 잃은 HP의 몇 %를 회복할지")
     add("보상.최소", "일반", CLEAR_CANDY[0], 0, 99999, note="클리어 보상 재화 최소")
     add("보상.최대", "일반", CLEAR_CANDY[1], 0, 99999, note="클리어 보상 재화 최대")
     add("보상.획득권확률", "일반", TICKET_CHANCE, 0, 100, integer=False, note="클리어했을 때 히든 칭호 획득권이 나올 확률(%)")
@@ -370,6 +390,9 @@ fmt = _fmt
 class Balance:
     """던전이 실제로 쓰는 값 한 벌. Balance.build({})는 기본값이다."""
     max_hp: int = MAX_HP
+    floors: int = FLOORS
+    floor_scale: int = FLOOR_SCALE
+    floor_heal: int = FLOOR_HEAL
     base_damage: int = BASE_DAMAGE
     guard_chance: int = GUARD_CHANCE
     guard_base: int = GUARD_BASE
@@ -426,7 +449,8 @@ class Balance:
                                  dodge=get(f"몬스터.{m.name}.회피")) for m in MONSTERS)
         bosses = tuple(replace(b, hp=get(f"보스.{b.name}.체력"), damage=get(f"보스.{b.name}.공격")) for b in BOSSES)
         return cls(
-            max_hp=get("일반.최대체력"), base_damage=get("일반.맨손공격력"), guard_chance=get("방어.성공확률"),
+            max_hp=get("일반.최대체력"), floors=get("일반.층수"), floor_scale=get("일반.층당강화"), floor_heal=get("일반.층이동회복"),
+            base_damage=get("일반.맨손공격력"), guard_chance=get("방어.성공확률"),
             guard_base=get("방어.기본피해감소"), guard_heal=get("방어.회복률"), reflect_base=get("방어.기본반사"),
             clear_candy=(get("보상.최소"), get("보상.최대")), ticket_chance=get("보상.획득권확률"), room_plan=plan,
             monsters=custom.get("monsters", monsters), bosses=custom.get("bosses", bosses),

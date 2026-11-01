@@ -8,7 +8,7 @@ from __future__ import annotations
 import secrets
 
 import balance
-from balance import SECTION_LABELS, SECTION_LIMITS, SECTIONS, Balance, check_entity, entity_dict
+from balance import SECTION_LABELS, SECTION_LIMITS, SECTIONS, TIER_ORDER, Balance, check_entity, entity_dict
 from store import Store, valid_emoji
 
 # 구역별로 /던전설정 숫자 항목의 이름표(구역을 직접 편집하면 그 숫자는 쓰이지 않으므로 같이 정리한다)
@@ -109,6 +109,27 @@ def delete(store: Store, guild: int, sections, name: str):
     return section, data
 
 
+def set_sell_price(store: Store, guild: int, sections, price: int, tier: str | None = None) -> dict[str, int]:
+    """장비·소모품의 판매가를 한꺼번에 바꾼다. tier를 주면 그 등급만, 없으면 전부. 0이면 팔 수 없다.
+    구역마다 바뀐 개수를 {구역: 개수}로 돌려준다. 바꿀 대상이 하나도 없으면 ContentError."""
+    if tier is not None and tier not in TIER_ORDER:
+        raise ContentError("등급은 일반·희귀·전설 중 하나여야 해요.")
+    changed: dict[str, int] = {}
+    for section in sections:
+        if section not in ("gear", "consumables"):
+            raise ContentError("판매가는 장비와 소모품에만 있어요.")
+        items = current(store, guild, section)
+        hits = [d for d in items if tier is None or d.get("tier", "일반") == tier]
+        if not hits:
+            continue
+        new = [entity_dict(_check(section, {**d, "sell_price": price})) if d in hits else d for d in items]
+        _commit(store, guild, section, new)
+        changed[section] = len(hits)
+    if not changed:
+        raise ContentError("바꿀 장비·소모품이 없어요." if tier is None else f"{tier} 등급인 장비·소모품이 없어요.")
+    return changed
+
+
 def reset(store: Store, guild: int, sections=SECTIONS) -> int:
     """구역을 기본 표로 되돌린다(바꾼 구역 수를 돌려준다). 기본 표는 /던전설정으로 바꾼 숫자와 합쳐지므로 그 숫자도 함께 지운다."""
     cfg = store.settings(guild)
@@ -126,4 +147,5 @@ def describe(section: str, data: dict) -> str:
     if section in ("monsters", "bosses"):
         dodge = "" if section == "bosses" else f" · 회피 {entity.dodge}%"
         return f"{head} — HP {entity.hp:,} · 공격 {entity.damage:,}{dodge}"
-    return f"{head} ({entity.tier}) — {entity.description} · 등장 {entity.weight}"
+    sell = f"판매 {entity.sell_price:,}" if entity.sell_price else "판매 불가"
+    return f"{head} ({entity.tier}) — {entity.description} · 등장 {entity.weight} · {sell}"

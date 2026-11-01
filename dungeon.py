@@ -8,9 +8,9 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass, field
 
-from balance import (BASE_DAMAGE, BASE_DODGE, BOSSES, CLEAR_CANDY, CONSUMABLES, DEFAULT, GEAR, GUARD_BASE,  # noqa: F401  (다시 내보냄)
-                     GUARD_CHANCE, GUARD_HEAL, MAX_HP, MONSTERS, REFLECT_BASE, ROOM_PLAN, ROOMS, TICKET_CHANCE,
-                     TIER_ORDER, Balance, Consumable, Gear, Monster, reduce_damage)
+from balance import (BASE_DAMAGE, BASE_DODGE, BOSSES, CLEAR_CANDY, CONSUMABLES, DEFAULT, FLOOR_HEAL, FLOOR_SCALE, FLOORS,  # noqa: F401  (다시 내보냄)
+                     GEAR, GUARD_BASE, GUARD_CHANCE, GUARD_HEAL, MAX_HP, MONSTERS, REFLECT_BASE, ROOM_PLAN, ROOMS,
+                     TICKET_CHANCE, TIER_ORDER, Balance, Consumable, Gear, Monster, floor_scaled, reduce_damage)
 
 GEAR_BY_KEY = {g.key: g for g in GEAR}          # 기본값 표(이름·이모지 조회용). 실제 수치는 bal에서 읽는다.
 ITEM_BY_KEY = {c.key: c for c in CONSUMABLES}
@@ -36,7 +36,8 @@ def pick_weighted(rng, table):
 class Run:
     """진행 중인 던전 하나. JSON으로 저장·복원된다."""
     hp: int = MAX_HP
-    room: int = 0
+    floor: int = 1                # 지금 층(1부터). 예전에 저장된 던전에는 없어서 1층으로 읽는다.
+    room: int = 0                 # 이 층에서 몇 번째 방인지(1~ROOMS)
     phase: str = "cleared"        # battle | guard | empty | chest | chest_done | cleared | dead | clear | quit
     kind: str = ""                # monster | boss | empty | chest
     enemy: dict | None = None
@@ -52,6 +53,11 @@ class Run:
 
     def bump(self) -> None:
         self.rev += 1
+
+    @property
+    def stage(self) -> int:
+        """처음부터 세어 몇 번째 방인지(시뮬레이터 통계용). 1층 3번째 방이면 3, 2층 1번째 방이면 ROOMS + 1."""
+        return (max(self.floor, 1) - 1) * ROOMS + self.room
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), ensure_ascii=False)
@@ -149,18 +155,30 @@ def roll_room(rng, room: int, bal: Balance | None = None) -> str:
     return table[-1][0]
 
 
-def _spawn(monster: Monster) -> dict:
-    return {"key": monster.key, "name": monster.name, "emoji": monster.emoji, "hp": monster.hp, "max_hp": monster.hp,
-            "damage": monster.damage, "dodge": monster.dodge, "boss": monster.boss, "stunned": False}
+def _spawn(monster: Monster, floor: int = 1, bal: Balance | None = None) -> dict:
+    """몬스터를 floor층에 맞게 만든다. 체력과 공격은 층마다 floor_scale%씩 늘어난다(회피는 그대로)."""
+    percent = (bal or DEFAULT).floor_scale
+    hp = max(1, floor_scaled(monster.hp, floor, percent))
+    return {"key": monster.key, "name": monster.name, "emoji": monster.emoji, "hp": hp, "max_hp": hp,
+            "damage": floor_scaled(monster.damage, floor, percent), "dodge": monster.dodge, "boss": monster.boss, "stunned": False}
 
 
 def advance(run: Run, rng, bal: Balance | None = None) -> list[str]:
-    """다음 방으로 간다. 마지막 방(10번째)을 마쳤다면 던전이 끝난다."""
+    """다음 방으로 간다. 한 층의 마지막 방(10번째, 보스)을 마쳤다면 위 층의 1번째 방으로 올라가고(잃은 HP를 일부 회복),
+    마지막 층이라면 던전이 끝난다."""
     bal = bal or DEFAULT
+    climb: list[str] = []
     if run.room >= ROOMS:
-        run.phase, run.enemy, run.kind = "clear", None, ""
-        run.events = ["🏆 던전의 끝에 도착했어요!"]
-        return run.events
+        if run.floor >= bal.floors:
+            run.phase, run.enemy, run.kind = "clear", None, ""
+            run.events = [f"🏆 {bal.floors}층 꼭대기에 도착했어요! 던전을 모두 돌파했어요!"]
+            return run.events
+        run.floor += 1
+        run.room = 0
+        healed = (bal.max_hp - run.hp) * bal.floor_heal // 100
+        run.hp = min(bal.max_hp, run.hp + max(0, healed))
+        climb = [f"⬆️ **{run.floor}층**으로 올라왔어요!" + (f" 숨을 돌려 HP +{healed}" if healed > 0 else "")
+                 + (f" 몬스터는 1층의 {floor_scaled(100, run.floor, bal.floor_scale)}% 수준이에요." if bal.floor_scale else "")]
     run.room += 1
     run.kind, run.enemy = roll_room(rng, run.room, bal), None
     if run.kind in ("monster", "boss") and not (bal.bosses if run.kind == "boss" else bal.monsters):
@@ -168,14 +186,14 @@ def advance(run: Run, rng, bal: Balance | None = None) -> list[str]:
     if run.kind in ("monster", "boss"):
         table = bal.bosses if run.kind == "boss" else bal.monsters
         monster = table[rng.randint(0, len(table) - 1)]
-        run.enemy, run.phase = _spawn(monster), "battle"
+        run.enemy, run.phase = _spawn(monster, run.floor, bal), "battle"
         text = (f"👑 미니 보스의 방! **{monster.name}**이(가) 나타났어요!" if monster.boss
                 else f"⚠️ 몬스터 조우! **{monster.name}**이(가) 나타났어요!")
     elif run.kind == "chest":
         run.phase, text = "chest", "🎁 보물 상자가 놓여 있는 방이에요."
     else:
         run.phase, text = "empty", "🚪 텅 빈 방이에요. 앞으로 나아갈 수 있어요."
-    run.events = [text]
+    run.events = [*climb, text]
     return run.events
 
 
@@ -343,6 +361,61 @@ def discard_pending(run: Run, bal: Balance | None = None) -> list[str]:
     run.pending_gear = None
     run.events = [f"🗑️ {gear.emoji} **{gear.name}**을(를) 버렸어요."]
     return run.events
+
+
+SELL_MODES = ("all", "one", "items")      # all: 고른 것 전부 · one: 고른 소모품을 1개씩 · items: 팔 수 있는 소모품 전부
+
+
+def sellable(run: Run, bal: Balance | None = None) -> list[dict]:
+    """지금 팔 수 있는 것(판매가 1 이상). 상자에서 나와 아직 정하지 않은 장비, 장착 중인 장비, 소지품의 소모품 순서다.
+    id: pending / weapon / shield / item:<key>. 관리자가 지웠거나 판매가를 0으로 한 것은 나오지 않는다."""
+    bal = bal or DEFAULT
+    out = []
+    for slot, key, tag in (("pending", run.pending_gear, "새 장비"), ("weapon", run.weapon, "장착 중"), ("shield", run.shield, "장착 중")):
+        gear = bal.gear_by_key.get(key) if key else None
+        if gear and gear.sell_price > 0:
+            out.append({"id": slot, "kind": "gear", "name": gear.name, "emoji": gear.emoji, "qty": 1, "price": gear.sell_price, "tag": tag})
+    for key, qty in run.items.items():
+        item = bal.item_by_key.get(key)
+        if item and item.sell_price > 0 and qty > 0:
+            out.append({"id": f"item:{key}", "kind": "item", "name": item.name, "emoji": item.emoji, "qty": qty,
+                        "price": item.sell_price, "tag": item.tier})
+    return out
+
+
+def sell(run: Run, picks, mode: str = "all", bal: Balance | None = None) -> tuple[int, list[tuple[dict, int]]]:
+    """던전 안에서 장비·소모품을 판다. 고른 것(picks: sellable의 id 목록)을 run에서 빼고 (받을 재화 합계, [(항목, 판 개수)])를 돌려준다.
+    싸우는 중이거나 끝난 던전에서는 팔 수 없다. 재화를 실제로 주는 건 호출하는 쪽(저장소)이다."""
+    bal = bal or DEFAULT
+    if run.finished:
+        raise DungeonError("끝난 던전에서는 팔 수 없어요.")
+    if run.in_battle:
+        raise DungeonError("싸우는 중에는 팔 수 없어요. 싸움이 끝난 뒤에 팔아 주세요.")
+    if mode not in SELL_MODES:
+        raise DungeonError("알 수 없는 판매 방식이에요.")
+    entries = {e["id"]: e for e in sellable(run, bal)}
+    if mode == "items":
+        picks = [i for i, e in entries.items() if e["kind"] == "item"]
+    chosen = [entries[i] for i in dict.fromkeys(picks) if i in entries]
+    if not chosen:
+        raise DungeonError("팔 수 있는 걸 골라 주세요. (판매가가 0인 것은 팔 수 없어요)")
+    total, sold = 0, []
+    for entry in chosen:
+        qty = entry["qty"] if entry["kind"] == "item" and mode != "one" else 1
+        total += entry["price"] * qty
+        sold.append((entry, qty))
+        if entry["id"] == "pending":
+            run.pending_gear = None
+        elif entry["id"] == "weapon":
+            run.weapon = None
+        elif entry["id"] == "shield":
+            run.shield = None
+        else:
+            key = entry["id"].split(":", 1)[1]
+            run.items[key] -= qty
+            if run.items[key] <= 0:
+                del run.items[key]
+    return total, sold
 
 
 def roll_guard(rng, bal: Balance | None = None) -> bool:

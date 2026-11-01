@@ -14,6 +14,10 @@ from tests.helpers import FakeRole, World, sent_embed
 
 Choice = discord.app_commands.Choice
 
+from store import NEW_ITEMS
+
+NEW_NAMES = [item[1] for item in NEW_ITEMS]
+
 
 class CommandFixture(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -189,7 +193,7 @@ class GrantTests(CommandFixture):
         self.store.create_item(100, "VIP", kind="role", role_id=50, buyable=True, buy_price=5)
         self.store.create_item(100, "초", emoji="🕯️")
         choices = await self.admin.give_item_autocomplete(self.ask(), "")
-        self.assertEqual([c.value for c in choices], ["초", "열쇠", "쓰레기"])             # 만들어진 순서
+        self.assertEqual([c.value for c in choices], ["초", "열쇠", "쓰레기", *NEW_NAMES])   # 만들어진 순서
         self.assertEqual(choices[1].name, "🗝️ 열쇠")
         self.assertEqual([c.value for c in await self.admin.give_item_autocomplete(self.ask(), "쓰")], ["쓰레기"])
         self.assertEqual(await self.admin.give_item_autocomplete(NS(guild_id=None), "x"), [])
@@ -331,13 +335,16 @@ class ItemManagementTests(CommandFixture):
         self.assertIn("🕯️ **초** · 구입 🍬 5 · 판매 ❌", text)
         self.assertIn("**유령 손님** `역할` · 구입 ❌ · 판매 🍬 9", text)
         self.assertIn("🗝️ **열쇠** · 구입 ❌ · 판매 ❌", text)
-        self.assertIn("상점에 진열 2/25", text)
+        self.assertIn("🗑️ **쓰레기** · 구입 ❌ · 판매 🍬 -20 ~ 20", text)                 # 판매가 범위
+        self.assertIn("🥃 **깨진 유리조각** · 구입 ❌ · 판매 🍬 -150", text)                # 팔 때 재화를 내는 물품
+        self.assertIn("🧙 **마녀 모자** · 구입 ❌ · 판매 🍬 100", text)
+        self.assertIn("상점에 진열 10/25", text)                                        # 초 + 역할 + 쓰레기 + 새 물품 7종
 
     async def test_item_autocomplete(self):
         self.store.create_item(100, "호박 초")
         choices = await self.shop.item_autocomplete(self.ask(), "호박")
         self.assertEqual([c.value for c in choices], ["호박 초"])
-        self.assertEqual([c.value for c in await self.shop.item_autocomplete(self.ask(), "")], ["호박 초", "열쇠", "쓰레기"])
+        self.assertEqual([c.value for c in await self.shop.item_autocomplete(self.ask(), "")], ["호박 초", "열쇠", "쓰레기", *NEW_NAMES])
         self.assertEqual(await self.shop.item_autocomplete(NS(guild_id=None), ""), [])
 
 
@@ -405,7 +412,8 @@ class EconomyCommandTests(CommandFixture):
         self.assertIn("**0.1%** 확률로 패키지", text)
         self.assertIn("누구나 한 번씩", text)
         self.assertNotIn("EXP", text)
-        self.assertIn("👻 꽝 60% · 🗝️ 열쇠 20% · 🍬 할로윈 재화 50 10% · 🗑️ 쓰레기 10%", text)
+        self.assertIn("👻 꽝 40% · 🗝️ 열쇠 14% · 🍬 할로윈 재화 50 7% · 🗑️ 쓰레기 11% · 🧙 마녀 모자 5.5% · 👻 유령의 천 5.5% · "
+                      "🥃 깨진 유리조각 8% · 🎃 잭 오 랜턴 3% · 🌙 달 조각 1.5% · 🍷 뱀파이어맛 와인 0.5% · ⚗️ 수상한 액체가 담긴 병 4%", text)
         self.assertIn("최대 99,999개", text)
         self.store.update_settings(100, channels=[400, 401], candy_chance=80, package_mode="first")
         interaction = await self.call(Economy.help, self.economy, self.ask(admin=False))

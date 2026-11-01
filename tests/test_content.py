@@ -349,6 +349,7 @@ class RuntimeEffectTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(out.ok)
 
     def test_simulation_runs_on_custom_content(self):
+        self.store.update_settings(G, dungeon={"일반.층수": 1})                  # 한 층으로 보면 잡몹의 영향이 또렷하다(보스가 벽인 100개 방에서는 묻힌다).
         base = balance_sim.simulate(self.store.balance(G), 300, seed=3)["attack"]["clear"]
         content.add(self.store, G, "monsters", dict(name="허수아비", emoji="🎃", hp=1, damage=0, dodge=0))
         for name in ("거대 박쥐", "슬라임", "마녀", "거대 쥐"):

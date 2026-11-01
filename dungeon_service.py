@@ -53,7 +53,7 @@ async def enter(store: Store, locks, guild_id: int, user_id: int) -> Outcome:
         run.hp = min(run.hp, bal.max_hp)             # 관리자가 최대 체력을 낮췄다면 맞춘다.
         run.bump()                                   # 이전에 띄워 둔 화면은 이제 지난 화면이 된다.
         entry = entry_label(store, guild_id)
-        run.events = ([f"🏚️ {entry + '을(를) 내고 ' if entry else ''}던전에 들어왔어요! 앞으로 방이 {dungeon.ROOMS}번 나와요."] if started
+        run.events = ([f"🏚️ {entry + '을(를) 내고 ' if entry else ''}던전에 들어왔어요! {bal.floors}층까지 올라가야 해요. (한 층에 방이 {dungeon.ROOMS}개)"] if started
                       else ["📖 진행 중이던 던전을 이어서 해요. (입장 물품은 쓰지 않아요)"])
         store.save_dungeon(guild_id, user_id, run.to_json())
         return Outcome(True, run=run, started=started)
@@ -84,6 +84,45 @@ async def act(store: Store, locks, rng, guild_id: int, user_id: int, rev: int, a
             store.save_dungeon(guild_id, user_id, run.to_json())
             return Outcome(True, run=run)
         return _finish(store, rng, guild_id, user_id, run, bal)
+
+
+async def sell(store: Store, locks, guild_id: int, user_id: int, rev: int, picks, mode: str = "all") -> Outcome:
+    """던전 안에서 장비·소모품을 판다. 판매가는 관리자가 정한 값이고, 재화는 바로 들어온다.
+    싸우는 중에는 팔 수 없고, 재화가 최대 보유량을 넘게 되면 아무것도 팔리지 않는다."""
+    async with locks.get(guild_id, user_id):
+        data = store.dungeon_run(guild_id, user_id)
+        if data is None:
+            return Outcome(False, "진행 중인 던전이 없어요. `/던전`으로 다시 들어와 주세요.", stale=True)
+        bal = store.balance(guild_id)
+        run = Run.from_json(data)
+        run.hp = min(run.hp, bal.max_hp)
+        if run.rev != rev:
+            return Outcome(False, "지난 화면이에요. 가장 최근 화면에서 눌러 주세요. (안 보이면 `/던전`)", stale=True)
+        try:
+            total, sold = dungeon.sell(run, picks, mode, bal)
+        except DungeonError as exc:
+            return Outcome(False, str(exc), run=run)
+        cur = store.currency(guild_id)
+        run.events = [f"💰 {entry['emoji']} **{entry['name']}**" + (f" ×{qty:,}" if qty > 1 else "") + f" — {cur.money(entry['price'] * qty)}"
+                      for entry, qty in sold]
+        run.events.append(f"합계 {cur.money(total)}을(를) 받았어요!")
+        run.bump()
+        try:
+            store.sell_in_dungeon(guild_id, user_id, run.to_json(), total)
+        except StoreError as exc:
+            return Outcome(False, str(exc), run=run)
+        return Outcome(True, run=run, notes=[total])
+
+
+async def peek(store: Store, guild_id: int, user_id: int) -> Run | None:
+    """진행 중인 던전을 바꾸지 않고 읽는다(판매 화면에서 돌아올 때 쓴다). 없으면 None."""
+    data = store.dungeon_run(guild_id, user_id)
+    if data is None:
+        return None
+    bal = store.balance(guild_id)
+    run = Run.from_json(data)
+    run.hp = min(run.hp, bal.max_hp)
+    return run
 
 
 def _apply(run: Run, rng, action: str, arg: str | None, guard_ok: bool, bal) -> str | None:

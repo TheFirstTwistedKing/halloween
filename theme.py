@@ -23,6 +23,22 @@ def plain_money(amount: int, cur: Currency | None = None) -> str:
     return f"{cur.name} {amount:,}" if cur.emoji.startswith("<") else cur.money(amount)
 
 
+def sell_text(row, cur: Currency | None = None, *, plain: bool = False) -> str:
+    """물품의 판매가 글자. 고정이면 '🍬 100', 음수면 '🍬 -150'(팔 때 재화를 낸다), 범위면 '🍬 -300 ~ 300'(팔 때마다 그 사이에서 뽑는다)."""
+    show = plain_money if plain else money
+    high = row["sell_max"] if "sell_max" in row.keys() else None
+    low = row["sell_price"]
+    return show(low, cur) if high is None else f"{show(low, cur)} ~ {high:,}"
+
+
+def sell_note(row) -> str:
+    """판매가가 보통과 다를 때(내야 하거나 매번 달라질 때) 붙이는 짧은 안내. 보통이면 빈 문자열."""
+    high = row["sell_max"] if "sell_max" in row.keys() else None
+    if high is not None:
+        return "\n🎲 팔 때마다 값이 달라져요" + (" (손해를 볼 수도 있어요)" if row["sell_price"] < 0 else "")
+    return "\n⚠️ 팔 때 재화를 내야 해요" if row["sell_price"] < 0 else ""
+
+
 def make_embed(title: str, description: str = "", *, color: int = ORANGE) -> discord.Embed:
     embed = discord.Embed(title=title, description=description or None, color=color)
     embed.set_footer(text=FOOTER)
@@ -36,7 +52,7 @@ def notice(text: str, ok: bool = True) -> discord.Embed:
 
 def item_line(row, role_name: str | None = None, cur: Currency | None = None) -> str:
     buy = money(row["buy_price"], cur) if row["buyable"] else "—"
-    sell = money(row["sell_price"], cur) if row["sellable"] else "—"
+    sell = sell_text(row, cur) if row["sellable"] else "—"
     tag = " `역할`" if row["kind"] == "role" else ""
     title = f"**{role_name or row['name']}**" if row["kind"] == "role" else f"**{row['name']}**"
     return f"{row['emoji']} {title}{tag}\n┕ 구매 {buy} · 판매 {sell}"
@@ -58,7 +74,7 @@ def detail_embed(row, *, candy: int, owned: int | None, role_name: str | None = 
     name = role_name or row["name"]
     embed = make_embed(f"{row['emoji']} {name}", row["description"] or "설명이 없어요.", color=PURPLE)
     embed.add_field(name="구매", value=money(row["buy_price"], cur) if row["buyable"] else "살 수 없어요", inline=True)
-    embed.add_field(name="판매", value=money(row["sell_price"], cur) if row["sellable"] else "팔 수 없어요", inline=True)
+    embed.add_field(name="판매", value=(sell_text(row, cur) + sell_note(row)) if row["sellable"] else "팔 수 없어요", inline=True)
     if row["kind"] == "role":
         embed.add_field(name="상태", value="가지고 있어요 ✅" if owned else "아직 없어요", inline=True)
     else:

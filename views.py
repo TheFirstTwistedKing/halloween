@@ -41,8 +41,10 @@ class QuantityModal(discord.ui.Modal):
         if item is None:
             await interaction.response.send_message(embed=theme.notice("이제 상점에 없는 물품이에요.", False), ephemeral=True)
             return
-        trade = services.buy if self.action == "buy" else services.sell
-        result = await trade(client.store, client.locks, interaction.user, item, int(text))
+        if self.action == "buy":
+            result = await services.buy(client.store, client.locks, interaction.user, item, int(text))
+        else:
+            result = await services.sell(client.store, client.locks, interaction.user, item, int(text), client.rng)
         await interaction.response.send_message(embed=theme.notice(result.text, result.ok), ephemeral=True)
 
 

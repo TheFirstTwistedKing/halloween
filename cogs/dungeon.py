@@ -30,7 +30,7 @@ def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=No
     elif ended == "quit":
         color, title = theme.PURPLE, "🚪 던전에서 나왔어요"
     else:
-        color, title = theme.ORANGE, f"🏚️ 던전 — 방 {max(run.room, 1)}/{ROOMS}"
+        color, title = theme.ORANGE, f"🏚️ 던전 — {max(run.floor, 1)}/{bal.floors}층 · 방 {max(run.room, 1)}/{ROOMS}"
     embed = theme.make_embed(title, "\n".join(run.events) or None, color=color)
     if run.enemy and not ended:
         enemy = run.enemy
@@ -66,6 +66,8 @@ class DungeonView(discord.ui.View):
     def __init__(self, client, user_id: int, run: Run, bal=None):
         super().__init__(timeout=900)
         self.client, self.user_id, self.rev = client, user_id, run.rev
+        bal = bal or DEFAULT
+        for_sale = dungeon.sellable(run, bal)
         if run.phase == "battle":
             self._button("공격", "⚔️", "attack", discord.ButtonStyle.danger)
             self._button("방어", "🛡️", "defend", discord.ButtonStyle.primary)
@@ -74,10 +76,15 @@ class DungeonView(discord.ui.View):
         elif run.pending_gear:
             self._button("장착", "✅", "equip", discord.ButtonStyle.success)
             self._button("버리기", "🗑️", "discard", discord.ButtonStyle.secondary)
+            pending = next((e for e in for_sale if e["id"] == "pending"), None)
+            if pending:                                   # 새 장비를 바로 파는 지름길
+                self._button(f"판매 +{pending['price']:,}", "💰", "sell_pending", discord.ButtonStyle.primary)
         elif run.can_advance:
             self._button("앞으로" if run.room else "출발", "🚪", "advance", discord.ButtonStyle.success)
-        if not run.pending_gear and any(k in (bal or DEFAULT).item_by_key for k in run.items):
-            self.add_item(ItemSelect(run, bal or DEFAULT))
+        if not run.in_battle and any(e["id"] != "pending" for e in for_sale):
+            self._button("판매", "💰", "open_sell", discord.ButtonStyle.secondary)
+        if not run.pending_gear and any(k in bal.item_by_key for k in run.items):
+            self.add_item(ItemSelect(run, bal))
         self._button("나가기", "🏃", "ask_quit", discord.ButtonStyle.secondary)
 
     def _button(self, label, emoji, action, style):
@@ -88,6 +95,12 @@ class DungeonView(discord.ui.View):
                 await interaction.response.send_message(
                     embed=theme.notice("정말 나갈까요? 던전 진행과 입장에 쓴 물품이 사라져요.", False),
                     view=ConfirmQuit(self.client, self.user_id, self.rev), ephemeral=True)
+                return
+            if action == "open_sell":
+                await open_sell(interaction, self.client, self.rev)
+                return
+            if action == "sell_pending":
+                await respond_sell(interaction, self.client, self.rev, ["pending"], "all", stay=False)
                 return
             await self.handle(interaction, action)
         button.callback = callback
@@ -151,6 +164,118 @@ async def respond(interaction: discord.Interaction, client, rev: int, action: st
         await interaction.response.edit_message(embed=run_embed(run, outcome, bal, client.store.currency(interaction.guild_id)), view=None)
         return
     await interaction.response.edit_message(embed=run_embed(run, outcome, bal, client.store.currency(interaction.guild_id)), view=view)
+
+
+def sell_embed(run: Run, bal, cur, wallet: int, result: bool = False) -> discord.Embed:
+    """판매 화면. result=True면 방금 판 내용(run.events)을 맨 위에 보여 준다."""
+    entries = dungeon.sellable(run, bal)
+    intro = ("팔 것을 고른 뒤 아래 버튼을 눌러요. 여러 개를 한꺼번에 고를 수 있어요.\n"
+             "던전을 나가거나 쓰러지면 장비·소지품은 사라지니, 팔 수 있을 때 팔아 두세요.")
+    embed = theme.make_embed("💰 던전 판매", "\n".join(run.events) if result and run.events else intro, color=theme.ORANGE)
+    lines = []
+    for e in entries:
+        if e["kind"] == "item":
+            lines.append(f"{e['emoji']} **{e['name']}** ×{e['qty']:,} — 개당 {theme.money(e['price'], cur)} · 전부 {theme.money(e['price'] * e['qty'], cur)}")
+        else:
+            lines.append(f"{e['emoji']} **{e['name']}** ({e['tag']}) — {theme.money(e['price'], cur)}")
+    if lines:
+        embed.add_field(name="🧾 팔 수 있는 것", value="\n".join(lines)[:1000], inline=False)
+    if len(entries) > 25:
+        embed.add_field(name="ℹ️", value="목록이 길어서 앞의 25개만 고를 수 있어요. 판 뒤에 다시 열면 나머지가 보여요.", inline=False)
+    embed.add_field(name="내 재화", value=theme.money(wallet, cur), inline=False)
+    return embed
+
+
+class SellView(discord.ui.View):
+    """판매 화면: 여러 개를 골라 한꺼번에 팔 수 있다. 던전 화면과 같은 메시지에서 바뀌어 나온다."""
+
+    def __init__(self, client, user_id: int, run: Run, bal, cur):
+        super().__init__(timeout=900)
+        self.client, self.user_id, self.rev, self.picks = client, user_id, run.rev, []
+        entries = dungeon.sellable(run, bal)
+        options = []
+        for e in entries[:25]:
+            if e["kind"] == "item":
+                label, hint = f"{e['name']} ×{e['qty']:,}", f"개당 {theme.plain_money(e['price'], cur)} · 전부 {theme.plain_money(e['price'] * e['qty'], cur)}"
+            else:
+                label, hint = f"{e['name']} ({e['tag']})", theme.plain_money(e["price"], cur)
+            options.append(discord.SelectOption(label=label[:100], value=e["id"], emoji=e["emoji"], description=hint[:100]))
+        select = discord.ui.Select(placeholder="💰 팔 것을 골라요 (여러 개 가능)", min_values=1, max_values=len(options), options=options, row=0)
+        select.callback = self.on_select
+        self.add_item(select)
+        self._button("선택한 것 판매", "💰", self.sell_picked, discord.ButtonStyle.success)
+        if any(e["kind"] == "item" and e["qty"] > 1 for e in entries):
+            self._button("1개씩만", "☝️", self.sell_one, discord.ButtonStyle.secondary)
+        if any(e["kind"] == "item" for e in entries):
+            self._button("소모품 전부", "🧺", self.sell_items, discord.ButtonStyle.primary)
+        self._button("돌아가기", "↩️", self.back, discord.ButtonStyle.secondary)
+
+    def _button(self, label, emoji, callback, style):
+        button = discord.ui.Button(label=label, emoji=emoji, style=style, row=1)
+        button.callback = callback
+        self.add_item(button)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.user_id
+
+    async def on_select(self, interaction: discord.Interaction):
+        self.picks = list(interaction.data.get("values", []))
+        await interaction.response.defer()
+
+    async def _sell(self, interaction: discord.Interaction, mode: str):
+        if mode != "items" and not self.picks:
+            await interaction.response.send_message(embed=theme.notice("먼저 위 목록에서 팔 것을 골라 주세요.", False), ephemeral=True)
+            return
+        await respond_sell(interaction, self.client, self.rev, self.picks, mode, stay=True)
+
+    async def sell_picked(self, interaction: discord.Interaction):
+        await self._sell(interaction, "all")
+
+    async def sell_one(self, interaction: discord.Interaction):
+        await self._sell(interaction, "one")
+
+    async def sell_items(self, interaction: discord.Interaction):
+        await self._sell(interaction, "items")
+
+    async def back(self, interaction: discord.Interaction):
+        run = await service.peek(self.client.store, interaction.guild_id, interaction.user.id)
+        if run is None or run.rev != self.rev:
+            await interaction.response.send_message(embed=theme.notice("지난 화면이에요. `/던전`으로 다시 열어 주세요.", False), ephemeral=True)
+            return
+        bal = self.client.store.balance(interaction.guild_id)
+        await interaction.response.edit_message(
+            embed=run_embed(run, None, bal, self.client.store.currency(interaction.guild_id)), view=DungeonView(self.client, interaction.user.id, run, bal))
+
+
+async def open_sell(interaction: discord.Interaction, client, rev: int):
+    """던전 화면의 [판매] 버튼: 같은 메시지를 판매 화면으로 바꾼다."""
+    run = await service.peek(client.store, interaction.guild_id, interaction.user.id)
+    if run is None or run.rev != rev:
+        await interaction.response.send_message(embed=theme.notice("지난 화면이에요. `/던전`으로 다시 열어 주세요.", False), ephemeral=True)
+        return
+    bal, cur = client.store.balance(interaction.guild_id), client.store.currency(interaction.guild_id)
+    if not dungeon.sellable(run, bal) or run.in_battle:
+        await interaction.response.send_message(embed=theme.notice("지금은 팔 수 있는 게 없어요.", False), ephemeral=True)
+        return
+    await interaction.response.edit_message(
+        embed=sell_embed(run, bal, cur, client.store.wallet(interaction.guild_id, interaction.user.id)),
+        view=SellView(client, interaction.user.id, run, bal, cur))
+
+
+async def respond_sell(interaction: discord.Interaction, client, rev: int, picks, mode: str, stay: bool):
+    """판매를 서비스에 넘기고 화면을 바꾼다. stay이고 아직 팔 게 남았다면 판매 화면에 머물고, 아니면 던전 화면으로 돌아간다."""
+    outcome = await service.sell(client.store, client.locks, interaction.guild_id, interaction.user.id, rev, picks, mode)
+    if not outcome.ok:
+        await interaction.response.send_message(embed=theme.notice(outcome.text, False), ephemeral=True)
+        return
+    run = outcome.run
+    bal, cur = client.store.balance(interaction.guild_id), client.store.currency(interaction.guild_id)
+    if stay and dungeon.sellable(run, bal):
+        await interaction.response.edit_message(
+            embed=sell_embed(run, bal, cur, client.store.wallet(interaction.guild_id, interaction.user.id), result=True),
+            view=SellView(client, interaction.user.id, run, bal, cur))
+        return
+    await interaction.response.edit_message(embed=run_embed(run, None, bal, cur), view=DungeonView(client, interaction.user.id, run, bal))
 
 
 class Dungeon(commands.Cog):

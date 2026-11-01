@@ -34,6 +34,11 @@ def param_choices(store, guild_id: int, current: str) -> list[Choice]:
     return out
 
 
+def where_text(stage: int) -> str:
+    """처음부터 세어 stage번째 방을 'N층 M번째 방'으로."""
+    return f"{(stage - 1) // balance.ROOMS + 1}층 {(stage - 1) % balance.ROOMS + 1}번째 방"
+
+
 def settings_lines(group: str, changed: dict) -> list[str]:
     """분류 하나의 항목들을 '이름 값 (바꿨으면 ✏️ 기본값)' 줄로 만든다. 방 배치는 방마다 한 줄."""
     if group == "방 배치":
@@ -205,9 +210,9 @@ class DungeonAdmin(commands.Cog):
         embed = theme.make_embed(f"🧪 던전 시뮬레이션 — 방식마다 {runs:,}판", color=theme.PURPLE)
         for entry in result.values():
             deaths = sorted(entry["deaths"].items(), key=lambda kv: -kv[1])[:3]
-            where = " · ".join(f"{room}번째 방 {rate * 100:.0f}%" for room, rate in deaths if rate >= 0.005) or "거의 없음"
+            where = " · ".join(f"{where_text(room)} {rate * 100:.0f}%" for room, rate in deaths if rate >= 0.005) or "거의 없음"
             embed.add_field(name=entry["label"], inline=False,
-                            value=f"**클리어 {entry['clear'] * 100:.1f}%** · 평균 도달 방 {entry['avg_room']:.1f}\n쓰러진 곳: {where}")
+                            value=f"**클리어 {entry['clear'] * 100:.1f}%** · 평균 도달 {where_text(round(entry['avg_room']))}\n쓰러진 곳: {where}")
         for warning in balance.warnings(bal):
             embed.add_field(name="주의", value=warning, inline=False)
         embed.add_field(name="참고", inline=False,

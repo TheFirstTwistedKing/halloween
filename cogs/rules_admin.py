@@ -12,7 +12,8 @@ from access import require_admin
 from cogs.admin import item_choices
 from confirm import Confirm
 from panel import refresh_panels
-from store import MAX_CLEAR_REWARDS, MAX_PACKAGE_ENTRIES, StoreError, valid_emoji
+from store import (MAX_CLEAR_REWARDS, MAX_PACKAGE_ENTRIES, NEW_ITEMS, PACKAGE_CANDY, StoreError, default_package_table,
+                   valid_emoji)
 
 Choice = app_commands.Choice
 KINDS = [Choice(name="꽝 (아무것도 없음)", value="none"), Choice(name="재화", value="candy"), Choice(name="물품", value="item")]
@@ -134,6 +135,25 @@ class RulesAdmin(commands.Cog):
         total = sum(e["weight"] for e in table)
         note = f"\n\n비율 합계 {total:g} — 합계가 100이 아니어도 비율로 계산해서 위 확률로 나와요."
         await interaction.response.send_message(embed=theme.make_embed("📦 패키지 결과표", "\n".join(lines) + note, color=theme.PURPLE), ephemeral=True)
+
+    @package.command(name="기본값", description="결과표를 새 기본 확률표로 통째로 바꿔요. 물품이 없으면 만들어요 (관리자)")
+    async def package_default(self, interaction: discord.Interaction):
+        if not await require_admin(interaction):
+            return
+        store, gid = self.bot.store, interaction.guild_id
+        store.ensure_defaults(gid)
+        names = {"none": "꽝", "key": "열쇠", "candy": f"{store.currency(gid).name} {PACKAGE_CANDY}", "trash": "쓰레기",
+                 **{item[0]: item[1] for item in NEW_ITEMS}}
+        preview = default_package_table({"key": 0, "trash": 0}, {item[0]: 0 for item in NEW_ITEMS})
+        lines = " · ".join(f"{names[e['id']]} {e['weight']:g}%" for e in preview)
+        now = len(store.package_table(gid))
+        text = (f"지금 결과표 **{now}칸**이 모두 사라지고 아래 기본 확률표로 바뀌어요. 직접 바꾼 확률·이름·아이콘도 기본값이 돼요.\n\n{lines}\n\n"
+                "• 열쇠·쓰레기·새 물품 7종 중 **없는 것만 만들어요**(있는 물품의 이름·가격은 그대로예요).\n"
+                "• 가방·재화·상점·던전 설정은 바뀌지 않아요.\n• 쓰레기의 판매가는 `/물품수정`으로 따로 고쳐요.")
+        await interaction.response.send_message(
+            embed=theme.make_embed("📦 기본 확률표로 바꿀까요?", text, color=theme.RED),
+            view=Confirm(interaction.user.id, lambda: f"📦 결과표를 기본 확률표({len(store.apply_default_package_table(gid))}칸)로 바꿨어요. `/패키지결과 목록`에서 확인하세요."
+                         , label="바꾸기", emoji="📦"), ephemeral=True)
 
     @package.command(name="추가", description="패키지 결과를 하나 더해요 (관리자)")
     @app_commands.rename(kind="종류", weight="확률", item="물품", amount="개수", emoji="이모지", title="이름")

@@ -223,7 +223,7 @@ class RealPathTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_all_commands_serialize_for_discord(self):
         commands = self.bot.tree.get_commands()
-        self.assertEqual(len(commands), 35)
+        self.assertEqual(len(commands), 36)
         for command in commands:
             payload = command.to_dict(self.bot.tree)
             self.assertLessEqual(len(payload["description"]), 100, command.name)

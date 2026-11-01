@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass, field
 
 from balance import (BASE_DAMAGE, BASE_DODGE, BOSSES, CLEAR_CANDY, CONSUMABLES, DEFAULT, FLOOR_HEAL, FLOOR_SCALE, FLOORS,  # noqa: F401  (다시 내보냄)
                      GEAR, GUARD_BASE, GUARD_CHANCE, GUARD_HEAL, MAX_HP, MONSTERS, REFLECT_BASE, ROOM_PLAN, ROOMS,
-                     TICKET_CHANCE, TIER_ORDER, Balance, Consumable, Gear, Monster, floor_scaled, reduce_damage)
+                     TICKET_CHANCE, TIER_ORDER, Balance, Consumable, EVENT_TAG, Gear, Monster, condition_text, floor_scaled, reduce_damage)
 
 GEAR_BY_KEY = {g.key: g for g in GEAR}          # 기본값 표(이름·이모지 조회용). 실제 수치는 bal에서 읽는다.
 ITEM_BY_KEY = {c.key: c for c in CONSUMABLES}
@@ -52,6 +52,7 @@ class Run:
     rev: int = 0                                    # 화면 번호. 행동마다 올라가서 지난 화면의 버튼을 가려낸다.
     items: dict = field(default_factory=dict)       # 가지고 있는 소모품 {key: 개수}
     pending_gear: str | None = None                 # 상자에서 나와 아직 장착/버림을 정하지 않은 장비
+    last: list = field(default_factory=list)        # 바로 직전 행동에서 일어난 일(소모품 사용 조건에 쓴다): guard_success·guard_fail·attack_hit·attack_miss·item_gain:키·item_use:키
 
     def bump(self) -> None:
         self.rev += 1
@@ -242,7 +243,9 @@ def player_attack(run: Run, rng, bal: Balance | None = None) -> list[str]:
     weapon = _weapon(run, bal)
     if rng.random() * 100 < enemy_dodge(run, bal):
         events = [f"💨 {run.enemy['name']}이(가) 공격을 피했어요!"]
+        run.last.append("attack_miss")
     else:
+        run.last.append("attack_hit")
         damage, crit = player_damage(run, bal), False
         if weapon and weapon.crit and rng.random() * 100 < weapon.crit:
             damage, crit = damage * 2, True
@@ -263,6 +266,7 @@ def player_defend(run: Run, guard_ok: bool, bal: Balance | None = None) -> list[
     else:
         raw = enemy["damage"]
         events = [("🛡️ 가드 성공!" if guard_ok else "❌ 가드 실패…")]
+        run.last.append("guard_success" if guard_ok else "guard_fail")
         events += _enemy_attack(run, guard_percent(run, bal) if guard_ok else 0)
         if guard_ok and run.phase != "dead":
             healed = min(bal.max_hp, run.hp + raw * bal.guard_heal // 100) - run.hp
@@ -281,18 +285,57 @@ def player_defend(run: Run, guard_ok: bool, bal: Balance | None = None) -> list[
     return events
 
 
+def condition_met(run: Run, cond, bal: Balance) -> bool:
+    """소모품 사용 조건 하나를 지금 만족하는가. HP 조건은 지금 상태, 나머지는 바로 직전 행동에서 일어난 일을 본다."""
+    kind, value = cond
+    if kind in ("hp_le", "hp_ge"):
+        return run.hp * 100 <= value * bal.max_hp if kind == "hp_le" else run.hp * 100 >= value * bal.max_hp
+    if kind in ("enemy_hp_le", "enemy_hp_ge"):
+        if not run.in_battle or not run.enemy:
+            return False                                               # 싸우는 상대가 없으면 만족할 수 없다.
+        enemy_max = run.enemy.get("max_hp") or run.enemy["hp"]
+        return run.enemy["hp"] * 100 <= value * enemy_max if kind == "enemy_hp_le" else run.enemy["hp"] * 100 >= value * enemy_max
+    if kind in ("item_gain", "item_use"):
+        return f"{kind}:{value}" in run.last
+    return EVENT_TAG[kind] in run.last
+
+
+def unmet_conditions(run: Run, item: Consumable, bal: Balance | None = None) -> list:
+    """이 소모품의 사용 조건 중 지금 만족하지 못하는 것들. 비어 있으면 쓸 수 있다."""
+    bal = bal or DEFAULT
+    return [cond for cond in item.conditions if not condition_met(run, cond, bal)]
+
+
 def use_consumable(run: Run, key: str, bal: Balance | None = None) -> list[str]:
-    """아이템 사용. 전투 중이면 한 턴을 쓴 것으로 치고 몬스터가 공격한다."""
+    """아이템 사용. 전투 중이면 한 턴을 쓴 것으로 치고 몬스터가 공격한다. 사용 조건이 있으면 전부 만족해야 쓸 수 있고(아니면 소모되지 않는다),
+    개조 소모품은 들고 있는 무기를 지정한 무기로 바꾼다."""
     bal = bal or DEFAULT
     item = bal.item_by_key.get(key)
     if item is None:
         raise DungeonError("알 수 없는 아이템이에요.")
     if run.items.get(key, 0) < 1:
         raise DungeonError(f"{item.name}이(가) 없어요.")
+    unmet = unmet_conditions(run, item, bal)
+    if unmet:
+        names = {c.key: c.name for c in bal.consumables}
+        raise DungeonError(f"지금은 {item.name}을(를) 쓸 수 없어요. 조건: " + " & ".join(condition_text(c, names) for c in unmet))
+    target = None
+    if item.modify:
+        target = bal.gear_by_key.get(item.modify)
+        if target is None or target.slot != "weapon":
+            raise DungeonError(f"{item.name}(으)로 개조할 무기가 사라졌어요.")
+        if run.weapon == target.key:
+            raise DungeonError(f"이미 {target.emoji} {target.name}을(를) 들고 있어서 개조할 수 없어요.")
     run.items[key] -= 1
     if run.items[key] <= 0:
         del run.items[key]
-    if item.full:
+    run.last = [f"item_use:{key}"]                  # 조건 판정은 끝났다: 이제 직전 행동은 이 소모품을 쓴 일이다.
+    if target is not None:
+        before = _weapon(run, bal)
+        run.weapon = target.key
+        events = [f"{item.emoji} **{item.name}**을(를) 사용했어요! 🔧 {before.name if before else '맨손'}이(가) "
+                  f"{target.emoji} **{target.name}**(으)로 개조됐어요. ({target.description})"]
+    elif item.full:
         gained, run.hp = max(0, bal.max_hp - run.hp), max(run.hp, bal.max_hp)
         events = [f"{item.emoji} **{item.name}**을(를) 사용했어요. HP가 전부 회복됐어요! (+{gained})"]
     elif item.heal:
@@ -316,6 +359,7 @@ def open_chest(run: Run, rng, bal: Balance | None = None) -> tuple[Gear, Consuma
     run.phase = "chest_done"
     run.pending_gear = gear.key                      # 장착할지 버릴지 정할 때까지 앞으로 갈 수 없다.
     run.items[item.key] = run.items.get(item.key, 0) + 1
+    run.last.append(f"item_gain:{item.key}")
     run.loot += [gear.name, item.name]
     held = _shield(run, bal) if gear.slot == "shield" else _weapon(run, bal)
     swap = f"\n┕ 지금 쓰는 **{held.name}**과(와) 바뀌어요." if held else ""

@@ -86,7 +86,7 @@ def edit(store: Store, guild: int, sections, name: str, changes: dict):
     if hit is None:
         raise ContentError("그런 항목이 없어요. 이름은 자동완성에서 골라 주세요.")
     section, data = hit
-    changes = {k: v for k, v in changes.items() if v is not None or k in ("dodge", "guard", "reflect", "guard_chance")}
+    changes = {k: v for k, v in changes.items() if v is not None or k in ("dodge", "guard", "reflect", "guard_chance", "modify")}
     if not changes:
         raise ContentError("바꿀 내용을 하나 이상 적어 주세요.")
     new = {**data, **changes}
@@ -105,8 +105,28 @@ def delete(store: Store, guild: int, sections, name: str):
     if hit is None:
         raise ContentError("그런 항목이 없어요. 이름은 자동완성에서 골라 주세요.")
     section, data = hit
+    users = _used_by(store, guild, section, data)
+    if users:
+        raise ContentError(users)
     _commit(store, guild, section, [d for d in current(store, guild, section) if d["key"] != data["key"]])
     return section, data
+
+
+def _used_by(store: Store, guild: int, section: str, data: dict) -> str:
+    """이 개체를 다른 소모품이 쓰고 있다면 지울 수 없는 이유를, 아니면 빈 문자열을 돌려준다.
+    (무기는 개조 소모품의 목표로, 소모품은 다른 소모품의 '획득/사용' 조건으로 쓰일 수 있다.)"""
+    if section == "gear":
+        users = [d["name"] for d in current(store, guild, "consumables") if d.get("modify") == data["key"]]
+        why = "개조 목표"
+    elif section == "consumables":
+        users = [d["name"] for d in current(store, guild, "consumables") if d["key"] != data["key"]
+                 and any(c[0] in balance.COND_ITEM and c[1] == data["key"] for c in d.get("conditions") or ())]
+        why = "사용 조건"
+    else:
+        return ""
+    if not users:
+        return ""
+    return f"**{data['name']}**은(는) 소모품 {', '.join(users[:3])}의 {why}로 쓰이고 있어서 지울 수 없어요. 먼저 그 소모품을 바꾸거나 지워 주세요."
 
 
 def set_sell_price(store: Store, guild: int, sections, price: int, tier: str | None = None) -> dict[str, int]:
@@ -140,12 +160,13 @@ def reset(store: Store, guild: int, sections=SECTIONS) -> int:
     return done
 
 
-def describe(section: str, data: dict) -> str:
-    """목록에 보여줄 한 줄."""
+def describe(section: str, data: dict, bal=None) -> str:
+    """목록에 보여줄 한 줄. bal(밸런스)을 주면 개조 목표 무기·조건의 소모품 이름까지 보여 준다."""
     entity, _ = check_entity(section, data)
     head = f"{entity.emoji} **{entity.name}**"
     if section in ("monsters", "bosses"):
         dodge = "" if section == "bosses" else f" · 회피 {entity.dodge}%"
         return f"{head} — HP {entity.hp:,} · 공격 {entity.damage:,}{dodge} · 등장 {entity.weight:g}"
     sell = f"판매 {entity.sell_price:,}" if entity.sell_price else "판매 불가"
-    return f"{head} ({entity.tier}) — {entity.description} · 등장 {entity.weight:g} · {sell}"
+    text = balance.item_summary(entity, bal) if bal is not None and section == "consumables" else entity.description
+    return f"{head} ({entity.tier}) — {text} · 등장 {entity.weight:g} · {sell}"

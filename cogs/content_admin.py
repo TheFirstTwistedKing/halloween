@@ -8,7 +8,8 @@ from discord.ext import commands
 import content
 import theme
 from access import require_admin
-from balance import SECTION_LABELS, SECTIONS, SELL_MAX, TIER_ORDER
+from balance import (COND_EVENT, COND_ITEM, COND_LABELS, COND_STATE, MAX_CONDITIONS, SECTION_LABELS, SECTIONS, SELL_MAX, TIER_ORDER,
+                     condition_text)
 from confirm import Confirm
 
 Choice = app_commands.Choice
@@ -19,6 +20,8 @@ GUARD_CHANCE_HELP = "방패: 이 방패로 방어할 때 가드에 성공할 확
 WEIGHT_HELP = "상자에서 나올 비율. 소수도 돼요(예: 0.5, 0.05). 다른 것들과의 비율로 계산하고 높을수록 자주 나와요"
 SELL_HELP = "던전 안에서 팔 때 받는 재화(개당). 0이면 팔 수 없어요. 비우면 그대로(추가할 땐 등급별 기본값)"
 SELL_TARGETS = [Choice(name="장비와 소모품 모두", value="both"), Choice(name="장비만", value="gear"), Choice(name="소모품만", value="consumables")]
+COND_CHOICES = [Choice(name=COND_LABELS[k].format(v="N"), value=k) for k in COND_STATE + COND_EVENT]
+MODIFY_HELP = "무기 개조: 쓰면 들고 있는 무기가 이 무기로 바뀌어요(무기 이름). 회복 효과와는 함께 못 써요"
 PERMS = dict(guild_only=True, default_permissions=discord.Permissions(administrator=True))
 
 
@@ -42,7 +45,7 @@ class ContentAdmin(commands.Cog):
         await interaction.response.send_message(embed=theme.notice(text, False), ephemeral=False)
 
     async def _done(self, interaction, head: str, section: str, data: dict | None = None):
-        line = f"\n{content.describe(section, data)}" if data else ""
+        line = f"\n{content.describe(section, data, self.bot.store.balance(interaction.guild_id))}" if data else ""
         await interaction.response.send_message(embed=theme.notice(
             f"{head}{line}\n지금 진행 중인 던전에도 바로 적용돼요(이미 나온 몬스터의 체력·공격은 그대로). `/던전시뮬`로 확인해 보세요."), ephemeral=False)
 
@@ -167,18 +170,22 @@ class ContentAdmin(commands.Cog):
     # ---------------------------------------------------------------- 소모품
     potion = app_commands.Group(name="소모품", description="던전 소모품(회복 아이템)을 더하고 빼고 바꿔요 (관리자)", **PERMS)
 
-    @potion.command(name="추가", description="소모품을 새로 만들어요. 회복량·전체회복·지속회복 중 하나를 정해요 (관리자)")
+    @potion.command(name="추가", description="소모품을 새로 만들어요. 회복량·전체회복·지속회복·무기 개조 중 하나를 정해요 (관리자)")
     @app_commands.rename(name="이름", emoji="이모지", tier="등급", weight="등장", heal="회복량", full="전체회복", regen="지속회복량", turns="지속턴",
-                         sell_price="판매가")
+                         sell_price="판매가", modify="개조무기")
     @app_commands.describe(weight=WEIGHT_HELP, heal="한 번에 회복하는 HP", full="HP를 전부 회복", regen="턴마다 회복하는 HP", turns="지속 회복이 이어지는 턴 수",
-                           sell_price=SELL_HELP)
+                           sell_price=SELL_HELP, modify=MODIFY_HELP)
     @app_commands.choices(tier=TIERS)
     async def potion_add(self, interaction: discord.Interaction, name: str, emoji: str, tier: Choice[str],
                          weight: app_commands.Range[float, 0, 1000], heal: app_commands.Range[int, 0, 100000] = 0, full: bool = False,
                          regen: app_commands.Range[int, 0, 100000] = 0, turns: app_commands.Range[int, 0, 1000] = 0,
-                         sell_price: app_commands.Range[int, 0, SELL_MAX] | None = None):
+                         sell_price: app_commands.Range[int, 0, SELL_MAX] | None = None, modify: str | None = None):
         def go():
             data = dict(name=name, emoji=emoji.strip(), tier=tier.value, weight=weight, heal=heal, full=full, regen=regen, regen_turns=turns)
+            if modify:
+                if heal or full or regen or turns:
+                    raise content.ContentError("개조 소모품은 회복 효과와 함께 쓸 수 없어요. 개조무기만 적어 주세요.")
+                data["modify"] = self._weapon_key(modify, interaction.guild_id)
             if sell_price is not None:                  # 비우면 등급별 기본 판매가
                 data["sell_price"] = sell_price
             entity = content.add(self.bot.store, interaction.guild_id, "consumables", data)
@@ -187,25 +194,29 @@ class ContentAdmin(commands.Cog):
 
     @potion.command(name="수정", description="소모품의 값을 고쳐요. 효과를 바꾸면 이전 효과는 사라져요 (관리자)")
     @app_commands.rename(target="대상", new_name="새이름", emoji="이모지", tier="등급", weight="등장", heal="회복량", full="전체회복",
-                         regen="지속회복량", turns="지속턴", sell_price="판매가")
-    @app_commands.describe(weight=WEIGHT_HELP, sell_price=SELL_HELP)
+                         regen="지속회복량", turns="지속턴", sell_price="판매가", modify="개조무기")
+    @app_commands.describe(weight=WEIGHT_HELP, sell_price=SELL_HELP, modify=MODIFY_HELP)
     @app_commands.choices(tier=TIERS)
     async def potion_edit(self, interaction: discord.Interaction, target: str, new_name: str | None = None, emoji: str | None = None,
                           tier: Choice[str] | None = None, weight: app_commands.Range[float, 0, 1000] | None = None,
                           heal: app_commands.Range[int, 1, 100000] | None = None, full: bool | None = None,
                           regen: app_commands.Range[int, 1, 100000] | None = None, turns: app_commands.Range[int, 1, 1000] | None = None,
-                          sell_price: app_commands.Range[int, 0, SELL_MAX] | None = None):
+                          sell_price: app_commands.Range[int, 0, SELL_MAX] | None = None, modify: str | None = None):
         def go():
             changes = dict(name=new_name, emoji=emoji and emoji.strip(), tier=tier and tier.value, weight=weight, sell_price=sell_price)
             changes = {k: v for k, v in changes.items() if v is not None}
-            if full:                                    # 효과는 하나만: 새 효과를 정하면 이전 효과를 지운다.
-                changes.update(full=True, heal=0, regen=0, regen_turns=0)
+            if modify:                                  # 개조 소모품으로 바꾼다: 회복 효과는 지운다.
+                if heal is not None or full or regen is not None or turns is not None:
+                    raise content.ContentError("개조 소모품은 회복 효과와 함께 쓸 수 없어요. 개조무기만 적어 주세요.")
+                changes.update(modify=self._weapon_key(modify, interaction.guild_id), full=False, heal=0, regen=0, regen_turns=0)
+            elif full:                                  # 효과는 하나만: 새 효과를 정하면 이전 효과를 지운다.
+                changes.update(full=True, heal=0, regen=0, regen_turns=0, modify=None)
             elif regen is not None:
-                changes.update(full=False, heal=0, regen=regen)
+                changes.update(full=False, heal=0, regen=regen, modify=None)
                 if turns is not None:
                     changes["regen_turns"] = turns
             elif heal is not None:
-                changes.update(full=False, heal=heal, regen=0, regen_turns=0)
+                changes.update(full=False, heal=heal, regen=0, regen_turns=0, modify=None)
             elif turns is not None:
                 changes["regen_turns"] = turns
             section, entity = content.edit(self.bot.store, interaction.guild_id, ("consumables",), target, changes)
@@ -220,6 +231,121 @@ class ContentAdmin(commands.Cog):
     @potion_edit.autocomplete("target")
     @potion_delete.autocomplete("target")
     async def potion_names(self, interaction: discord.Interaction, current: str):
+        return names_for(self.bot.store, interaction.guild_id, ("consumables",), current) if interaction.guild_id else []
+
+    def _weapon_key(self, name: str, guild_id: int) -> str:
+        """무기 이름 → key. 무기(방패 아님)가 아니면 ContentError."""
+        hit = content.find(self.bot.store, guild_id, ("gear",), name)
+        if hit is None or hit[1]["slot"] != "weapon":
+            raise content.ContentError("개조무기는 이미 있는 무기 이름이어야 해요(자동완성에서 골라 주세요). 방패는 안 돼요.")
+        return hit[1]["key"]
+
+    @potion_add.autocomplete("modify")
+    @potion_edit.autocomplete("modify")
+    async def weapon_names(self, interaction: discord.Interaction, current: str):
+        if not interaction.guild_id:
+            return []
+        needle = current.strip().lower()
+        return [Choice(name=f"{d['emoji']} {d['name']}"[:100], value=d["name"]) for d in content.current(self.bot.store, interaction.guild_id, "gear")
+                if d["slot"] == "weapon" and needle in d["name"].lower()][:25]
+
+    # ---------------------------------------------------------------- 소모품 사용 조건
+    cond = app_commands.Group(name="소모품조건", description="소모품을 쓸 수 있는 조건을 붙이고 뗘요 (관리자)", **PERMS)
+
+    @cond.command(name="추가", description="소모품에 사용 조건을 붙여요. 붙인 조건을 전부 만족해야 쓸 수 있어요 (관리자)")
+    @app_commands.rename(target="소모품", kind="조건", value="값", other="아이템")
+    @app_commands.describe(target="조건을 붙일 소모품", kind=f"조건 종류. HP 조건은 최대 체력의 %, 나머지는 바로 직전 행동에서 일어난 일이에요(최대 {MAX_CONDITIONS}개)",
+                           value="HP 조건의 퍼센트(0~100)", other="'아이템 획득/사용' 조건에서 지켜볼 소모품")
+    @app_commands.choices(kind=COND_CHOICES)
+    async def cond_add(self, interaction: discord.Interaction, target: str, kind: Choice[str], value: app_commands.Range[int, 0, 100] | None = None,
+                       other: str | None = None):
+        def go():
+            hit = self._consumable(target, interaction.guild_id)
+            if kind.value in COND_STATE:
+                if value is None:
+                    raise content.ContentError("HP 조건에는 '값'(0~100%)이 필요해요.")
+                if other:
+                    raise content.ContentError("HP 조건에는 '아이템'이 필요 없어요.")
+                entry = [kind.value, value]
+            elif kind.value in COND_ITEM:
+                if not other:
+                    raise content.ContentError("'아이템 획득/사용' 조건에는 지켜볼 '아이템'(소모품)이 필요해요.")
+                if value is not None:
+                    raise content.ContentError("이 조건에는 '값'이 필요 없어요.")
+                watched = content.find(self.bot.store, interaction.guild_id, ("consumables",), other)
+                if watched is None:
+                    raise content.ContentError("그런 소모품이 없어요. 아이템은 자동완성에서 골라 주세요.")
+                entry = [kind.value, watched[1]["key"]]
+            else:
+                if value is not None or other:
+                    raise content.ContentError("이 조건에는 '값'이나 '아이템'이 필요 없어요.")
+                entry = [kind.value, None]
+            new = [list(c) for c in hit["conditions"]] + [entry]
+            section, entity = content.edit(self.bot.store, interaction.guild_id, ("consumables",), hit["name"], {"conditions": new})
+            return section, self._entity_dict(entity)
+        await self._run(interaction, go, "➕ 사용 조건을 붙였어요.")
+
+    @cond.command(name="삭제", description="소모품의 사용 조건 하나를 떼요. 번호는 /소모품조건 목록에서 봐요 (관리자)")
+    @app_commands.rename(target="소모품", number="번호")
+    async def cond_delete(self, interaction: discord.Interaction, target: str, number: app_commands.Range[int, 1, MAX_CONDITIONS]):
+        def go():
+            hit = self._consumable(target, interaction.guild_id)
+            if number > len(hit["conditions"]):
+                raise content.ContentError(f"{hit['name']}의 조건은 {len(hit['conditions'])}개예요. 번호는 `/소모품조건 목록`에서 봐요.")
+            new = [list(c) for i, c in enumerate(hit["conditions"], start=1) if i != number]
+            section, entity = content.edit(self.bot.store, interaction.guild_id, ("consumables",), hit["name"], {"conditions": new})
+            return section, self._entity_dict(entity)
+        await self._run(interaction, go, "➖ 사용 조건을 뗐어요.")
+
+    @cond.command(name="비우기", description="소모품의 사용 조건을 전부 떼요. 언제나 쓸 수 있게 돼요 (관리자)")
+    @app_commands.rename(target="소모품")
+    async def cond_clear(self, interaction: discord.Interaction, target: str):
+        def go():
+            hit = self._consumable(target, interaction.guild_id)
+            if not hit["conditions"]:
+                raise content.ContentError(f"{hit['name']}에는 사용 조건이 없어요.")
+            section, entity = content.edit(self.bot.store, interaction.guild_id, ("consumables",), hit["name"], {"conditions": []})
+            return section, self._entity_dict(entity)
+        await self._run(interaction, go, "🧹 사용 조건을 전부 뗐어요.")
+
+    @cond.command(name="목록", description="조건이 붙은 소모품과 조건을 봐요 (관리자)")
+    @app_commands.rename(target="소모품")
+    async def cond_list(self, interaction: discord.Interaction, target: str | None = None):
+        if not await require_admin(interaction):
+            return
+        store, gid = self.bot.store, interaction.guild_id
+        rows = content.current(store, gid, "consumables")
+        if target:
+            hit = content.find(store, gid, ("consumables",), target)
+            if hit is None:
+                await self._deny(interaction, "그런 소모품이 없어요. 이름은 자동완성에서 골라 주세요.")
+                return
+            rows = [hit[1]]
+        else:
+            rows = [d for d in rows if d["conditions"] or d.get("modify")]
+        names = {d["key"]: d["name"] for d in content.current(store, gid, "consumables")}
+        gear = {g.key: g for g in store.balance(gid).gear}
+        lines = []
+        for d in rows:
+            target_gear = gear.get(d.get("modify"))
+            effect = (f" — 🔧 {target_gear.emoji} {target_gear.name}(으)로 개조" if target_gear else " — 🔧 개조(목표 무기가 사라졌어요)") if d.get("modify") else ""
+            conds = "\n".join(f"　{i}. {condition_text(c, names)}" for i, c in enumerate(d["conditions"], start=1)) or "　조건 없음(언제나 사용 가능)"
+            lines.append(f"{d['emoji']} **{d['name']}**{effect}\n{conds}")
+        text = "\n".join(lines) if lines else "조건이 붙은 소모품이 없어요. `/소모품조건 추가`로 붙여 보세요."
+        await interaction.response.send_message(embed=theme.make_embed("🔒 소모품 사용 조건", text[:3500], color=theme.PURPLE), ephemeral=False)
+
+    def _consumable(self, name: str, guild_id: int) -> dict:
+        hit = content.find(self.bot.store, guild_id, ("consumables",), name)
+        if hit is None:
+            raise content.ContentError("그런 소모품이 없어요. 이름은 자동완성에서 골라 주세요.")
+        return hit[1]
+
+    @cond_add.autocomplete("target")
+    @cond_add.autocomplete("other")
+    @cond_delete.autocomplete("target")
+    @cond_clear.autocomplete("target")
+    @cond_list.autocomplete("target")
+    async def cond_names(self, interaction: discord.Interaction, current: str):
         return names_for(self.bot.store, interaction.guild_id, ("consumables",), current) if interaction.guild_id else []
 
     # ---------------------------------------------------------------- 판매가 일괄 설정
@@ -261,7 +387,7 @@ class ContentAdmin(commands.Cog):
         custom = store.settings(gid)["dungeon_content"]
         embed = theme.make_embed("🏚️ 던전 목록", "바꾸려면 `/몬스터` `/장비` `/소모품`. ✏️ = 직접 편집한 분류", color=theme.PURPLE)
         for sec in ([section.value] if section else SECTIONS):
-            lines = [content.describe(sec, d) for d in content.current(store, gid, sec)]
+            lines = [content.describe(sec, d, store.balance(gid)) for d in content.current(store, gid, sec)]
             mark = " ✏️" if sec in custom else ""
             embed.add_field(name=f"{SECTION_LABELS[sec]} {len(lines)}개{mark}", value="\n".join(lines)[:1000] or "없음", inline=False)
         await interaction.response.send_message(embed=embed, ephemeral=False)

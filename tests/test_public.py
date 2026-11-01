@@ -96,13 +96,14 @@ class PublicCommandTests(FakeWorld):
         await Shop.register_shop.callback(Shop(self.bot), i, self.w.channels[400])
         i.response.defer.assert_awaited_once_with(ephemeral=False)
 
-    async def test_the_dungeon_screen_is_public_but_its_buttons_are_private_to_the_player(self):
+    async def test_the_dungeon_screen_is_private_to_the_player_and_still_locked_to_them(self):
+        """던전은 개인 화면이다: 본인에게만 보이고(비공개), 혹시 보이더라도 다른 사람은 조작할 수 없다."""
         from cogs.dungeon import Dungeon
         self.store.add_item(G, U, self.ids["key"], 1)
         i = self.w.interaction()
         await Dungeon.enter.callback(Dungeon(self.bot), i)
         kwargs = i.response.send_message.await_args.kwargs
-        self.assertFalse(kwargs["ephemeral"])
+        self.assertTrue(kwargs["ephemeral"])
         view = kwargs["view"]
         self.assertFalse(await view.interaction_check(self.w.interaction(uid=OTHER)))
         self.assertTrue(await view.interaction_check(self.w.interaction(uid=U)))

@@ -21,8 +21,13 @@ def _dps(bal: Balance, weapon, dodge: int, boss: bool = False) -> float:
     return (1 - miss / 100) * attack * (1 + crit)
 
 
+def _plain(item) -> bool:
+    """시뮬레이션 플레이어는 조건부·개조 소모품을 쓰지 않는다(언제 쓸지 계획할 수 없는 소모품)."""
+    return not item.modify and not item.conditions
+
+
 def _best_heal(run, bal):
-    heals = [k for k in run.items if not bal.item_by_key[k].regen]
+    heals = [k for k in run.items if not bal.item_by_key[k].regen and _plain(bal.item_by_key[k])]
     return max(heals, key=lambda k: (bal.item_by_key[k].full, bal.item_by_key[k].heal)) if heals else None
 
 
@@ -62,6 +67,8 @@ def play(rng, policy: str, bal: Balance) -> tuple[bool, int]:
             missing, used = bal.max_hp - run.hp, False
             for key in sorted(run.items, key=lambda k: -bal.item_by_key[k].heal):
                 item = bal.item_by_key[key]
+                if not _plain(item):
+                    continue
                 if (item.full and missing >= bal.max_hp * 0.6) or (item.heal and not item.full and item.heal <= missing) \
                         or (item.regen and run.regen_turns == 0 and run.hp <= bal.max_hp * 0.9):
                     dungeon.use_consumable(run, key, bal)

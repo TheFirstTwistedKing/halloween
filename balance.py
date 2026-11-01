@@ -66,6 +66,8 @@ class Consumable:
     regen_turns: int = 0
     description: str = ""
     sell_price: int = 0          # 던전 안에서 팔 때 받는 재화(개당). 0이면 팔 수 없다.
+    modify: str | None = None    # 무기 개조: 쓰면 지금 든 무기가 이 무기(key)로 바뀐다. 개조 소모품은 회복 효과가 없다.
+    conditions: tuple = ()       # 사용 조건 ((종류, 값), ...). 전부 만족해야 쓸 수 있다. 비면 언제나 쓸 수 있다(아래 COND_* 참고).
 
 
 @dataclass(frozen=True)
@@ -98,6 +100,8 @@ def describe_gear(gear: Gear) -> str:
 
 
 def describe_item(item: Consumable) -> str:
+    if item.modify:
+        return "들고 있는 무기를 다른 무기로 개조해요"
     if item.full:
         return "HP를 전부 회복"
     if item.regen:
@@ -170,6 +174,85 @@ def _num(data: dict, key: str, low, high, default=0, none_ok=False):
     if isinstance(value, bool) or not isinstance(value, (int, float)) or value != int(value) or not low <= value <= high:
         return None, f"{key} 값은 {low}~{high} 사이의 정수여야 해요."
     return int(value), None
+
+
+# ---------------------------------------------------------------- 소모품 사용 조건
+# 상태 조건은 지금 상태를 보고(내 HP, 몬스터 HP: 최대 체력의 %), 사건 조건은 '바로 직전 행동'에서 일어난 일을 본다(다음 행동을 하면 사라진다).
+# 반사는 가드에 성공하면 항상 들어가므로 '반사 성공'은 가드 성공, '반사 실패'는 가드 실패와 같은 사건이다.
+MAX_CONDITIONS = 5
+COND_STATE = ("hp_le", "hp_ge", "enemy_hp_le", "enemy_hp_ge")
+COND_ITEM = ("item_gain", "item_use")
+COND_EVENT = ("guard_success", "guard_fail", "reflect_success", "reflect_fail", "attack_hit", "attack_miss") + COND_ITEM
+COND_LABELS = {
+    "hp_le": "내 HP {v}% 이하", "hp_ge": "내 HP {v}% 이상", "enemy_hp_le": "몬스터 HP {v}% 이하", "enemy_hp_ge": "몬스터 HP {v}% 이상",
+    "guard_success": "방어 성공 직후", "guard_fail": "방어 실패 직후", "reflect_success": "반사 성공 직후", "reflect_fail": "반사 실패 직후",
+    "attack_hit": "공격 적중 직후", "attack_miss": "공격이 빗나간 직후", "item_gain": "{v} 획득 직후", "item_use": "{v} 사용 직후",
+}
+EVENT_TAG = {"guard_success": "guard_success", "reflect_success": "guard_success", "guard_fail": "guard_fail", "reflect_fail": "guard_fail",
+             "attack_hit": "attack_hit", "attack_miss": "attack_miss"}      # 조건 종류 → Run.last에 남는 표시
+
+
+def condition_text(cond, names: dict | None = None) -> str:
+    """조건 하나를 사람이 읽는 문장으로. names는 소모품 key → 이름(없으면 key를 그대로 쓴다)."""
+    kind, value = cond
+    shown = (names or {}).get(value, value) if kind in COND_ITEM else value
+    return COND_LABELS[kind].format(v=shown)
+
+
+def check_conditions(raw):
+    """저장된 조건 목록을 검사해 ((종류, 값), ...)로 만든다. (조건들, None) 또는 (None, 이유)."""
+    if raw is None:
+        return (), None
+    if not isinstance(raw, (list, tuple)) or len(raw) > MAX_CONDITIONS:
+        return None, f"사용 조건은 {MAX_CONDITIONS}개까지예요."
+    out, seen = [], set()
+    for entry in raw:
+        if not isinstance(entry, (list, tuple)) or len(entry) != 2:
+            return None, "사용 조건 형식이 올바르지 않아요."
+        kind, value = entry
+        if kind in COND_STATE:
+            if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 100:
+                return None, "HP 조건의 값은 0~100(%) 정수여야 해요."
+            if kind in seen:
+                return None, f"'{condition_text((kind, value))}' 같은 종류의 조건은 하나만 붙일 수 있어요."
+        elif kind in COND_ITEM:
+            if not isinstance(value, str) or not 1 <= len(value) <= 40:
+                return None, "아이템 조건에는 소모품이 필요해요."
+        elif kind in COND_EVENT:
+            if value is not None:
+                return None, "이 조건에는 값이 필요 없어요."
+        else:
+            return None, "알 수 없는 사용 조건이에요."
+        if (kind, value) in seen:
+            return None, "같은 조건을 두 번 붙일 수 없어요."
+        seen.add((kind, value))
+        if kind in COND_STATE:
+            seen.add(kind)
+        out.append((kind, value))
+    events = [c for c in out if c[0] in COND_EVENT]
+    if len(events) > 1:
+        return None, ("직전 행동 조건(방어·반사·공격·아이템 획득/사용)은 하나만 붙일 수 있어요. 한 번의 행동에서는 한 가지 일만 일어나서 "
+                      "둘을 동시에 만족할 수 없어요. HP 조건은 함께 붙일 수 있어요.")
+    values = {c[0]: c[1] for c in out if c[0] in COND_STATE}
+    for low, high, who in (("hp_ge", "hp_le", "내"), ("enemy_hp_ge", "enemy_hp_le", "몬스터")):
+        if low in values and high in values and values[low] > values[high]:
+            return None, f"{who} HP의 '이상' 값이 '이하' 값보다 커서 조건을 만족할 수 없어요."
+    if events and events[0][0] == "item_gain" and ("enemy_hp_le" in values or "enemy_hp_ge" in values):
+        return None, "아이템은 몬스터가 없는 상자 방에서 얻어서, 몬스터 HP 조건과 함께 쓸 수 없어요."
+    return tuple(out), None
+
+
+def item_summary(item: Consumable, bal) -> str:
+    """소모품 설명 한 줄: 효과(개조면 목표 무기 이름) + 사용 조건."""
+    if item.modify:
+        gear = bal.gear_by_key.get(item.modify)
+        text = f"무기를 {gear.emoji} {gear.name}(으)로 개조" if gear else "무기 개조(목표 무기가 사라졌어요)"
+    else:
+        text = item.description
+    if item.conditions:
+        names = {c.key: c.name for c in bal.consumables}
+        text += " · 조건: " + " & ".join(condition_text(c, names) for c in item.conditions)
+    return text
 
 
 WEIGHT_MAX = 1000
@@ -258,7 +341,16 @@ def check_entity(section: str, data) -> tuple[object | None, str | None]:
     full = data.get("full", False)
     if not isinstance(full, bool):
         return None, "full 값이 올바르지 않아요."
-    if full:
+    modify = data.get("modify")
+    if modify is not None and (not isinstance(modify, str) or not 1 <= len(modify) <= 40):
+        return None, "개조할 무기가 올바르지 않아요."
+    conditions, problem = check_conditions(data.get("conditions"))
+    if problem:
+        return None, problem
+    if modify:                                          # 개조 소모품: 회복 효과는 없다.
+        full = False
+        n["heal"] = n["regen"] = n["regen_turns"] = 0
+    elif full:
         n["heal"] = n["regen"] = n["regen_turns"] = 0
     elif n["regen"] > 0:
         n["heal"] = 0
@@ -269,7 +361,7 @@ def check_entity(section: str, data) -> tuple[object | None, str | None]:
     else:
         n["regen_turns"] = 0
     item = Consumable(key, name, emoji, tier, n["weight"], heal=n["heal"], full=full, regen=n["regen"], regen_turns=n["regen_turns"],
-                      sell_price=n["sell_price"])
+                      sell_price=n["sell_price"], modify=modify or None, conditions=conditions)
     return replace(item, description=describe_item(item)), None
 
 

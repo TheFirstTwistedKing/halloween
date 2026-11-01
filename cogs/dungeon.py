@@ -9,7 +9,7 @@ import dungeon
 import dungeon_service as service
 import theme
 from owner import owner_only
-from balance import DEFAULT
+from balance import DEFAULT, item_summary
 from dungeon import ROOMS, Run
 
 BAR = 10
@@ -18,6 +18,13 @@ BAR = 10
 def bar(value: int, maximum: int, full: str, width: int = BAR) -> str:
     filled = 0 if maximum <= 0 else max(0, min(width, -(-value * width // maximum)))   # 남아 있으면 최소 한 칸
     return full * filled + "⬛" * (width - filled)
+
+
+def _ready_mark(run: Run, item, bal) -> str:
+    """조건부 소모품 표시: 조건을 만족해 지금 쓸 수 있으면 ✨, 아직이면 🔒. 조건이 없으면 빈 문자열."""
+    if not item.conditions:
+        return ""
+    return " 🔒" if dungeon.unmet_conditions(run, item, bal) else " ✨"
 
 
 def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=None) -> discord.Embed:
@@ -46,7 +53,8 @@ def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=No
         if any(spare):                                    # 예비 칸은 비어 있으면 보여 주지 않는다.
             embed.add_field(name="📦 예비", inline=False,
                             value=" · ".join(f"{g.emoji} {g.name}" if g else f"{label} —" for g, label in zip(spare, ("⚔️", "🛡️"))))
-        held = [f"{bal.item_by_key[k].emoji} {bal.item_by_key[k].name} ×{n}" for k, n in run.items.items() if k in bal.item_by_key]
+        held = [f"{bal.item_by_key[k].emoji} {bal.item_by_key[k].name} ×{n}" + _ready_mark(run, bal.item_by_key[k], bal)
+                for k, n in run.items.items() if k in bal.item_by_key]
         if held:                                          # 관리자가 지운 아이템만 남았다면 칸 자체를 숨긴다(빈 칸은 디스코드가 거절한다).
             embed.add_field(name="🧪 소지품", value="\n".join(held), inline=False)
         if run.regen_turns:
@@ -130,7 +138,7 @@ class ItemSelect(discord.ui.Select):
     def __init__(self, run: Run, bal):
         items = bal.item_by_key
         options = [discord.SelectOption(label=f"{items[k].name} ×{n}", value=k, emoji=items[k].emoji,
-                                        description=items[k].description[:100])
+                                        description=(_ready_mark(run, items[k], bal).strip() + " " + item_summary(items[k], bal)).strip()[:100])
                    for k, n in run.items.items() if k in items]
         super().__init__(placeholder="🧪 아이템 사용 (전투 중엔 한 턴을 써요)", options=options[:25], row=1)
 

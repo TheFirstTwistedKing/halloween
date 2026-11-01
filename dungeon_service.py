@@ -108,6 +108,7 @@ async def sell(store: Store, locks, guild_id: int, user_id: int, rev: int, picks
         run.events = [f"💰 {entry['emoji']} **{entry['name']}**" + (f" ×{qty:,}" if qty > 1 else "") + f" — {cur.money(entry['price'] * qty)}"
                       for entry, qty in sold]
         run.events.append(f"합계 {cur.money(total)}을(를) 받았어요!")
+        run.last = []
         run.bump()
         try:
             store.sell_in_dungeon(guild_id, user_id, run.to_json(), total)
@@ -129,6 +130,9 @@ async def peek(store: Store, guild_id: int, user_id: int) -> Run | None:
 
 def _apply(run: Run, rng, action: str, arg: str | None, guard_ok: bool | None, bal) -> str | None:
     """행동을 규칙에 적용한다. 할 수 없는 행동이면 이유를 돌려준다."""
+    previous, run.last = run.last, []                      # '바로 직전 행동'에서 일어난 일은 행동마다 새로 쓴다(소모품 사용 조건).
+    if action == "item":
+        run.last = previous                                # 소모품은 직전 행동을 기준으로 조건을 따진다. 쓰고 나면 use_consumable가 '방금 쓴 것'으로 새로 쓴다.
     if action == "quit":
         run.phase, run.enemy = "quit", None
         run.events = ["🚪 던전에서 나왔어요. 입장에 쓴 물품은 돌아오지 않아요."]

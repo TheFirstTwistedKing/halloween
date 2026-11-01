@@ -291,9 +291,9 @@ class BagSellTests(FakeWorld):
     async def test_the_selector_is_limited_to_25_options(self):
         with self.store.db:                                                            # 상점 25칸 한도를 거치지 않고 30개를 직접 넣는다.
             for n in range(30):
-                row = self.store.db.execute("INSERT INTO items(guild,name,emoji,kind,sell_price,sellable) VALUES(?,?,?,?,?,?) RETURNING id",
-                                            (G, f"물건{n:02}", "🎃", "item", 1, 1)).fetchone()
-                self.store.db.execute("INSERT INTO inventory VALUES(?,?,?,?)", (G, U, row["id"], 1))
+                item_id = self.store.db.execute("INSERT INTO items(guild,name,emoji,kind,sell_price,sellable) VALUES(?,?,?,?,?,?)",
+                                                (G, f"물건{n:02}", "🎃", "item", 1, 1)).lastrowid
+                self.store.db.execute("INSERT INTO inventory VALUES(?,?,?,?)", (G, U, item_id, 1))
         view = (await self.open_bag()).response.send_message.await_args.kwargs["view"]
         self.assertEqual(len(self.select(view).options), 25)
 

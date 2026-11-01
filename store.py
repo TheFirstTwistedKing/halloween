@@ -464,9 +464,10 @@ class Store:
                        or self.db.execute("SELECT id FROM items WHERE guild=? AND lower(name)=lower(?)", (guild, name)).fetchone())
                 if row is None:
                     sellable = listed < MAX_SHOP_ITEMS
-                    row = self.db.execute(
+                    cursor = self.db.execute(                       # RETURNING은 SQLite 3.35 이상에서만 되므로 lastrowid를 쓴다.
                         "INSERT INTO items(guild, name, emoji, description, kind, sell_price, sell_max, sellable, system) "
-                        "VALUES(?,?,?,?,'item',?,?,?,?) RETURNING id", (guild, name, emoji, description, low, high, int(sellable), system)).fetchone()
+                        "VALUES(?,?,?,?,'item',?,?,?,?)", (guild, name, emoji, description, low, high, int(sellable), system))
+                    row = {"id": cursor.lastrowid}
                     listed += sellable
                 new_ids[system] = row["id"]
         return new_ids

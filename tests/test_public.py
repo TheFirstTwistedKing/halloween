@@ -41,8 +41,8 @@ class PublicByDefaultTests(unittest.TestCase):
             self.assertEqual(private, [], f"{name}.py {private}")
 
     def test_only_the_dungeons_in_screen_buttons_and_the_shop_flows_and_packages_stay_private(self):
-        """남아 있는 비공개 응답은 버튼·선택창을 눌렀을 때의 개인 안내(던전 화면 안), 공용 상점 패널 쪽, 패키지뿐이다."""
-        allowed = {"cogs/dungeon.py", "packages.py", "panel.py", "views.py", "owner.py"}
+        """남아 있는 비공개 응답은 버튼·선택창을 눌렀을 때의 개인 안내(던전·연금술 화면 안), 공용 상점 패널 쪽, 패키지뿐이다."""
+        allowed = {"cogs/dungeon.py", "cogs/alchemy.py", "packages.py", "panel.py", "views.py", "owner.py"}
         found = set()
         for path in list(ROOT.glob("*.py")) + list((ROOT / "cogs").glob("*.py")):
             if "ephemeral=True" in path.read_text(encoding="utf-8"):

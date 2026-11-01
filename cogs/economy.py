@@ -104,6 +104,8 @@ class Economy(commands.Cog):
         embed.add_field(name="📦 패키지", inline=False,
                         value=f"채팅하다 보면 **{cfg['package_chance']:g}%** 확률로 패키지가 나타나요. **{mode}** 뜯을 수 있어요.\n"
                               + (f"한 번 뜯으면 **{cfg['package_cooldown']}초** 동안은 다른 패키지를 뜯을 수 없어요.\n" if cfg["package_cooldown"] else "")
+                              + (f"가끔 **{cfg['package_pile_chance']:g}%** 확률로 **패키지 더미**로 변이해서 나오는데, 더미는 **{cfg['package_pile_size']}개**가 나와요!\n"
+                                 if cfg["package_pile_chance"] else "")
                               + (results or "결과가 아직 없어요."))
         embed.add_field(name="🛒 쓰는 법", inline=False,
                         value=f"상점 채널에서 물품을 골라 사고팔 수 있어요. `/가방`으로 내 {cur.name}·물품을 봐요.\n"

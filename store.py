@@ -49,6 +49,8 @@ DEFAULT_SETTINGS = {
     "package_mode": "all",       # all: 누구나 각자 한 번씩 / first: 먼저 뜯은 한 명만
     "package_seconds": 120,      # 패키지가 머무는 시간(초)
     "package_cooldown": 30,      # 패키지를 뜯은 사람이 다음 패키지를 뜯을 수 있기까지(초). 0이면 제한 없음
+    "package_pile_chance": 35.0, # 패키지가 나타날 때 '더미'로 변이할 확률(%). 0이면 더미는 안 나온다
+    "package_pile_size": 3,      # 더미를 뜯으면 나오는 결과 개수(결과표에서 그만큼 따로 뽑는다)
     "reaction": True,            # 재화를 얻으면 메시지에 재화 이모지 반응을 단다
     "currency_emoji": CANDY, "currency_name": CANDY_NAME, "currency_max": CANDY_MAX,   # 재화 자체(/재화설정)
     "seeded": False,             # 기본 물품(열쇠·쓰레기)과 기본 패키지 결과표를 한 번 만들었는지
@@ -85,6 +87,8 @@ def validate_settings(cfg: dict) -> None:
     number("candy_cooldown", 0, 3600, True)
     number("package_seconds", 10, 3600, True)
     number("package_cooldown", 0, 3600, True)
+    number("package_pile_chance", 0, 100)
+    number("package_pile_size", 1, 10, True)
     if cfg["candy_min"] > cfg["candy_max"]:
         raise ValueError("최소값이 최대값보다 클 수 없어요.")
     if cfg["package_mode"] not in ("all", "first"):
@@ -125,6 +129,16 @@ def roll_candy(cfg: dict, rng) -> int:
 
 def roll_package_spawn(cfg: dict, rng) -> bool:
     return cfg["package_chance"] > 0 and rng.random() * 100 < cfg["package_chance"]
+
+
+def roll_package_pile(cfg: dict, rng) -> bool:
+    """방금 나타난 패키지가 '더미'로 변이할까(기본 35%)."""
+    return cfg["package_pile_chance"] > 0 and rng.random() * 100 < cfg["package_pile_chance"]
+
+
+def split_results(text: str) -> list[str]:
+    """package_opens에 저장된 결과(더미는 쉼표로 이은 여러 개)를 결과 id 목록으로."""
+    return [part for part in text.split(",") if part]
 
 
 def check_package_table(table) -> None:
@@ -246,7 +260,7 @@ class Store:
             CREATE TABLE IF NOT EXISTS shops(channel INTEGER PRIMARY KEY, guild INTEGER NOT NULL, message INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS packages(
                 message INTEGER PRIMARY KEY, guild INTEGER NOT NULL, channel INTEGER NOT NULL,
-                expires REAL NOT NULL, mode TEXT NOT NULL, closed INTEGER NOT NULL DEFAULT 0);
+                expires REAL NOT NULL, mode TEXT NOT NULL, closed INTEGER NOT NULL DEFAULT 0, pile INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS package_opens(
                 message INTEGER, user INTEGER, result TEXT NOT NULL, PRIMARY KEY(message, user));
             CREATE TABLE IF NOT EXISTS package_cooldowns(
@@ -264,6 +278,10 @@ class Store:
         if "sell_max" not in {row["name"] for row in self.db.execute("PRAGMA table_info(items)")}:
             with self.db:
                 self.db.execute("ALTER TABLE items ADD COLUMN sell_max INTEGER")
+        # 패키지 더미가 생기기 전에 만든 DB의 packages 표에는 pile 칸이 없다. 이미 나와 있던 패키지는 일반(0)으로 둔다.
+        if "pile" not in {row["name"] for row in self.db.execute("PRAGMA table_info(packages)")}:
+            with self.db:
+                self.db.execute("ALTER TABLE packages ADD COLUMN pile INTEGER NOT NULL DEFAULT 0")
 
     def close(self):
         self.db.close()
@@ -793,10 +811,11 @@ class Store:
             return self.db.execute("DELETE FROM shops WHERE channel=?", (channel,)).rowcount > 0
 
     # ---- 패키지 ----
-    def create_package(self, guild: int, channel: int, message: int, expires: float, mode: str):
+    def create_package(self, guild: int, channel: int, message: int, expires: float, mode: str, pile: int = 0):
+        """패키지 하나를 기록한다. pile이 0보다 크면 '더미'이고, 뜯으면 결과가 pile개 나온다."""
         with self.db:
-            self.db.execute("INSERT INTO packages(message, guild, channel, expires, mode) VALUES(?,?,?,?,?)",
-                            (message, guild, channel, expires, mode))
+            self.db.execute("INSERT INTO packages(message, guild, channel, expires, mode, pile) VALUES(?,?,?,?,?,?)",
+                            (message, guild, channel, expires, mode, pile))
 
     def package(self, message: int):
         return self.db.execute("SELECT * FROM packages WHERE message=?", (message,)).fetchone()

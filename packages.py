@@ -7,7 +7,7 @@ import time
 import discord
 
 import theme
-from store import roll_package_result
+from store import roll_package_pile, roll_package_result, split_results
 
 LOG = logging.getLogger("halloween")
 PKG_OPEN_ID = "hw:pkg:open"
@@ -48,13 +48,14 @@ def apply_reward(store, guild_id: int, user_id: int, entry: dict) -> int:
 
 async def spawn(client, message, cfg) -> discord.Message | None:
     """채팅이 올라온 그 채널에 패키지를 낸다."""
-    embed = theme.package_embed(cfg["package_mode"], cfg["package_seconds"])
+    pile = cfg["package_pile_size"] if roll_package_pile(cfg, client.rng) else 0       # 나타나는 순간 확률(기본 35%)로 '더미'로 변이한다.
+    embed = theme.package_embed(cfg["package_mode"], cfg["package_seconds"], pile)
     try:
         sent = await message.channel.send(embed=embed, view=PackageView())
     except discord.HTTPException:
         LOG.warning("패키지를 올리지 못했어요: 채널 %s", message.channel.id)
         return None
-    client.store.create_package(message.guild.id, message.channel.id, sent.id, time.time() + cfg["package_seconds"], cfg["package_mode"])
+    client.store.create_package(message.guild.id, message.channel.id, sent.id, time.time() + cfg["package_seconds"], cfg["package_mode"], pile)
     return sent
 
 
@@ -69,8 +70,10 @@ async def open_package(interaction: discord.Interaction):
     table = store.package_table(interaction.guild_id)
     if not table or sum(e["weight"] for e in table) <= 0:      # 표가 비었다면(관리자가 직접 고치지 않는 한 없는 일) 꽝으로 둔다.
         table = [{"id": "none", "kind": "none", "weight": 1, "amount": 1}]
-    entry = roll_package_result(table, client.rng)
-    status = store.open_package(interaction.message.id, interaction.user.id, entry["id"], now, cooldown)
+    row = store.package(interaction.message.id)
+    count = (row["pile"] or 1) if row else 1                     # 더미는 결과표에서 그 개수만큼 따로 뽑는다(꽝·재화도 섞일 수 있다).
+    entries = [roll_package_result(table, client.rng) for _ in range(count)]
+    status = store.open_package(interaction.message.id, interaction.user.id, ",".join(e["id"] for e in entries), now, cooldown)
     if status != "ok":
         text = {"again": "이미 이 패키지를 뜯었어요. 다음 패키지를 기다려 보세요!",
                 "closed": "한발 늦었어요. 이미 다른 분이 뜯었어요!",
@@ -78,9 +81,14 @@ async def open_package(interaction: discord.Interaction):
                 "wait": wait_text(store.package_wait(interaction.guild_id, interaction.user.id, now, cooldown))}[status]
         await interaction.response.send_message(embed=theme.notice(text, False), ephemeral=True)
         return
-    gained = apply_reward(store, interaction.guild_id, interaction.user.id, entry)
-    title, description = theme.package_result_text(entry, store, interaction.guild_id, gained)
-    await interaction.response.send_message(embed=theme.make_embed(title, description, color=theme.PURPLE), ephemeral=True)
+    gains = [apply_reward(store, interaction.guild_id, interaction.user.id, entry) for entry in entries]
+    if count > 1:
+        title, description = theme.package_pile_text(entries, gains, store, interaction.guild_id)
+        embed = theme.make_embed(title, description, color=theme.GOLD)
+    else:
+        title, description = theme.package_result_text(entries[0], store, interaction.guild_id, gains[0])
+        embed = theme.make_embed(title, description, color=theme.PURPLE)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
     row = store.package(interaction.message.id)
     if row and row["closed"] == 1:     # 선착순: 뜯은 사람이 나오면 바로 결과를 모두에게 보여준다.
         await summarize(client, row)
@@ -98,15 +106,19 @@ def summary_embed(row, openers, store=None) -> discord.Embed:
         emoji, title = theme.entry_icon_title(entry, store, row["guild"])
         return f"{emoji} {title}"
 
+    pile = bool(row["pile"])                                           # 더미면 한 사람이 결과를 여러 개 받았다.
+    kind, color = ("패키지 더미", theme.GOLD) if pile else ("패키지", theme.PURPLE)
     if row["mode"] == "first" and openers:
-        return theme.make_embed("📦 패키지가 열렸어요!", f"<@{openers[0]['user']}> 님이 뜯었어요 → **{label(openers[0]['result'])}**", color=theme.PURPLE)
+        got = " · ".join(f"**{label(r)}**" for r in split_results(openers[0]["result"]))
+        return theme.make_embed(f"📦 {kind}가 열렸어요!", f"<@{openers[0]['user']}> 님이 뜯었어요 → {got}", color=color)
     if openers:
         counts = {}
         for opener in openers:
-            counts[opener["result"]] = counts.get(opener["result"], 0) + 1
+            for result in split_results(opener["result"]):
+                counts[result] = counts.get(result, 0) + 1
         detail = " · ".join(f"{label(k)} ×{v}" for k, v in counts.items())
-        return theme.make_embed("📦 패키지가 사라졌어요", f"{len(openers)}명이 뜯었어요.\n{detail}", color=theme.PURPLE)
-    return theme.make_embed("📦 패키지가 사라졌어요", "아무도 뜯지 않았어요… 🕸️", color=theme.PURPLE)
+        return theme.make_embed(f"📦 {kind}가 사라졌어요", f"{len(openers)}명이 뜯었어요.\n{detail}", color=color)
+    return theme.make_embed(f"📦 {kind}가 사라졌어요", "아무도 뜯지 않았어요… 🕸️", color=color)
 
 
 async def summarize(client, row):

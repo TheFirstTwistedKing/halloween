@@ -379,12 +379,12 @@ class Dungeon(commands.Cog):
     @app_commands.guild_only()
     async def enter(self, interaction: discord.Interaction):
         outcome = await service.enter(self.bot.store, self.bot.locks, interaction.guild_id, interaction.user.id)
-        if not outcome.ok:
-            await interaction.response.send_message(embed=theme.notice(outcome.text, False), ephemeral=False)
+        if not outcome.ok:                                   # 던전은 개인 화면이다: 입장 불가 안내도 던전 화면도 본인에게만 보인다.
+            await interaction.response.send_message(embed=theme.notice(outcome.text, False), ephemeral=True)
             return
         bal = self.bot.store.balance(interaction.guild_id)
         await interaction.response.send_message(embed=run_embed(outcome.run, None, bal, self.bot.store.currency(interaction.guild_id)),
-                                                view=DungeonView(self.bot, interaction.user.id, outcome.run, bal), ephemeral=False)
+                                                view=DungeonView(self.bot, interaction.user.id, outcome.run, bal), ephemeral=True)
 
 
 async def setup(bot):

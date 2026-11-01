@@ -15,6 +15,7 @@ Choice = app_commands.Choice
 TIERS = [Choice(name=t, value=t) for t in TIER_ORDER]
 SLOTS = [Choice(name="무기", value="weapon"), Choice(name="방패", value="shield")]
 LIST_CHOICES = [Choice(name=SECTION_LABELS[s], value=s) for s in SECTIONS]
+GUARD_CHANCE_HELP = "방패: 이 방패로 방어할 때 가드에 성공할 확률(%). 비우면 서버 기본(/던전설정 방어.성공확률)을 써요."
 WEIGHT_HELP = "상자에서 나올 비율. 소수도 돼요(예: 0.5, 0.05). 다른 것들과의 비율로 계산하고 높을수록 자주 나와요"
 SELL_HELP = "던전 안에서 팔 때 받는 재화(개당). 0이면 팔 수 없어요. 비우면 그대로(추가할 땐 등급별 기본값)"
 SELL_TARGETS = [Choice(name="장비와 소모품 모두", value="both"), Choice(name="장비만", value="gear"), Choice(name="소모품만", value="consumables")]
@@ -107,19 +108,20 @@ class ContentAdmin(commands.Cog):
 
     @gear.command(name="추가", description="장비를 새로 만들어요 (관리자)")
     @app_commands.rename(name="이름", emoji="이모지", slot="종류", tier="등급", weight="등장", attack="공격력", crit="크리티컬",
-                         dodge="회피변환", guard="가드", reflect="반사", sell_price="판매가")
+                         dodge="회피변환", guard="가드", reflect="반사", guard_chance="가드성공률", sell_price="판매가")
     @app_commands.describe(slot="무기 / 방패", weight=WEIGHT_HELP, attack="무기: 공격 피해 추가", crit="무기: 크리티컬(2배) 확률(%)",
                            dodge="무기: 잡몹의 회피 확률을 이 값으로 바꿔요(%)", guard="방패: 가드 성공 시 피해 감소(%)(필수)",
-                           reflect="방패: 가드 성공 시 반사 피해(%)", sell_price=SELL_HELP)
+                           reflect="방패: 가드 성공 시 반사 피해(%)", guard_chance=GUARD_CHANCE_HELP, sell_price=SELL_HELP)
     @app_commands.choices(slot=SLOTS, tier=TIERS)
     async def gear_add(self, interaction: discord.Interaction, name: str, emoji: str, slot: Choice[str], tier: Choice[str],
                        weight: app_commands.Range[float, 0, 1000], attack: app_commands.Range[int, 0, 100000] = 0,
                        crit: app_commands.Range[int, 0, 100] = 0, dodge: app_commands.Range[int, 0, 95] | None = None,
                        guard: app_commands.Range[int, 0, 100] | None = None, reflect: app_commands.Range[int, 0, 500] | None = None,
-                       sell_price: app_commands.Range[int, 0, SELL_MAX] | None = None):
+                       sell_price: app_commands.Range[int, 0, SELL_MAX] | None = None,
+                       guard_chance: app_commands.Range[int, 0, 100] | None = None):
         def go():
             data = dict(name=name, emoji=emoji.strip(), slot=slot.value, tier=tier.value, weight=weight, attack=attack, crit=crit,
-                        dodge=dodge, guard=guard, reflect=reflect)
+                        dodge=dodge, guard=guard, reflect=reflect, guard_chance=guard_chance)
             if sell_price is not None:                  # 비우면 등급별 기본 판매가
                 data["sell_price"] = sell_price
             entity = content.add(self.bot.store, interaction.guild_id, "gear", data)
@@ -128,15 +130,16 @@ class ContentAdmin(commands.Cog):
 
     @gear.command(name="수정", description="장비의 값을 고쳐요. 바꿀 것만 적으세요 (-1은 해제) (관리자)")
     @app_commands.rename(target="대상", new_name="새이름", emoji="이모지", tier="등급", weight="등장", attack="공격력", crit="크리티컬",
-                         dodge="회피변환", guard="가드", reflect="반사", sell_price="판매가")
-    @app_commands.describe(weight=WEIGHT_HELP, sell_price=SELL_HELP)
+                         dodge="회피변환", guard="가드", reflect="반사", guard_chance="가드성공률", sell_price="판매가")
+    @app_commands.describe(weight=WEIGHT_HELP, guard_chance=GUARD_CHANCE_HELP + " -1은 해제(서버 기본으로)", sell_price=SELL_HELP)
     @app_commands.choices(tier=TIERS)
     async def gear_edit(self, interaction: discord.Interaction, target: str, new_name: str | None = None, emoji: str | None = None,
                         tier: Choice[str] | None = None, weight: app_commands.Range[float, 0, 1000] | None = None,
                         attack: app_commands.Range[int, 0, 100000] | None = None, crit: app_commands.Range[int, 0, 100] | None = None,
                         dodge: app_commands.Range[int, -1, 95] | None = None, guard: app_commands.Range[int, 0, 100] | None = None,
                         reflect: app_commands.Range[int, -1, 500] | None = None,
-                        sell_price: app_commands.Range[int, 0, SELL_MAX] | None = None):
+                        sell_price: app_commands.Range[int, 0, SELL_MAX] | None = None,
+                        guard_chance: app_commands.Range[int, -1, 100] | None = None):
         def go():
             changes = dict(name=new_name, emoji=emoji and emoji.strip(), tier=tier and tier.value, weight=weight, attack=attack,
                            crit=crit, guard=guard, sell_price=sell_price)
@@ -145,6 +148,8 @@ class ContentAdmin(commands.Cog):
                 changes["dodge"] = None if dodge < 0 else dodge
             if reflect is not None:
                 changes["reflect"] = None if reflect < 0 else reflect
+            if guard_chance is not None:                # -1은 '해제'(서버 기본 성공률로)
+                changes["guard_chance"] = None if guard_chance < 0 else guard_chance
             section, entity = content.edit(self.bot.store, interaction.guild_id, ("gear",), target, changes)
             return section, self._entity_dict(entity)
         await self._run(interaction, go, "✏️ 고쳤어요.")

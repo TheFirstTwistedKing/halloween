@@ -45,6 +45,7 @@ DEFAULT_SETTINGS = {
     "package_chance": 0.1,       # 채팅 한 번당 패키지가 나올 확률(%)
     "package_mode": "all",       # all: 누구나 각자 한 번씩 / first: 먼저 뜯은 한 명만
     "package_seconds": 120,      # 패키지가 머무는 시간(초)
+    "package_cooldown": 30,      # 패키지를 뜯은 사람이 다음 패키지를 뜯을 수 있기까지(초). 0이면 제한 없음
     "reaction": True,            # 재화를 얻으면 메시지에 재화 이모지 반응을 단다
     "currency_emoji": CANDY, "currency_name": CANDY_NAME, "currency_max": CANDY_MAX,   # 재화 자체(/재화설정)
     "seeded": False,             # 기본 물품(열쇠·쓰레기)과 기본 패키지 결과표를 한 번 만들었는지
@@ -80,6 +81,7 @@ def validate_settings(cfg: dict) -> None:
     number("candy_max", 0, 1000, True)
     number("candy_cooldown", 0, 3600, True)
     number("package_seconds", 10, 3600, True)
+    number("package_cooldown", 0, 3600, True)
     if cfg["candy_min"] > cfg["candy_max"]:
         raise ValueError("최소값이 최대값보다 클 수 없어요.")
     if cfg["package_mode"] not in ("all", "first"):
@@ -244,6 +246,8 @@ class Store:
                 expires REAL NOT NULL, mode TEXT NOT NULL, closed INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS package_opens(
                 message INTEGER, user INTEGER, result TEXT NOT NULL, PRIMARY KEY(message, user));
+            CREATE TABLE IF NOT EXISTS package_cooldowns(
+                guild INTEGER, user INTEGER, at REAL NOT NULL, PRIMARY KEY(guild, user));
             CREATE TABLE IF NOT EXISTS dungeons(
                 guild INTEGER, user INTEGER, data TEXT NOT NULL, PRIMARY KEY(guild, user));
             CREATE TABLE IF NOT EXISTS tickets(
@@ -661,21 +665,38 @@ class Store:
     def active_package(self, channel: int, now: float):
         return self.db.execute("SELECT * FROM packages WHERE channel=? AND closed=0 AND expires>?", (channel, now)).fetchone()
 
-    def open_package(self, message: int, user: int, result: str, now: float) -> str:
-        """패키지를 뜯은 기록을 남긴다. 'ok' 또는 'gone'(없거나 끝남) / 'closed'(선착순에서 이미 뜯김) / 'again'(이미 뜯음)."""
+    def package_wait(self, guild: int, user: int, now: float, cooldown: float) -> float:
+        """이 사람이 다음 패키지를 뜯을 수 있기까지 남은 초. 바로 뜯을 수 있으면 0."""
+        if cooldown <= 0:
+            return 0.0
+        row = self.db.execute("SELECT at FROM package_cooldowns WHERE guild=? AND user=?", (guild, user)).fetchone()
+        return max(0.0, row["at"] + cooldown - now) if row else 0.0
+
+    def open_package(self, message: int, user: int, result: str, now: float, cooldown: float = 0) -> str:
+        """패키지를 뜯은 기록을 남긴다. 'ok' 또는 'gone'(없거나 끝남) / 'closed'(선착순에서 이미 뜯김) / 'again'(이미 뜯음) /
+        'wait'(방금 다른 패키지를 뜯어서 cooldown초가 아직 안 지남: 아무것도 기록하지 않는다). 뜯으면 쿨타임이 새로 시작된다."""
         with self.db:
             row = self.package(message)
             if row is None or row["expires"] <= now:
                 return "gone"
             if row["closed"]:
                 return "closed"
+            if self.db.execute("SELECT 1 FROM package_opens WHERE message=? AND user=?", (message, user)).fetchone():
+                return "again"
+            if self.package_wait(row["guild"], user, now, cooldown) > 0:
+                return "wait"
             try:
                 self.db.execute("INSERT INTO package_opens VALUES(?,?,?)", (message, user, result))
             except sqlite3.IntegrityError:
                 return "again"
             if row["mode"] == "first":
                 self.db.execute("UPDATE packages SET closed=1 WHERE message=?", (message,))
+            self.db.execute("INSERT INTO package_cooldowns VALUES(?,?,?) ON CONFLICT(guild,user) DO UPDATE SET at=excluded.at",
+                            (row["guild"], user, now))
         return "ok"
+
+    def has_opened(self, message: int, user: int) -> bool:
+        return self.db.execute("SELECT 1 FROM package_opens WHERE message=? AND user=?", (message, user)).fetchone() is not None
 
     def package_openers(self, message: int):
         return self.db.execute("SELECT user, result FROM package_opens WHERE message=? ORDER BY rowid", (message,)).fetchall()

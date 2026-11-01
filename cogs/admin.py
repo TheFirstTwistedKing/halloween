@@ -77,7 +77,8 @@ def settings_embed(cfg) -> discord.Embed:
                           f"같은 사람 쿨타임: {cooldown(cfg['candy_cooldown'])}")
     mode = "먼저 뜯은 한 명만" if cfg["package_mode"] == "first" else "누구나 한 번씩"
     embed.add_field(name="📦 패키지", inline=False,
-                    value=f"채팅 한 번에 **{cfg['package_chance']:g}%** 확률 · {mode} · {cfg['package_seconds']}초 동안")
+                    value=f"채팅 한 번에 **{cfg['package_chance']:g}%** 확률 · {mode} · {cfg['package_seconds']}초 동안\n"
+                          f"패키지 쿨타임: {cooldown(cfg['package_cooldown'])} (뜯은 사람이 다음 패키지를 뜯기까지)")
     embed.add_field(name=f"{cur_emoji} 반응", value="켜짐" if cfg["reaction"] else "꺼짐", inline=False)
     return embed
 
@@ -138,11 +139,13 @@ class Admin(commands.Cog):
     @app_commands.guild_only()
     @app_commands.default_permissions(administrator=True)
     @app_commands.rename(candy_chance="재화확률", candy_min="재화최소", candy_max="재화최대", candy_cooldown="재화쿨타임",
-                         package_chance="패키지확률", package_mode="패키지방식", package_seconds="패키지시간", reaction="반응")
+                         package_chance="패키지확률", package_mode="패키지방식", package_seconds="패키지시간", package_cooldown="패키지쿨타임",
+                         reaction="반응")
     @app_commands.describe(candy_chance="채팅 한 번당 재화를 얻을 확률(%, 기본 50)", candy_min="한 번에 얻는 재화 최소(기본 1)",
                            candy_max="한 번에 얻는 재화 최대(기본 5)", candy_cooldown="같은 사람이 다시 얻기까지(초, 기본 3, 0=제한 없음)",
                            package_chance="채팅 한 번당 패키지 확률(%, 기본 0.1)",
                            package_mode="누구나 한 번씩 / 먼저 뜯은 한 명만", package_seconds="패키지가 머무는 시간(초, 기본 120)",
+                           package_cooldown="패키지를 뜯은 사람이 다음 패키지를 뜯기까지(초, 기본 30, 0=제한 없음)",
                            reaction="재화를 얻으면 재화 이모지 반응 달기")
     @app_commands.choices(package_mode=[app_commands.Choice(name="누구나 한 번씩", value="all"),
                                         app_commands.Choice(name="먼저 뜯은 한 명만", value="first")])
@@ -152,12 +155,14 @@ class Admin(commands.Cog):
                        candy_cooldown: app_commands.Range[int, 0, 3600] | None = None,
                        package_chance: app_commands.Range[float, 0, 100] | None = None,
                        package_mode: app_commands.Choice[str] | None = None,
-                       package_seconds: app_commands.Range[int, 10, 3600] | None = None, reaction: bool | None = None):
+                       package_seconds: app_commands.Range[int, 10, 3600] | None = None,
+                       package_cooldown: app_commands.Range[int, 0, 3600] | None = None, reaction: bool | None = None):
         if not await require_admin(interaction):
             return
         changes = {k: v for k, v in dict(candy_chance=candy_chance, candy_min=candy_min, candy_max=candy_max,
                                          candy_cooldown=candy_cooldown,
-                                         package_chance=package_chance, package_seconds=package_seconds, reaction=reaction).items()
+                                         package_chance=package_chance, package_seconds=package_seconds,
+                                         package_cooldown=package_cooldown, reaction=reaction).items()
                    if v is not None}
         if package_mode is not None:
             changes["package_mode"] = package_mode.value

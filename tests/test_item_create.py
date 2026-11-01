@@ -136,7 +136,7 @@ class AdoptSameNamedItemTests(unittest.TestCase):
         self.assertEqual((store.item(1, key["id"])["emoji"], store.item(1, key["id"])["description"], store.qty(1, 7, key["id"])), ("🔑", "내가 만든 열쇠", 4))
         table = {e["id"]: e for e in cfg["package_table"]}
         self.assertEqual((table["key"]["item"], table["trash"]["item"]), (key["id"], trash["id"]))
-        self.assertEqual(len(cfg["package_table"]), 11)                      # 새 기본 확률표까지 그대로 적용된다.
+        self.assertEqual(len(cfg["package_table"]), 12)                      # 새 기본 확률표까지 그대로 적용된다.
         store.ensure_defaults(1)                                             # 다시 불러도 그대로
         self.assertEqual(len([r for r in store.items(1) if r["name"] == "열쇠"]), 1)
         store.close()

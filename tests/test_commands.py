@@ -16,7 +16,7 @@ Choice = discord.app_commands.Choice
 
 from store import NEW_ITEMS
 
-NEW_NAMES = [item[1] for item in NEW_ITEMS]
+NEW_NAMES = [*(item[1] for item in NEW_ITEMS), "부활권"]      # 부활권은 버전 2에서 마지막에 만들어진다
 
 
 class CommandFixture(unittest.IsolatedAsyncioTestCase):
@@ -412,8 +412,8 @@ class EconomyCommandTests(CommandFixture):
         self.assertIn("**0.1%** 확률로 패키지", text)
         self.assertIn("누구나 한 번씩", text)
         self.assertNotIn("EXP", text)
-        self.assertIn("👻 꽝 40% · 🗝️ 열쇠 14% · 🍬 할로윈 재화 50 7% · 🗑️ 쓰레기 11% · 🧙 마녀 모자 5.5% · 👻 유령의 천 5.5% · "
-                      "🥃 깨진 유리조각 8% · 🎃 잭 오 랜턴 3% · 🌙 달 조각 1.5% · 🍷 뱀파이어맛 와인 0.5% · ⚗️ 수상한 액체가 담긴 병 4%", text)
+        self.assertIn("👻 꽝 39.9% · 🗝️ 열쇠 14% · 🍬 할로윈 재화 50 7% · 🗑️ 쓰레기 11% · 🧙 마녀 모자 5.5% · 👻 유령의 천 5.5% · "
+                      "🥃 깨진 유리조각 8% · 🎃 잭 오 랜턴 3% · 🌙 달 조각 1.5% · 🍷 뱀파이어맛 와인 0.5% · ⚗️ 수상한 액체가 담긴 병 4% · 🎟️ 부활권 0.1%", text)
         self.assertIn("최대 99,999개", text)
         self.store.update_settings(100, channels=[400, 401], candy_chance=80, package_mode="first")
         interaction = await self.call(Economy.help, self.economy, self.ask(admin=False))

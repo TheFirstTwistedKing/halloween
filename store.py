@@ -21,7 +21,7 @@ MAX_SHOP_ITEMS = 25              # 선택창 한도(디스코드): 상점에 올
 QTY_MAX = 999                    # 한 번에 사고팔 수 있는 수량
 TICKET_MAX = 99_999              # 한 사람이 가질 수 있는 히든 칭호 획득권의 최대(관리자 지급 기준)
 MAX_RECIPES = 100                # 서버마다 연금술 레시피 수 한도
-SEED_VERSION = 1                 # 기본 물품·패키지 결과표의 버전. 올리면 이미 운영 중인 서버도 한 번 이전한다(_upgrade_seed).
+SEED_VERSION = 2                 # 기본 물품·패키지 결과표의 버전. 올리면 이미 운영 중인 서버도 한 번 이전한다(_upgrade_seed).
 PACKAGE_CANDY = 50
 MAX_PACKAGE_ENTRIES = 20
 SYSTEM_ITEMS = {
@@ -39,6 +39,10 @@ NEW_ITEMS = (
     ("vampire_wine", "뱀파이어맛 와인", "🍷", "붉고 진한 와인이에요. 한 모금이면 송곳니가 자란다는 소문이 있어요.", 500, None, 0.5),
     ("mystery_bottle", "수상한 액체가 담긴 병", "⚗️", "뭐가 들었는지 아무도 몰라요. 팔 때마다 값이 달라져요.", -300, 300, 4),
 )
+# 부활권(버전 2에서 추가): 던전에서 쓰러졌을 때 가방에 있으면 자동으로 한 장 쓰여서 되살아난다. 팔 수도 살 수도 없게 만든다(관리자가 /물품수정으로 바꿀 수 있다).
+REVIVE_SYSTEM = "revive"
+REVIVE_ITEM = ("부활권", "🎟️", "던전에서 쓰러졌을 때 가방에 있으면 자동으로 한 장 쓰여서, 그 자리에서 다시 일어나요.")
+REVIVE_PERCENT = 0.1             # 패키지 한 번에서 부활권이 나올 확률(%)
 TRASH_SELL = (-20, 20)           # 쓰레기의 판매가 범위(팔 때마다 이 사이에서 뽑는다)
 DEFAULT_SETTINGS = {
     "channels": [],              # 재화·패키지가 나오는 채널
@@ -216,8 +220,9 @@ def first_package_table(ids: dict) -> list[dict]:
         {"id": "trash", "kind": "item", "item": ids["trash"], "weight": 10, "amount": 1}]
 
 
-def default_package_table(ids: dict, new_ids: dict) -> list[dict]:
-    """버전 1의 기본 패키지 결과표(가중치 합 100이라 가중치가 곧 퍼센트). 값어치가 높을수록 드물고, 쓸모없거나 손해인 물품은 흔하다."""
+def package_table_v1(ids: dict, new_ids: dict) -> list[dict]:
+    """버전 1의 기본 패키지 결과표(가중치 합 100이라 가중치가 곧 퍼센트). 값어치가 높을수록 드물고, 쓸모없거나 손해인 물품은 흔하다.
+    버전 2로 올릴 때 서버의 표가 아직 이것 그대로인지 알아보는 데에도 쓴다."""
     table = [
         {"id": "none", "kind": "none", "weight": 40, "amount": 1, "emoji": "👻", "title": "꽝"},
         {"id": "key", "kind": "item", "item": ids["key"], "weight": 14, "amount": 1},
@@ -226,6 +231,45 @@ def default_package_table(ids: dict, new_ids: dict) -> list[dict]:
     for system, _name, _emoji, _description, _low, _high, weight in NEW_ITEMS:
         table.append({"id": system, "kind": "item", "item": new_ids[system], "weight": weight, "amount": 1})
     return table
+
+
+def _is_package_table_v1(table: list[dict]) -> bool:
+    by_id = {e.get("id"): e for e in table}
+    try:
+        ids = {key: by_id[key]["item"] for key in ("key", "trash")}
+        new_ids = {system: by_id[system]["item"] for system, *_ in NEW_ITEMS}
+    except KeyError:
+        return False
+    return table == package_table_v1(ids, new_ids)
+
+
+def table_with_revive(table: list[dict], revive_id: int) -> list[dict]:
+    """패키지 결과표에 부활권을 REVIVE_PERCENT(0.1%)로 넣는다. 이미 있으면 그대로 둔다.
+    버전 1 기본 표 그대로면 꽝에서 0.1을 덜어 합이 100인 채로 정확히 0.1%가 되게 하고,
+    관리자가 손댄 표면 다른 결과의 비율은 건드리지 않고 부활권의 몫이 0.1% 안팎이 되게 가중치를 계산해 덧붙인다(칸이 가득 찼거나 표가 비면 못 넣는다)."""
+    if any(e["kind"] == "item" and e.get("item") == revive_id for e in table):
+        return table
+    if len(table) >= MAX_PACKAGE_ENTRIES:
+        return table
+    new_id = REVIVE_SYSTEM
+    while any(e.get("id") == new_id for e in table):
+        new_id += "_"
+    entry = {"id": new_id, "kind": "item", "item": revive_id, "weight": REVIVE_PERCENT, "amount": 1}
+    if _is_package_table_v1(table):
+        out = [dict(e) for e in table]
+        out[0]["weight"] = round(out[0]["weight"] - REVIVE_PERCENT, 4)
+        return out + [entry]
+    total = sum(e["weight"] for e in table)
+    if total <= 0:
+        return table
+    entry["weight"] = max(0.0001, round(total * REVIVE_PERCENT / (100 - REVIVE_PERCENT), 4))
+    return [dict(e) for e in table] + [entry]
+
+
+def default_package_table(ids: dict, new_ids: dict, revive_id: int | None = None) -> list[dict]:
+    """지금의 기본 패키지 결과표(가중치 합 100이라 가중치가 곧 퍼센트). 버전 1의 표에 부활권 0.1%를 더한 것(꽝에서 0.1을 덜어낸다)."""
+    table = package_table_v1(ids, new_ids)
+    return table_with_revive(table, revive_id) if revive_id is not None else table
 
 
 # ---------------------------------------------------------------- 저장소
@@ -432,6 +476,37 @@ class Store:
             self._upgrade_seed(guild)
 
     def _upgrade_seed(self, guild: int) -> None:
+        """서버의 기본 구성을 SEED_VERSION까지 올린다. 한 단계씩 차례로 거친다(새 서버는 0 → 1 → 2)."""
+        if self.settings(guild)["seed_version"] < 1:
+            self._upgrade_seed_v1(guild)
+        if self.settings(guild)["seed_version"] < 2:
+            self._upgrade_seed_v2(guild)
+
+    def _upgrade_seed_v2(self, guild: int) -> None:
+        """버전 2: 부활권을 만들고 패키지 결과표에 0.1%로 넣는다(table_with_revive). 부활권이 이미 표에 있으면 그대로 둔다.
+        - 같은 이름('부활권')의 물품을 관리자가 이미 만들어 뒀다면 그 물품을 부활권으로 이어받는다(이름·가격·가방 속 개수는 그대로)."""
+        revive_id = self._ensure_revive_item(guild)
+        table = table_with_revive(self.settings(guild)["package_table"], revive_id)
+        self.update_settings(guild, seed_version=2, package_table=table)
+
+    def _ensure_revive_item(self, guild: int) -> int:
+        """부활권 물품의 id. 없으면 만든다(팔 수 없고 살 수 없다). 같은 이름의 물품이 있으면 그걸 부활권으로 삼는다."""
+        name, emoji, description = REVIVE_ITEM
+        with self.db:
+            row = self.db.execute("SELECT id FROM items WHERE guild=? AND system=?", (guild, REVIVE_SYSTEM)).fetchone()
+            if row is None:
+                same = self.db.execute("SELECT id, kind FROM items WHERE guild=? AND lower(name)=lower(?)", (guild, name)).fetchone()
+                if same and same["kind"] == "item":
+                    self.db.execute("UPDATE items SET system=? WHERE id=?", (REVIVE_SYSTEM, same["id"]))
+                    return same["id"]
+                if same:                                           # 같은 이름의 역할 상품이 있다면 이름만 살짝 다르게 만든다.
+                    name = "던전 " + name
+                cursor = self.db.execute("INSERT INTO items(guild, name, emoji, description, kind, system) VALUES(?,?,?,?,'item',?)",
+                                         (guild, name, emoji, description, REVIVE_SYSTEM))
+                return cursor.lastrowid
+            return row["id"]
+
+    def _upgrade_seed_v1(self, guild: int) -> None:
         """버전 1: 패키지에서 나오는 물품 7종을 만들고, 쓰레기를 팔 수 있게 하고, 패키지 결과표를 좋은 물품은 드물게·나쁜 물품은 흔하게 바꾼다.
         - 관리자가 같은 이름의 물품을 이미 만들어 뒀다면 그 물품을 그대로 쓰고 값은 건드리지 않는다.
         - 쓰레기는 아직 손대지 않았을 때만(판매 꺼짐·판매가 0) 판매가 범위를 정한다.
@@ -450,8 +525,8 @@ class Store:
                self.db.execute("SELECT id, system FROM items WHERE guild=? AND system IN ('key','trash')", (guild,)).fetchall()}
         table = cfg["package_table"]
         if "key" in ids and "trash" in ids and table == first_package_table(ids):
-            table = default_package_table(ids, new_ids)
-        self.update_settings(guild, seed_version=SEED_VERSION, package_table=table)
+            table = package_table_v1(ids, new_ids)
+        self.update_settings(guild, seed_version=1, package_table=table)
 
     def _ensure_new_items(self, guild: int) -> dict[str, int]:
         """패키지 물품 7종 중 없는 것을 만든다. 시스템 이름이나 같은 이름의 물품이 이미 있으면 그걸 그대로 쓰고 값은 건드리지 않는다.
@@ -473,7 +548,7 @@ class Store:
         return new_ids
 
     def apply_default_package_table(self, guild: int) -> list[dict]:
-        """패키지 결과표를 지금의 기본 확률표로 통째로 바꾼다(관리자가 손댄 표여도). 표에 필요한 물품(열쇠·쓰레기·새 물품 7종) 중 없는 것은 만들고,
+        """패키지 결과표를 지금의 기본 확률표로 통째로 바꾼다(관리자가 손댄 표여도). 표에 필요한 물품(열쇠·쓰레기·새 물품 7종·부활권) 중 없는 것은 만들고,
         있는 것은 이름·가격을 그대로 둔다. 가방·지갑·다른 설정은 건드리지 않는다. 새 표를 돌려준다."""
         self.ensure_defaults(guild)
         with self.db:
@@ -489,7 +564,7 @@ class Store:
             row = (self.db.execute("SELECT id FROM items WHERE guild=? AND system=?", (guild, key)).fetchone()
                    or self.db.execute("SELECT id FROM items WHERE guild=? AND lower(name)=lower(?)", (guild, name)).fetchone())
             ids[key] = row["id"]
-        table = default_package_table(ids, new_ids)
+        table = default_package_table(ids, new_ids, self._ensure_revive_item(guild))
         self.update_settings(guild, package_table=table)
         return table
 
@@ -924,6 +999,30 @@ class Store:
         """진행 상황을 저장한다. 이미 끝난(지워진) 던전은 되살리지 않는다."""
         with self.db:
             self.db.execute("UPDATE dungeons SET data=? WHERE guild=? AND user=?", (data, guild, user))
+
+    def revive_item(self, guild: int):
+        """부활권 물품(행). 관리자가 지웠다면 None."""
+        return self.db.execute("SELECT * FROM items WHERE guild=? AND system=?", (guild, REVIVE_SYSTEM)).fetchone()
+
+    def use_revive(self, guild: int, user: int, data: str) -> bool:
+        """부활권 한 장을 쓰고, 되살아난 던전 상태를 저장한다(한 덩어리). 부활권이 없거나 진행 중인 던전이 없으면 아무것도 바꾸지 않고 False."""
+        class _No(Exception):
+            pass
+        try:
+            with self.db:
+                item = self.revive_item(guild)
+                if item is None:
+                    raise _No
+                if self.db.execute("UPDATE inventory SET qty=qty-1 WHERE guild=? AND user=? AND item=? AND qty>1",
+                                   (guild, user, item["id"])).rowcount == 0:
+                    if self.db.execute("DELETE FROM inventory WHERE guild=? AND user=? AND item=? AND qty=1",
+                                       (guild, user, item["id"])).rowcount == 0:
+                        raise _No
+                if self.db.execute("UPDATE dungeons SET data=? WHERE guild=? AND user=?", (data, guild, user)).rowcount == 0:
+                    raise _No
+        except _No:
+            return False
+        return True
 
     def sell_in_dungeon(self, guild: int, user: int, data: str, total: int) -> int:
         """던전 안에서 장비·소모품을 판 결과를 저장하고 재화를 준다(한 덩어리). 지금 가진 재화를 돌려준다.

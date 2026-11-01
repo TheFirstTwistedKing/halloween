@@ -42,15 +42,19 @@ class ProbabilityTests(unittest.TestCase):
 
     def test_package_result_boundaries(self):
         table = Store(":memory:").package_table(1)
-        # 누적 경계(%): 꽝 0~40 · 열쇠 ~54 · 재화 ~61 · 쓰레기 ~72 · 마녀 모자 ~77.5 · 유령의 천 ~83 · 깨진 유리조각 ~91 · 잭 오 랜턴 ~94
-        #              · 달 조각 ~95.5 · 뱀파이어맛 와인 ~96 · 수상한 병 ~100
-        for value, expected in [(0.0, "none"), (0.3999, "none"), (0.40, "key"), (0.5399, "key"), (0.54, "candy"), (0.6099, "candy"),
-                                (0.61, "trash"), (0.7199, "trash"), (0.72, "witch_hat"), (0.7749, "witch_hat"), (0.775, "ghost_cloth"),
-                                (0.8299, "ghost_cloth"), (0.83, "broken_glass"), (0.9099, "broken_glass"), (0.91, "jack_o_lantern"),
-                                (0.9399, "jack_o_lantern"), (0.94, "moon_shard"), (0.9549, "moon_shard"), (0.955, "vampire_wine"),
-                                (0.9599, "vampire_wine"), (0.96, "mystery_bottle"), (0.9999, "mystery_bottle")]:
-            self.assertEqual(roll_package_result(table, Scripted([value]))["id"], expected, value)
-        self.assertEqual(sum(e["weight"] for e in table), 100)
+        # 누적 경계(%): 꽝 0~39.9 · 열쇠 ~53.9 · 재화 ~60.9 · 쓰레기 ~71.9 · 마녀 모자 ~77.4 · 유령의 천 ~82.9 · 깨진 유리조각 ~90.9 · 잭 오 랜턴 ~93.9
+        #              · 달 조각 ~95.4 · 뱀파이어맛 와인 ~95.9 · 수상한 병 ~99.9 · 부활권 ~100(0.1%)
+        order = ["none", "key", "candy", "trash", "witch_hat", "ghost_cloth", "broken_glass", "jack_o_lantern", "moon_shard",
+                 "vampire_wine", "mystery_bottle", "revive"]
+        edges = [39.9, 53.9, 60.9, 71.9, 77.4, 82.9, 90.9, 93.9, 95.4, 95.9, 99.9]
+        self.assertEqual([e["id"] for e in table], order)
+        self.assertEqual(roll_package_result(table, Scripted([0.0]))["id"], "none")
+        for i, edge in enumerate(edges):                          # 경계 바로 아래는 앞 칸, 바로 위는 다음 칸(부동소수점 오차를 피해 0.0001%p씩 띄운다)
+            self.assertEqual(roll_package_result(table, Scripted([(edge - 0.01) / 100]))["id"], order[i], edge)
+            self.assertEqual(roll_package_result(table, Scripted([(edge + 0.01) / 100]))["id"], order[i + 1], edge)
+        self.assertEqual(roll_package_result(table, Scripted([0.9999]))["id"], "revive")
+        self.assertAlmostEqual(sum(e["weight"] for e in table), 100)
+        self.assertAlmostEqual(next(e["weight"] for e in table if e["id"] == "revive"), 0.1)       # 부활권은 정확히 0.1%
 
     def test_package_result_uses_ratios_not_percentages(self):
         table = [{"id": "a", "kind": "none", "weight": 1}, {"id": "b", "kind": "none", "weight": 3}]      # 합계 4
@@ -239,7 +243,7 @@ class ItemTests(unittest.TestCase):
 
     def test_system_items(self):
         ids = self.store.ensure_system_items(1)
-        self.assertEqual(set(ids), {"key", "trash", *(item[0] for item in NEW_ITEMS)})
+        self.assertEqual(set(ids), {"key", "trash", "revive", *(item[0] for item in NEW_ITEMS)})
         self.assertEqual(self.store.ensure_system_items(1), ids)               # 여러 번 불러도 한 번만 만들어진다.
         key = self.store.item(1, ids["key"])
         self.assertEqual((key["name"], key["emoji"], key["buyable"], key["sellable"]), ("열쇠", "🗝️", 0, 0))
@@ -263,7 +267,7 @@ class ItemTests(unittest.TestCase):
         self.store.add_item(1, 7, ids["key"], 3)
         self.assertEqual(self.store.delete_item(1, ids["key"]), 3)               # 가방에서도 사라진다.
         self.store.delete_item(1, ids["trash"])
-        self.assertEqual(set(self.store.ensure_system_items(1)), {item[0] for item in NEW_ITEMS})   # 지운 열쇠·쓰레기는 되살아나지 않는다.
+        self.assertEqual(set(self.store.ensure_system_items(1)), {"revive", *(item[0] for item in NEW_ITEMS)})   # 지운 열쇠·쓰레기는 되살아나지 않는다.
         self.assertNotIn("열쇠", [r["name"] for r in self.store.items(1)])
         self.assertNotIn("쓰레기", [r["name"] for r in self.store.items(1)])
         self.assertEqual(self.store.item_users(1, 12345), [])
@@ -282,8 +286,8 @@ class ItemTests(unittest.TestCase):
         self.assertEqual(next(e for e in cfg["package_table"] if e["id"] == "key")["item"], key_id)
         self.assertEqual(self.store.qty(1, 7, key_id), 4)
         names = [r["name"] for r in self.store.items(1)]
-        self.assertEqual((names.count("열쇠"), names.count("쓰레기")), (1, 1))          # 열쇠·쓰레기는 새로 만들지 않았다(새 물품 7종만 더해진다).
-        self.assertEqual(len(names), 2 + len(NEW_ITEMS))
+        self.assertEqual((names.count("열쇠"), names.count("쓰레기")), (1, 1))          # 열쇠·쓰레기는 새로 만들지 않았다(새 물품 7종과 부활권만 더해진다).
+        self.assertEqual(len(names), 2 + len(NEW_ITEMS) + 1)
         trash = self.store.item_by_name(1, "쓰레기")
         self.assertEqual((trash["sellable"], trash["sell_price"], trash["sell_max"]), (1, -20, 20))   # 손대지 않은 쓰레기는 범위 판매가가 된다.
 

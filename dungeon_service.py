@@ -80,6 +80,8 @@ async def act(store: Store, locks, rng, guild_id: int, user_id: int, rev: int, a
         if problem:
             return Outcome(False, problem, run=run)
         run.bump()
+        if run.phase == "dead" and _revive(store, guild_id, user_id, run, bal):
+            return Outcome(True, run=run, notes=["revived"])
         if not run.finished and run.phase != "dead":
             store.save_dungeon(guild_id, user_id, run.to_json())
             return Outcome(True, run=run)
@@ -158,6 +160,24 @@ def _apply(run: Run, rng, action: str, arg: str | None, guard_ok: bool, bal) -> 
                     else "지금은 앞으로 갈 수 없어요.")
         dungeon.advance(run, rng, bal)
     return None
+
+
+def _revive(store: Store, guild_id: int, user_id: int, run: Run, bal) -> bool:
+    """쓰러졌을 때 가방에 부활권이 있으면 한 장 쓰고 그 자리에서 다시 일어난다(HP는 최대의 bal.revive_heal %).
+    싸우던 상대는 그대로 남는다. 부활권이 없으면 아무것도 바꾸지 않고 False(그대로 던전이 끝난다)."""
+    item = store.revive_item(guild_id)
+    if item is None or store.qty(guild_id, user_id, item["id"]) < 1:
+        return False
+    saved = (run.hp, run.phase, list(run.events))
+    run.hp = max(1, bal.max_hp * bal.revive_heal // 100)
+    run.phase = "battle" if run.enemy else "cleared"
+    left = store.qty(guild_id, user_id, item["id"]) - 1
+    run.events = run.events + [f"{item['emoji']} **{item['name']}**을(를) 한 장 썼어요! HP {run.hp}(으)로 다시 일어났어요."
+                               + (f" (남은 {item['name']} {left}장)" if left else "")]
+    if store.use_revive(guild_id, user_id, run.to_json()):
+        return True
+    run.hp, run.phase, run.events = saved                 # 그 사이 부활권이 사라졌다면(겹친 요청 등) 쓰러진 채로 둔다.
+    return False
 
 
 def _finish(store: Store, rng, guild_id: int, user_id: int, run: Run, bal) -> Outcome:

@@ -39,7 +39,7 @@ class ShopPanelView(discord.ui.View):
         options = []
         for row in rows or []:
             buy = f"구매 {theme.plain_money(row['buy_price'], cur)}" if row["buyable"] else "구매 불가"
-            sell = f"판매 {theme.plain_money(row['sell_price'], cur)}" if row["sellable"] else "판매 불가"
+            sell = f"판매 {theme.sell_text(row, cur, plain=True)}" if row["sellable"] else "판매 불가"
             options.append(discord.SelectOption(
                 label=display_name(guild, row)[:100], value=str(row["id"]), description=f"{buy} · {sell}"[:100],
                 emoji=partial_emoji(row["emoji"]) if with_emoji else None))

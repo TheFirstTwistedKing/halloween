@@ -10,7 +10,8 @@ from cogs.rules_admin import RulesAdmin, package_lines
 from confirm import Confirm
 from josa import eul_reul, eun_neun, i_ga
 from store import StoreError
-from tests.helpers import Scripted, World, sent_embed
+from store import NEW_ITEMS
+from tests.helpers import Scripted, World, pin_first_table, sent_embed
 
 G, U = 100, 7
 Choice = type("Choice", (), {"__init__": lambda self, value: setattr(self, "value", value)})
@@ -163,6 +164,10 @@ class EntryItemTests(RulesFixture):
 
 
 class PackageCommandTests(RulesFixture):
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        pin_first_table(self.store, G)                 # 명령어 동작을 보는 시험이라 처음 기본 표로 고정한다.
+
     def ids(self):
         return [e["id"] for e in self.store.package_table(G)]
 
@@ -259,7 +264,7 @@ class PackageCommandTests(RulesFixture):
         items = await self.cog.pkg_item_autocomplete(self.ask(), "열")
         self.assertEqual([c.value for c in items], ["열쇠"])
         entry = await self.cog.entry_autocomplete(self.ask(), "")
-        self.assertEqual({c.value for c in entry}, {"열쇠", "쓰레기"})
+        self.assertEqual({c.value for c in entry}, {"열쇠", "쓰레기", *(item[1] for item in NEW_ITEMS)})
 
     def test_package_lines_note_unnormalized_totals(self):
         lines = package_lines(self.store, G)

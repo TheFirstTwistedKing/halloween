@@ -10,6 +10,7 @@ from services import role_problem
 from store import MAX_SHOP_ITEMS, StoreError
 
 TEXT = discord.TextChannel
+SELL_MAX_HELP = "범위로 팔려면 최대 판매가. 팔 때마다 판매가~이 값 사이에서 뽑아요 (예: 판매가 -300, 판매최대 300). 같은 값이면 고정"
 
 
 class ConfirmDelete(discord.ui.View):
@@ -104,18 +105,20 @@ class Shop(commands.Cog):
     @app_commands.command(name="물품등록", description="상점에 물품을 등록해요 (관리자)")
     @app_commands.guild_only()
     @app_commands.default_permissions(administrator=True)
-    @app_commands.rename(name="이름", buyable="구입", sellable="판매", buy_price="구입가", sell_price="판매가", description="설명", emoji="이모지")
+    @app_commands.rename(name="이름", buyable="구입", sellable="판매", buy_price="구입가", sell_price="판매가", description="설명", emoji="이모지",
+                         sell_max="판매최대")
     @app_commands.describe(name="물품 이름 (30자까지)", buyable="사람들이 살 수 있게 할까요? (true/false)",
                            sellable="사람들이 팔 수 있게 할까요? (true/false)", buy_price="구입 가격(재화). 구입을 켰다면 필수",
-                           sell_price="판매 가격(재화). 판매를 켰다면 필수", description="설명 (200자까지)", emoji="아이콘 (기본 🎃)")
+                           sell_price="판매 가격(재화). 음수면 팔 때 재화를 내요. 판매를 켰다면 0이 아닌 값", description="설명 (200자까지)",
+                           emoji="아이콘 (기본 🎃)", sell_max=SELL_MAX_HELP)
     async def add_item(self, interaction: discord.Interaction, name: str, buyable: bool, sellable: bool,
-                       buy_price: app_commands.Range[int, 0, 1_000_000_000] = 0, sell_price: app_commands.Range[int, 0, 1_000_000_000] = 0,
-                       description: str = "", emoji: str = "🎃"):
+                       buy_price: app_commands.Range[int, 0, 1_000_000_000] = 0, sell_price: app_commands.Range[int, -1_000_000_000, 1_000_000_000] = 0,
+                       description: str = "", emoji: str = "🎃", sell_max: app_commands.Range[int, -1_000_000_000, 1_000_000_000] | None = None):
         if not await require_admin(interaction):
             return
         try:
             item = self.bot.store.create_item(interaction.guild_id, name.strip(), emoji=emoji.strip(), description=description.strip(),
-                                              buy_price=buy_price, sell_price=sell_price, buyable=buyable, sellable=sellable)
+                                              buy_price=buy_price, sell_price=sell_price, buyable=buyable, sellable=sellable, sell_max=sell_max)
         except StoreError as exc:
             await self._deny(interaction, str(exc))
             return
@@ -148,7 +151,7 @@ class Shop(commands.Cog):
     @staticmethod
     def _flags(item, cur=None) -> str:
         buy = f"구입 ✅ {theme.money(item['buy_price'], cur)}" if item["buyable"] else "구입 ❌"
-        sell = f"판매 ✅ {theme.money(item['sell_price'], cur)}" if item["sellable"] else "판매 ❌"
+        sell = f"판매 ✅ {theme.sell_text(item, cur)}" if item["sellable"] else "판매 ❌"
         note = "" if item["buyable"] or item["sellable"] else "\n(구입·판매가 모두 꺼져 있어서 상점에는 나오지 않아요.)"
         return f"{buy} · {sell}{note}"
 
@@ -156,11 +159,12 @@ class Shop(commands.Cog):
     @app_commands.guild_only()
     @app_commands.default_permissions(administrator=True)
     @app_commands.rename(item="물품", new_name="새이름", buyable="구입", sellable="판매", buy_price="구입가", sell_price="판매가",
-                         description="설명", emoji="이모지")
+                         description="설명", emoji="이모지", sell_max="판매최대")
+    @app_commands.describe(sell_price="판매 가격. 음수면 팔 때 재화를 내요. 범위로 바꾸려면 판매최대도 함께", sell_max=SELL_MAX_HELP)
     async def edit_item(self, interaction: discord.Interaction, item: str, new_name: str | None = None, buyable: bool | None = None,
                         sellable: bool | None = None, buy_price: app_commands.Range[int, 0, 1_000_000_000] | None = None,
-                        sell_price: app_commands.Range[int, 0, 1_000_000_000] | None = None, description: str | None = None,
-                        emoji: str | None = None):
+                        sell_price: app_commands.Range[int, -1_000_000_000, 1_000_000_000] | None = None, description: str | None = None,
+                        emoji: str | None = None, sell_max: app_commands.Range[int, -1_000_000_000, 1_000_000_000] | None = None):
         if not await require_admin(interaction):
             return
         store, gid = self.bot.store, interaction.guild_id
@@ -170,7 +174,7 @@ class Shop(commands.Cog):
             await self._deny(interaction, "그런 물품이 없어요.")
             return
         changes = {k: v for k, v in dict(name=new_name and new_name.strip(), buyable=buyable, sellable=sellable, buy_price=buy_price,
-                                         sell_price=sell_price, description=description and description.strip(),
+                                         sell_price=sell_price, sell_max=sell_max, description=description and description.strip(),
                                          emoji=emoji and emoji.strip()).items() if v is not None}
         if description == "":
             changes["description"] = ""
@@ -218,7 +222,7 @@ class Shop(commands.Cog):
         for row in store.items(gid):
             kind = " `역할`" if row["kind"] == "role" else ""
             buy = f"구입 {theme.money(row['buy_price'], cur)}" if row["buyable"] else "구입 ❌"
-            sell = f"판매 {theme.money(row['sell_price'], cur)}" if row["sellable"] else "판매 ❌"
+            sell = f"판매 {theme.sell_text(row, cur)}" if row["sellable"] else "판매 ❌"
             lines.append(f"{row['emoji']} **{display_name(interaction.guild, row)}**{kind} · {buy} · {sell}")
         listed = len(store.items(gid, shop_only=True))
         text = "\n".join(lines)[:3800] or "등록된 물품이 없어요."

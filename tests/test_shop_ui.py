@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 import discord
 
 from panel import ShopPanelView, build_panel, post_panel, refresh_panels
-from store import CANDY_MAX
+from store import CANDY_MAX, NEW_ITEMS
 from tests.helpers import FakeRole, World, sent_embed
 from views import DetailView, QuantityModal, bag_for, send_bag
 
@@ -41,15 +41,20 @@ class PanelContentTests(UiFixture):
         self.assertIn("🕯️ **호박 초**\n┕ 구매 🍬 30 · 판매 🍬 10", text)
         self.assertIn("🦇 **박쥐 날개**\n┕ 구매 — · 판매 🍬 7", text)
         self.assertIn("👑 **유령 손님** `역할`\n┕ 구매 🍬 200 · 판매 —", text)          # 역할은 실제 역할 이름으로
-        for hidden in ("비밀 물품", "열쇠", "쓰레기"):
+        for hidden in ("비밀 물품", "열쇠"):                                         # 판매가 꺼진 물품은 안 나온다(쓰레기·새 물품 7종은 팔 수 있다).
             self.assertNotIn(hidden, text)
         self.assertIn("🍬 = 할로윈 재화", embed.fields[0].name)
         select, bag = view.children
-        self.assertEqual([o.label for o in select.options], ["호박 초", "박쥐 날개", "유령 손님"])
-        self.assertEqual([o.value for o in select.options], [str(self.candle["id"]), str(self.bat["id"]), str(self.vip["id"])])
+        labels = [o.label for o in select.options]
+        self.assertEqual(labels, ["호박 초", "박쥐 날개", "쓰레기", *(item[1] for item in NEW_ITEMS), "유령 손님"])   # 물품(만든 순서) 다음 역할
+        values = [o.value for o in select.options]
+        self.assertEqual((values[0], values[1], values[-1]), (str(self.candle["id"]), str(self.bat["id"]), str(self.vip["id"])))
         self.assertEqual(select.options[0].description, "구매 🍬 30 · 판매 🍬 10")
         self.assertEqual(select.options[1].description, "구매 불가 · 판매 🍬 7")
-        self.assertEqual([str(o.emoji) for o in select.options], ["🕯️", "🦇", "👑"])
+        self.assertEqual(select.options[2].description, "구매 불가 · 판매 🍬 -20 ~ 20")        # 범위 판매가
+        self.assertEqual(select.options[4].description, "구매 불가 · 판매 🍬 100")                # 유령의 천
+        self.assertIn("🥃 **깨진 유리조각**\n┕ 구매 — · 판매 🍬 -150", text)                    # 음수 판매가(팔 때 재화를 낸다)
+        self.assertEqual([str(o.emoji) for o in (select.options[0], select.options[1], select.options[-1])], ["🕯️", "🦇", "👑"])
         self.assertEqual((bag.label, str(bag.emoji)), ("가방", "🎒"))
 
     async def test_the_shop_uses_the_servers_currency(self):

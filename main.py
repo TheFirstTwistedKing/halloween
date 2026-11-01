@@ -56,6 +56,7 @@ class HalloweenBot(commands.Bot):
         self.locks = Locks()
         self.rng = rng or random.Random()
         self.guild_ids = frozenset(guild_ids or [])
+        self._purged = False
 
     def allowed_guild(self, guild_id: int) -> bool:
         """GUILD_ID를 정했다면 그 서버에서만 동작한다. 비어 있으면 봇이 들어간 모든 서버."""
@@ -80,8 +81,36 @@ class HalloweenBot(commands.Bot):
             synced = await self.tree.sync()
             LOG.info("슬래시 명령어 %d개를 전체 서버에 등록했어요. (반영까지 최대 1시간)", len(synced))
 
+    async def purge_stale_commands(self) -> list[str]:
+        """디스코드에 남아 있는 옛 슬래시 명령어를 지운다. 이 봇이 쓰지 않는 범위에 등록된 명령어는 코드에 없어서 눌러도 응답하지 않는다.
+        예전에 GUILD_ID 없이 켰다가 지금은 GUILD_ID를 쓰거나(전체 서버용 명령어가 남음), 반대로 바꿨을 때(서버용 명령어가 남음) 생긴다.
+        - GUILD_ID가 있으면: 전체 서버용 명령어를 비우고, GUILD_ID에 없는 서버의 서버용 명령어도 비운다.
+        - GUILD_ID가 없으면: 봇이 들어간 모든 서버의 서버용 명령어를 비운다(전체 서버용은 시작할 때 이미 코드대로 덮어썼다).
+        지금 쓰는 명령어는 건드리지 않는다. 지운 이름의 목록을 돌려준다."""
+        scopes: list[discord.Object | None] = [None] if self.guild_ids else []
+        scopes += [discord.Object(id=guild.id) for guild in self.guilds if guild.id not in self.guild_ids]
+        removed = []
+        for scope in scopes:
+            where = "전체 서버" if scope is None else f"서버 ID {scope.id}"
+            try:
+                existing = await self.tree.fetch_commands(guild=scope)
+                if not existing:
+                    continue
+                self.tree.clear_commands(guild=scope)
+                await self.tree.sync(guild=scope)
+            except discord.HTTPException as exc:
+                LOG.warning("%s의 옛 명령어를 정리하지 못했어요 (HTTP %s)", where, exc.status)
+                continue
+            names = [command.name for command in existing]
+            removed += names
+            LOG.info("%s에 남아 있던 옛 명령어 %d개를 지웠어요: %s", where, len(names), ", ".join(f"/{n}" for n in names))
+        return removed
+
     async def on_ready(self):
         LOG.info("연결 완료: %s / 서버 %d개", self.user, len(self.guilds))
+        if not self._purged:                        # 연결이 끊겼다 다시 이어져도 한 번만 한다.
+            self._purged = True
+            await self.purge_stale_commands()
 
 
 def main():

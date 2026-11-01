@@ -64,24 +64,27 @@ class ContentAdmin(commands.Cog):
     monster = app_commands.Group(name="몬스터", description="던전 몬스터·보스를 더하고 빼고 바꿔요 (관리자)", **PERMS)
 
     @monster.command(name="추가", description="몬스터나 보스를 새로 만들어요 (관리자)")
-    @app_commands.rename(name="이름", emoji="이모지", hp="체력", damage="공격", dodge="회피", boss="보스")
+    @app_commands.rename(name="이름", emoji="이모지", hp="체력", damage="공격", dodge="회피", boss="보스", weight="등장")
     @app_commands.describe(name="이름 (30자까지)", emoji="이모지", hp="체력", damage="한 번 때리는 피해", dodge="내 공격을 피할 확률(%, 기본 10). 보스는 회피 불가라 무시돼요",
-                           boss="미니 보스로 만들까요? (마지막 방에 나와요)")
+                           boss="미니 보스로 만들까요? (마지막 방에 나와요)",
+                           weight="같은 종류(잡몹끼리, 보스끼리) 안에서 나올 비율. 소수도 돼요(예: 0.5). 기본 1 = 다른 몬스터와 같은 확률")
     async def monster_add(self, interaction: discord.Interaction, name: str, emoji: str, hp: app_commands.Range[int, 1, 100000],
-                          damage: app_commands.Range[int, 0, 100000], dodge: app_commands.Range[int, 0, 95] = 10, boss: bool = False):
+                          damage: app_commands.Range[int, 0, 100000], dodge: app_commands.Range[int, 0, 95] = 10, boss: bool = False,
+                          weight: app_commands.Range[float, 0, 1000] = 1):
         def go():
             section = "bosses" if boss else "monsters"
-            entity = content.add(self.bot.store, interaction.guild_id, section, dict(name=name, emoji=emoji.strip(), hp=hp, damage=damage, dodge=dodge))
+            entity = content.add(self.bot.store, interaction.guild_id, section, dict(name=name, emoji=emoji.strip(), hp=hp, damage=damage, dodge=dodge, weight=weight))
             return section, self._entity_dict(entity)
         await self._run(interaction, go, "➕ 만들었어요.")
 
     @monster.command(name="수정", description="몬스터·보스의 값을 고쳐요. 바꿀 것만 적으세요 (관리자)")
-    @app_commands.rename(target="대상", new_name="새이름", emoji="이모지", hp="체력", damage="공격", dodge="회피")
+    @app_commands.rename(target="대상", new_name="새이름", emoji="이모지", hp="체력", damage="공격", dodge="회피", weight="등장")
+    @app_commands.describe(weight="같은 종류 안에서 나올 비율. 소수도 돼요(예: 0.5). 0이면 안 나와요")
     async def monster_edit(self, interaction: discord.Interaction, target: str, new_name: str | None = None, emoji: str | None = None,
                            hp: app_commands.Range[int, 1, 100000] | None = None, damage: app_commands.Range[int, 0, 100000] | None = None,
-                           dodge: app_commands.Range[int, 0, 95] | None = None):
+                           dodge: app_commands.Range[int, 0, 95] | None = None, weight: app_commands.Range[float, 0, 1000] | None = None):
         def go():
-            changes = dict(name=new_name, emoji=emoji and emoji.strip(), hp=hp, damage=damage, dodge=dodge)
+            changes = dict(name=new_name, emoji=emoji and emoji.strip(), hp=hp, damage=damage, dodge=dodge, weight=weight)
             changes = {k: v for k, v in changes.items() if v is not None}
             section, entity = content.edit(self.bot.store, interaction.guild_id, ("monsters", "bosses"), target, changes)
             return section, self._entity_dict(entity)

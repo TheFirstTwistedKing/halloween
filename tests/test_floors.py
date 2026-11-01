@@ -84,7 +84,7 @@ class AscendTests(unittest.TestCase):
     def test_a_middle_room_is_not_a_floor_change(self):
         run = dungeon.new_run()
         run.floor, run.room, run.phase = 4, 3, "chest_done"
-        dungeon.advance(run, Scripted(randoms=[MONSTER], ints=[0]))
+        dungeon.advance(run, Scripted(randoms=[MONSTER, 0.0]))     # 방 종류 추첨, 그다음 어떤 몬스터인지 추첨
         self.assertEqual((run.floor, run.room), (4, 4))
         self.assertNotIn("⬆️", "\n".join(run.events))
 
@@ -119,10 +119,10 @@ class ScalingTests(unittest.TestCase):
     def test_a_monster_in_the_room_uses_the_floors_numbers(self):
         run = dungeon.new_run()
         run.floor, run.room, run.phase = 10, 1, "chest_done"
-        dungeon.advance(run, Scripted(randoms=[MONSTER], ints=[1]))            # 2번째 방, 잡몹, 목록의 2번째(슬라임)
+        dungeon.advance(run, Scripted(randoms=[MONSTER, 0.3]))          # 2번째 방, 잡몹, 같은 확률 4칸 중 2번째(0.25~0.5)인 슬라임
         self.assertEqual((run.enemy["name"], run.enemy["hp"], run.enemy["damage"]), ("슬라임", 367, 61))
         run.room, run.phase = dungeon.ROOMS - 1, "cleared"
-        dungeon.advance(run, Scripted(ints=[0]))                               # 10번째 방 보스(해골 왕)
+        dungeon.advance(run, Scripted(randoms=[0.0]))                           # 10번째 방 보스(해골 왕)
         self.assertEqual((run.enemy["name"], run.enemy["hp"]), ("해골 왕", 1224))
 
     def test_the_player_is_not_scaled(self):

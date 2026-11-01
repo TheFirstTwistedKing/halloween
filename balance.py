@@ -75,6 +75,7 @@ class Monster:
     damage: int
     dodge: int = BASE_DODGE      # 보스는 0 — 회피 불가
     boss: bool = False
+    weight: float = 1            # 같은 방 종류(잡몹끼리, 보스끼리)에서 나올 가중치(소수 가능). 기본은 모두 1 = 같은 확률
 
 
 def describe_gear(gear: Gear) -> str:
@@ -171,9 +172,9 @@ WEIGHT_MAX = 1000
 WEIGHT_DECIMALS = 4                      # 등장 비율은 소수 넷째 자리까지 쓴다(0.0001 단위)
 
 
-def _weight(data: dict, key: str = "weight"):
+def _weight(data: dict, key: str = "weight", default=0):
     """등장 비율: 0~1000, 소수 가능(넷째 자리까지). 정수로 딱 떨어지면 int로 돌려줘서 저장·표시가 깔끔하다."""
-    value = data.get(key, 0)
+    value = data.get(key, default)
     if isinstance(value, bool) or not isinstance(value, (int, float)) or value != value or value in (float("inf"), float("-inf")):
         return None, f"{key} 값은 0~{WEIGHT_MAX} 사이의 숫자여야 해요."
     if not 0 <= value <= WEIGHT_MAX:
@@ -210,7 +211,10 @@ def check_entity(section: str, data) -> tuple[object | None, str | None]:
         n, problem = numbers(("hp", 1, 100000, 1), ("damage", 0, 100000, 0), ("dodge", 0, 95, BASE_DODGE))
         if problem:
             return None, problem
-        return Monster(key, name, emoji, n["hp"], n["damage"], 0 if boss else n["dodge"], boss), None
+        weight, problem = _weight(data, default=1)             # 예전에 저장된 몬스터에는 등장 값이 없어서 기본 1(같은 확률)로 본다
+        if problem:
+            return None, problem
+        return Monster(key, name, emoji, n["hp"], n["damage"], 0 if boss else n["dodge"], boss, weight), None
     tier = data.get("tier", "일반")
     if tier not in TIER_ORDER:
         return None, "등급은 일반·희귀·전설 중 하나여야 해요."
@@ -340,9 +344,11 @@ def _build_params() -> dict[str, Param]:
         add(f"몬스터.{m.name}.체력", "몬스터", m.hp, 1, 100000)
         add(f"몬스터.{m.name}.공격", "몬스터", m.damage, 0, 100000, note="몬스터가 한 번 때리는 피해")
         add(f"몬스터.{m.name}.회피", "몬스터", m.dodge, 0, 95, note="내 공격을 피할 확률(%). 일부 무기는 이 값을 바꿔 버려요")
+        add(f"몬스터.{m.name}.등장", "몬스터", m.weight, 0, WEIGHT_MAX, integer=False, note="잡몹 방에서 나올 가중치(비율, 소수 가능). 전부 0이면 안 돼요")
     for b in BOSSES:
         add(f"보스.{b.name}.체력", "보스", b.hp, 1, 100000)
         add(f"보스.{b.name}.공격", "보스", b.damage, 0, 100000, note="보스는 회피 불가라 회피 항목이 없어요")
+        add(f"보스.{b.name}.등장", "보스", b.weight, 0, WEIGHT_MAX, integer=False, note="보스 방에서 나올 가중치(비율, 소수 가능). 전부 0이면 안 돼요")
 
     for g in GEAR:
         if g.slot == "weapon":
@@ -468,8 +474,9 @@ class Balance:
                 c = replace(c, heal=get(f"아이템.{c.name}.회복량"), weight=get(f"아이템.{c.name}.등장"))
             items.append(replace(c, description=describe_item(c)))
         monsters = tuple(replace(m, hp=get(f"몬스터.{m.name}.체력"), damage=get(f"몬스터.{m.name}.공격"),
-                                 dodge=get(f"몬스터.{m.name}.회피")) for m in MONSTERS)
-        bosses = tuple(replace(b, hp=get(f"보스.{b.name}.체력"), damage=get(f"보스.{b.name}.공격")) for b in BOSSES)
+                                 dodge=get(f"몬스터.{m.name}.회피"), weight=get(f"몬스터.{m.name}.등장")) for m in MONSTERS)
+        bosses = tuple(replace(b, hp=get(f"보스.{b.name}.체력"), damage=get(f"보스.{b.name}.공격"), weight=get(f"보스.{b.name}.등장"))
+                       for b in BOSSES)
         return cls(
             max_hp=get("일반.최대체력"), floors=get("일반.층수"), floor_scale=get("일반.층당강화"), floor_heal=get("일반.층이동회복"),
             base_damage=get("일반.맨손공격력"), guard_chance=get("방어.성공확률"),
@@ -497,8 +504,12 @@ def validate(overrides: dict, content=None) -> str | None:
     kinds = {kind for table in bal.room_plan for kind, _ in table}
     if "monster" in kinds and not bal.monsters:
         return "잡몹이 나오는 방이 있는데 잡몹이 하나도 없어요. 몬스터를 추가하거나 방 배치에서 잡몹 가중치를 0으로 해 주세요."
+    if "monster" in kinds and sum(m.weight for m in bal.monsters) <= 0:
+        return "잡몹이 나오는 방이 있는데 몬스터의 '등장' 가중치가 전부 0이에요. 하나는 0보다 커야 해요."
     if "boss" in kinds and not bal.bosses:
         return "보스가 나오는 방이 있는데 보스가 하나도 없어요. 보스를 추가하거나 방 배치를 바꿔 주세요."
+    if "boss" in kinds and sum(b.weight for b in bal.bosses) <= 0:
+        return "보스가 나오는 방이 있는데 보스의 '등장' 가중치가 전부 0이에요. 하나는 0보다 커야 해요."
     if sum(g.weight for g in bal.gear) <= 0:
         return "상자에서 나오는 장비의 '등장' 가중치가 전부 0이에요. 하나는 0보다 커야 해요."
     if sum(c.weight for c in bal.consumables) <= 0:

@@ -345,6 +345,61 @@ def discard_pending(run: Run, bal: Balance | None = None) -> list[str]:
     return run.events
 
 
+SELL_MODES = ("all", "one", "items")      # all: 고른 것 전부 · one: 고른 소모품을 1개씩 · items: 팔 수 있는 소모품 전부
+
+
+def sellable(run: Run, bal: Balance | None = None) -> list[dict]:
+    """지금 팔 수 있는 것(판매가 1 이상). 상자에서 나와 아직 정하지 않은 장비, 장착 중인 장비, 소지품의 소모품 순서다.
+    id: pending / weapon / shield / item:<key>. 관리자가 지웠거나 판매가를 0으로 한 것은 나오지 않는다."""
+    bal = bal or DEFAULT
+    out = []
+    for slot, key, tag in (("pending", run.pending_gear, "새 장비"), ("weapon", run.weapon, "장착 중"), ("shield", run.shield, "장착 중")):
+        gear = bal.gear_by_key.get(key) if key else None
+        if gear and gear.sell_price > 0:
+            out.append({"id": slot, "kind": "gear", "name": gear.name, "emoji": gear.emoji, "qty": 1, "price": gear.sell_price, "tag": tag})
+    for key, qty in run.items.items():
+        item = bal.item_by_key.get(key)
+        if item and item.sell_price > 0 and qty > 0:
+            out.append({"id": f"item:{key}", "kind": "item", "name": item.name, "emoji": item.emoji, "qty": qty,
+                        "price": item.sell_price, "tag": item.tier})
+    return out
+
+
+def sell(run: Run, picks, mode: str = "all", bal: Balance | None = None) -> tuple[int, list[tuple[dict, int]]]:
+    """던전 안에서 장비·소모품을 판다. 고른 것(picks: sellable의 id 목록)을 run에서 빼고 (받을 재화 합계, [(항목, 판 개수)])를 돌려준다.
+    싸우는 중이거나 끝난 던전에서는 팔 수 없다. 재화를 실제로 주는 건 호출하는 쪽(저장소)이다."""
+    bal = bal or DEFAULT
+    if run.finished:
+        raise DungeonError("끝난 던전에서는 팔 수 없어요.")
+    if run.in_battle:
+        raise DungeonError("싸우는 중에는 팔 수 없어요. 싸움이 끝난 뒤에 팔아 주세요.")
+    if mode not in SELL_MODES:
+        raise DungeonError("알 수 없는 판매 방식이에요.")
+    entries = {e["id"]: e for e in sellable(run, bal)}
+    if mode == "items":
+        picks = [i for i, e in entries.items() if e["kind"] == "item"]
+    chosen = [entries[i] for i in dict.fromkeys(picks) if i in entries]
+    if not chosen:
+        raise DungeonError("팔 수 있는 걸 골라 주세요. (판매가가 0인 것은 팔 수 없어요)")
+    total, sold = 0, []
+    for entry in chosen:
+        qty = entry["qty"] if entry["kind"] == "item" and mode != "one" else 1
+        total += entry["price"] * qty
+        sold.append((entry, qty))
+        if entry["id"] == "pending":
+            run.pending_gear = None
+        elif entry["id"] == "weapon":
+            run.weapon = None
+        elif entry["id"] == "shield":
+            run.shield = None
+        else:
+            key = entry["id"].split(":", 1)[1]
+            run.items[key] -= qty
+            if run.items[key] <= 0:
+                del run.items[key]
+    return total, sold
+
+
 def roll_guard(rng, bal: Balance | None = None) -> bool:
     """방어 버튼의 가드 성공 여부."""
     return rng.random() * 100 < (bal or DEFAULT).guard_chance

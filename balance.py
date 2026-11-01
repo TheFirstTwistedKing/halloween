@@ -20,6 +20,8 @@ REFLECT_BASE = 30                # 가드 성공 시 그 공격 피해의 이 %�
 CLEAR_CANDY = (50, 150)          # 클리어 보상 재화(최소, 최대)
 TICKET_CHANCE = 10               # 클리어했을 때 히든 칭호 획득권이 나올 확률(%)
 TIER_ORDER = {"일반": 0, "희귀": 1, "전설": 2}
+SELL_DEFAULT = {"일반": 5, "희귀": 15, "전설": 50}     # 던전 장비·소모품의 기본 판매가(등급별). 0이면 팔 수 없다.
+SELL_MAX = 1_000_000_000
 
 ROOM_KINDS = (("chest", "상자"), ("empty", "빈방"), ("monster", "잡몹"), ("boss", "보스"))
 # 방 배치: 1~10번째 방 각각의 추첨표((종류, 가중치)). 홀수 방은 상자, 짝수 방은 빈 방 또는 잡몹, 마지막 방은 미니 보스.
@@ -43,6 +45,7 @@ class Gear:
     guard: int | None = None     # 가드 피해 감소(%)
     reflect: int | None = None   # 가드 성공 시 반사 피해(%). 없으면 REFLECT_BASE
     description: str = ""
+    sell_price: int = 0          # 던전 안에서 팔 때 받는 재화(개당). 0이면 팔 수 없다.
 
 
 @dataclass(frozen=True)
@@ -57,6 +60,7 @@ class Consumable:
     regen: int = 0               # 턴이 지날 때마다 회복하는 양
     regen_turns: int = 0
     description: str = ""
+    sell_price: int = 0          # 던전 안에서 팔 때 받는 재화(개당). 0이면 팔 수 없다.
 
 
 @dataclass(frozen=True)
@@ -94,11 +98,13 @@ def describe_item(item: Consumable) -> str:
 
 
 def _gear(*args, **kwargs) -> Gear:
+    kwargs.setdefault("sell_price", SELL_DEFAULT[args[4]])        # args[4]는 등급
     gear = Gear(*args, **kwargs)
     return replace(gear, description=describe_gear(gear))
 
 
 def _item(*args, **kwargs) -> Consumable:
+    kwargs.setdefault("sell_price", SELL_DEFAULT[args[3]])        # args[3]은 등급
     item = Consumable(*args, **kwargs)
     return replace(item, description=describe_item(item))
 
@@ -192,7 +198,8 @@ def check_entity(section: str, data) -> tuple[object | None, str | None]:
         slot = data.get("slot")
         if slot not in ("weapon", "shield"):
             return None, "장비 종류는 무기·방패 중 하나여야 해요."
-        n, problem = numbers(("weight", 0, 1000, 0), ("attack", 0, 100000, 0), ("crit", 0, 100, 0))
+        n, problem = numbers(("weight", 0, 1000, 0), ("attack", 0, 100000, 0), ("crit", 0, 100, 0),
+                             ("sell_price", 0, SELL_MAX, SELL_DEFAULT[tier]))
         if problem:
             return None, problem
         extra = {}
@@ -208,9 +215,10 @@ def check_entity(section: str, data) -> tuple[object | None, str | None]:
             if extra["guard"] is None:
                 return None, "방패에는 가드(피해 감소 %)가 필요해요."
         gear = Gear(key, name, emoji, slot, tier, n["weight"], attack=n["attack"], crit=n["crit"], dodge=extra["dodge"],
-                    guard=extra["guard"], reflect=extra["reflect"])
+                    guard=extra["guard"], reflect=extra["reflect"], sell_price=n["sell_price"])
         return replace(gear, description=describe_gear(gear)), None
-    n, problem = numbers(("weight", 0, 1000, 0), ("heal", 0, 100000, 0), ("regen", 0, 100000, 0), ("regen_turns", 0, 1000, 0))
+    n, problem = numbers(("weight", 0, 1000, 0), ("heal", 0, 100000, 0), ("regen", 0, 100000, 0), ("regen_turns", 0, 1000, 0),
+                         ("sell_price", 0, SELL_MAX, SELL_DEFAULT[tier]))
     if problem:
         return None, problem
     full = data.get("full", False)
@@ -226,7 +234,8 @@ def check_entity(section: str, data) -> tuple[object | None, str | None]:
         return None, "회복량·전체 회복·지속 회복 중 하나는 있어야 해요."
     else:
         n["regen_turns"] = 0
-    item = Consumable(key, name, emoji, tier, n["weight"], heal=n["heal"], full=full, regen=n["regen"], regen_turns=n["regen_turns"])
+    item = Consumable(key, name, emoji, tier, n["weight"], heal=n["heal"], full=full, regen=n["regen"], regen_turns=n["regen_turns"],
+                      sell_price=n["sell_price"])
     return replace(item, description=describe_item(item)), None
 
 

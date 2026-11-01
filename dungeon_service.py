@@ -11,7 +11,7 @@ import dungeon
 from dungeon import DungeonError, Run
 from store import Store, StoreError
 
-ACTIONS = ("advance", "attack", "defend", "item", "chest", "equip", "discard", "quit")
+ACTIONS = ("advance", "attack", "defend", "item", "chest", "equip", "stash", "swap_weapon", "swap_shield", "discard", "quit")
 
 
 @dataclass
@@ -146,6 +146,10 @@ def _apply(run: Run, rng, action: str, arg: str | None, guard_ok: bool, bal) -> 
         dungeon.open_chest(run, rng, bal)
     elif action == "equip":
         dungeon.equip_pending(run, bal)
+    elif action == "stash":
+        dungeon.stash_pending(run, bal)
+    elif action in ("swap_weapon", "swap_shield"):
+        dungeon.swap_spare(run, action.split("_", 1)[1], bal)
     elif action == "discard":
         dungeon.discard_pending(run, bal)
     elif action == "advance":

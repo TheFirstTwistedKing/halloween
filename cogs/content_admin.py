@@ -37,12 +37,12 @@ class ContentAdmin(commands.Cog):
         self.bot = bot
 
     async def _deny(self, interaction, text):
-        await interaction.response.send_message(embed=theme.notice(text, False), ephemeral=True)
+        await interaction.response.send_message(embed=theme.notice(text, False), ephemeral=False)
 
     async def _done(self, interaction, head: str, section: str, data: dict | None = None):
         line = f"\n{content.describe(section, data)}" if data else ""
         await interaction.response.send_message(embed=theme.notice(
-            f"{head}{line}\n지금 진행 중인 던전에도 바로 적용돼요(이미 나온 몬스터의 체력·공격은 그대로). `/던전시뮬`로 확인해 보세요."), ephemeral=True)
+            f"{head}{line}\n지금 진행 중인 던전에도 바로 적용돼요(이미 나온 몬스터의 체력·공격은 그대로). `/던전시뮬`로 확인해 보세요."), ephemeral=False)
 
     async def _run(self, interaction, func, head: str):
         """content 함수를 부르고 결과를 알린다. func() → (구역, 개체 사전)."""
@@ -237,7 +237,7 @@ class ContentAdmin(commands.Cog):
         scope = f"{tier.value} 등급 " if tier else ""
         result = "이제 팔 수 없어요." if price == 0 else f"개당 {cur.money(price)}에 팔 수 있어요."
         await interaction.response.send_message(embed=theme.notice(
-            f"💰 {scope}{parts}의 판매가를 바꿨어요. {result}\n하나씩 고치려면 `/장비 수정` `/소모품 수정`의 판매가를 쓰세요."), ephemeral=True)
+            f"💰 {scope}{parts}의 판매가를 바꿨어요. {result}\n하나씩 고치려면 `/장비 수정` `/소모품 수정`의 판매가를 쓰세요."), ephemeral=False)
 
     # ---------------------------------------------------------------- 목록 · 초기화
     @app_commands.command(name="던전목록", description="던전의 몬스터·보스·장비·소모품을 모두 봐요 (관리자)")
@@ -255,7 +255,7 @@ class ContentAdmin(commands.Cog):
             lines = [content.describe(sec, d) for d in content.current(store, gid, sec)]
             mark = " ✏️" if sec in custom else ""
             embed.add_field(name=f"{SECTION_LABELS[sec]} {len(lines)}개{mark}", value="\n".join(lines)[:1000] or "없음", inline=False)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.response.send_message(embed=embed, ephemeral=False)
 
     @app_commands.command(name="던전콘텐츠초기화", description="몬스터·장비·소모품을 기본 목록으로 되돌려요. 분류를 비우면 전부 (관리자)")
     @app_commands.guild_only()
@@ -282,7 +282,7 @@ class ContentAdmin(commands.Cog):
 
         await interaction.response.send_message(embed=theme.make_embed(
             "♻️ 기본 목록으로 되돌릴까요?", f"**{label}**에서 직접 만들거나 바꾼 내용이 모두 사라지고 기본값으로 돌아가요.", color=theme.RED),
-            view=Confirm(interaction.user.id, do, label="되돌리기", emoji="♻️"), ephemeral=True)
+            view=Confirm(interaction.user.id, do, label="되돌리기", emoji="♻️"), ephemeral=False)
 
 
 async def setup(bot):

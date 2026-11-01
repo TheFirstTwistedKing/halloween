@@ -20,5 +20,5 @@ async def require_admin(interaction: discord.Interaction) -> bool:
     """관리자가 아니면 본인에게만 보이는 거절 메시지를 보내고 False를 돌려준다."""
     if is_admin(interaction):
         return True
-    await interaction.response.send_message(embed=theme.notice("이 명령어는 서버 관리자만 쓸 수 있어요.", False), ephemeral=True)
+    await interaction.response.send_message(embed=theme.notice("이 명령어는 서버 관리자만 쓸 수 있어요.", False), ephemeral=False)
     return False

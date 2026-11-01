@@ -8,6 +8,7 @@ from discord.ext import commands
 import dungeon
 import dungeon_service as service
 import theme
+from owner import owner_only
 from balance import DEFAULT
 from dungeon import ROOMS, Run
 
@@ -107,7 +108,7 @@ class DungeonView(discord.ui.View):
         self.add_item(button)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return interaction.user.id == self.user_id
+        return await owner_only(interaction, self.user_id)
 
     async def handle(self, interaction: discord.Interaction, action: str, arg: str | None = None):
         await respond(interaction, self.client, self.rev, action, arg)
@@ -136,7 +137,7 @@ class ConfirmQuit(discord.ui.View):
         self.add_item(no)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return interaction.user.id == self.user_id
+        return await owner_only(interaction, self.user_id)
 
     async def confirm(self, interaction: discord.Interaction):
         self.stop()
@@ -216,7 +217,7 @@ class SellView(discord.ui.View):
         self.add_item(button)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return interaction.user.id == self.user_id
+        return await owner_only(interaction, self.user_id)
 
     async def on_select(self, interaction: discord.Interaction):
         self.picks = list(interaction.data.get("values", []))
@@ -289,11 +290,11 @@ class Dungeon(commands.Cog):
     async def enter(self, interaction: discord.Interaction):
         outcome = await service.enter(self.bot.store, self.bot.locks, interaction.guild_id, interaction.user.id)
         if not outcome.ok:
-            await interaction.response.send_message(embed=theme.notice(outcome.text, False), ephemeral=True)
+            await interaction.response.send_message(embed=theme.notice(outcome.text, False), ephemeral=False)
             return
         bal = self.bot.store.balance(interaction.guild_id)
         await interaction.response.send_message(embed=run_embed(outcome.run, None, bal, self.bot.store.currency(interaction.guild_id)),
-                                                view=DungeonView(self.bot, interaction.user.id, outcome.run, bal), ephemeral=True)
+                                                view=DungeonView(self.bot, interaction.user.id, outcome.run, bal), ephemeral=False)
 
 
 async def setup(bot):

@@ -311,15 +311,17 @@ class BagTests(UiFixture):
         self.assertEqual(candy_bar(50, 100), "🟧" * 5 + "⬛" * 5)
         self.assertEqual(candy_bar(500, 100), "🟧" * 10)                                # 최대를 낮춰도 칸이 넘치지 않는다.
 
-    async def test_the_bag_is_private_and_the_panel_button_opens_it(self):
+    async def test_the_bag_command_is_public_and_the_panel_button_is_private(self):
         interaction = self.w.interaction()
-        await send_bag(interaction)
+        await send_bag(interaction)                                                # /가방 명령어
         embed, kwargs = sent_embed(interaction)
-        self.assertTrue(kwargs["ephemeral"])
-        self.assertIsNone(kwargs.get("view"))                                      # 가방에는 버튼이 없다(경험치 교환 제거).
+        self.assertFalse(kwargs["ephemeral"])
+        self.assertIsNone(kwargs.get("view"))                                      # 팔 수 있는 물품이 없으면 판매 선택창도 없다.
         panel_click = self.w.interaction()
-        await ShopPanelView().on_bag(panel_click)
-        self.assertEqual(sent_embed(panel_click)[0].title, "🎒 user7의 가방")
+        await ShopPanelView().on_bag(panel_click)                                  # 공용 상점 패널의 [가방] 버튼
+        embed, kwargs = sent_embed(panel_click)
+        self.assertEqual(embed.title, "🎒 user7의 가방")
+        self.assertTrue(kwargs["ephemeral"])
 
     async def test_the_bag_uses_the_servers_currency(self):
         self.store.set_currency(100, emoji="💎", name="젬", max=200)

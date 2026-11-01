@@ -107,7 +107,7 @@ class Economy(commands.Cog):
         embed.add_field(name="🛒 쓰는 법", inline=False,
                         value=f"상점 채널에서 물품을 골라 사고팔 수 있어요. `/가방`으로 내 {cur.name}·물품을 봐요.\n"
                               f"{eun_neun(cur.name)} **최대 {cur.max:,}개**까지 가질 수 있어요.")
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.response.send_message(embed=embed, ephemeral=False)
 
 
 async def setup(bot):

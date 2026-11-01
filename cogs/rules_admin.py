@@ -38,7 +38,7 @@ class RulesAdmin(commands.Cog):
         self.bot = bot
 
     async def _deny(self, interaction, text):
-        await interaction.response.send_message(embed=theme.notice(text, False), ephemeral=True)
+        await interaction.response.send_message(embed=theme.notice(text, False), ephemeral=False)
 
     # ---------------------------------------------------------------- 재화
     @app_commands.command(name="재화설정", description="재화의 이모지·이름·최대 보유량을 바꿔요. 비워 두면 현재 값을 보여줘요 (관리자)")
@@ -55,7 +55,7 @@ class RulesAdmin(commands.Cog):
         changes = {k: v for k, v in dict(emoji=emoji and emoji.strip(), name=name and name.strip(), max=maximum).items() if v is not None}
         if not changes:
             cur = store.currency(gid)
-            await interaction.response.send_message(embed=theme.notice(f"지금 재화: {cur.emoji} **{cur.name}** · 최대 {cur.max:,}개"), ephemeral=True)
+            await interaction.response.send_message(embed=theme.notice(f"지금 재화: {cur.emoji} **{cur.name}** · 최대 {cur.max:,}개"), ephemeral=False)
             return
         if "emoji" in changes and not valid_emoji(changes["emoji"]):
             await self._deny(interaction, "이모지는 😀 같은 이모지 하나이거나 서버 이모지여야 해요.")
@@ -73,14 +73,14 @@ class RulesAdmin(commands.Cog):
             view = Confirm(interaction.user.id, apply, label="줄이기", emoji="⚠️", after=after)
             await interaction.response.send_message(embed=theme.make_embed(
                 "⚠️ 최대 보유량을 줄일까요?", f"재화를 {changes['max']:,}개보다 많이 가진 **{n:,}명**이 {changes['max']:,}개로 줄어요. 되돌릴 수 없어요.",
-                color=theme.RED), view=view, ephemeral=True)
+                color=theme.RED), view=view, ephemeral=False)
             return
         try:
             text = apply()
         except ValueError as exc:
             await self._deny(interaction, str(exc))
             return
-        await interaction.response.send_message(embed=theme.notice(text), ephemeral=True)
+        await interaction.response.send_message(embed=theme.notice(text), ephemeral=False)
         await refresh_panels(self.bot, interaction.guild)
 
     # ---------------------------------------------------------------- 던전 입장 물품
@@ -95,7 +95,7 @@ class RulesAdmin(commands.Cog):
         store.ensure_defaults(gid)
         if item is None:
             store.update_settings(gid, entry_item=None, entry_cost=1)
-            await interaction.response.send_message(embed=theme.notice("이제 던전은 **무료 입장**이에요."), ephemeral=True)
+            await interaction.response.send_message(embed=theme.notice("이제 던전은 **무료 입장**이에요."), ephemeral=False)
             return
         row = store.item_by_name(gid, item)
         if row is None or row["kind"] != "item":
@@ -103,7 +103,7 @@ class RulesAdmin(commands.Cog):
             return
         store.update_settings(gid, entry_item=row["id"], entry_cost=count)
         await interaction.response.send_message(
-            embed=theme.notice(f"던전에 들어가려면 {row['emoji']} **{row['name']}** {count}개가 필요해요. (이미 들어간 사람의 진행은 그대로예요)"), ephemeral=True)
+            embed=theme.notice(f"던전에 들어가려면 {row['emoji']} **{row['name']}** {count}개가 필요해요. (이미 들어간 사람의 진행은 그대로예요)"), ephemeral=False)
 
     @entry_item.autocomplete("item")
     async def entry_autocomplete(self, interaction: discord.Interaction, current: str):
@@ -134,7 +134,7 @@ class RulesAdmin(commands.Cog):
         table = self.bot.store.package_table(interaction.guild_id)
         total = sum(e["weight"] for e in table)
         note = f"\n\n비율 합계 {total:g} — 합계가 100이 아니어도 비율로 계산해서 위 확률로 나와요."
-        await interaction.response.send_message(embed=theme.make_embed("📦 패키지 결과표", "\n".join(lines) + note, color=theme.PURPLE), ephemeral=True)
+        await interaction.response.send_message(embed=theme.make_embed("📦 패키지 결과표", "\n".join(lines) + note, color=theme.PURPLE), ephemeral=False)
 
     @package.command(name="기본값", description="결과표를 새 기본 확률표로 통째로 바꿔요. 물품이 없으면 만들어요 (관리자)")
     async def package_default(self, interaction: discord.Interaction):
@@ -153,7 +153,7 @@ class RulesAdmin(commands.Cog):
         await interaction.response.send_message(
             embed=theme.make_embed("📦 기본 확률표로 바꿀까요?", text, color=theme.RED),
             view=Confirm(interaction.user.id, lambda: f"📦 결과표를 기본 확률표({len(store.apply_default_package_table(gid))}칸)로 바꿨어요. `/패키지결과 목록`에서 확인하세요."
-                         , label="바꾸기", emoji="📦"), ephemeral=True)
+                         , label="바꾸기", emoji="📦"), ephemeral=False)
 
     @package.command(name="추가", description="패키지 결과를 하나 더해요 (관리자)")
     @app_commands.rename(kind="종류", weight="확률", item="물품", amount="개수", emoji="이모지", title="이름")
@@ -195,7 +195,7 @@ class RulesAdmin(commands.Cog):
 
     async def _show(self, interaction, head: str):
         lines = package_lines(self.bot.store, interaction.guild_id)
-        await interaction.response.send_message(embed=theme.notice(head + "\n" + "\n".join(lines)), ephemeral=True)
+        await interaction.response.send_message(embed=theme.notice(head + "\n" + "\n".join(lines)), ephemeral=False)
 
     def _find_entry(self, gid: int, ident: str):
         return next((e for e in self.bot.store.package_table(gid) if e["id"] == ident), None)
@@ -306,7 +306,7 @@ class RulesAdmin(commands.Cog):
 
     async def _clear_show(self, interaction, head: str):
         text = head + "\n" + "\n".join(self._clear_lines(interaction.guild_id))
-        await interaction.response.send_message(embed=theme.notice(text), ephemeral=True)
+        await interaction.response.send_message(embed=theme.notice(text), ephemeral=False)
 
     def _find_clear(self, gid: int, ident: str):
         return next((r for r in self.bot.store.settings(gid)["clear_rewards"] if r["id"] == ident), None)
@@ -319,7 +319,7 @@ class RulesAdmin(commands.Cog):
                 "물품 보상은 각각 따로 확률을 굴려요.")
         await interaction.response.send_message(
             embed=theme.make_embed("🏆 던전 클리어 보상", "\n".join(self._clear_lines(interaction.guild_id)) + note, color=theme.PURPLE),
-            ephemeral=True)
+            ephemeral=False)
 
     @clear.command(name="추가", description="클리어 보상 물품을 하나 더해요 (관리자)")
     @app_commands.rename(item="물품", amount="개수", chance="확률")

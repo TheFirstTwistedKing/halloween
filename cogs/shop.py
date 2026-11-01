@@ -3,6 +3,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import theme
+from owner import owner_only
 from access import require_admin
 from cogs.admin import item_choices
 from panel import display_name, post_panel, refresh_panels
@@ -26,7 +27,7 @@ class ConfirmDelete(discord.ui.View):
         self.add_item(no)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return interaction.user.id == self.admin_id
+        return await owner_only(interaction, self.admin_id)
 
     async def confirm(self, interaction: discord.Interaction):
         self.stop()
@@ -51,7 +52,7 @@ class Shop(commands.Cog):
         self.bot = bot
 
     async def _deny(self, interaction, text):
-        await interaction.response.send_message(embed=theme.notice(text, False), ephemeral=True)
+        await interaction.response.send_message(embed=theme.notice(text, False), ephemeral=False)
 
     # ---------------------------------------------------------------- 상점 등록
     @app_commands.command(name="상점등록", description="이 채널에 할로윈 상점을 띄워요 (관리자)")
@@ -70,13 +71,13 @@ class Shop(commands.Cog):
         if not (perms.view_channel and perms.send_messages and perms.embed_links):
             await self._deny(interaction, f"봇이 {channel.mention}에서 메시지를 보내거나 임베드를 올릴 수 없어요. 채널 권한을 확인해 주세요.")
             return
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=False)
         try:
             message = await post_panel(self.bot, channel)
         except discord.HTTPException:
-            await interaction.followup.send(embed=theme.notice("상점을 올리지 못했어요. 채널 권한을 확인해 주세요.", False), ephemeral=True)
+            await interaction.followup.send(embed=theme.notice("상점을 올리지 못했어요. 채널 권한을 확인해 주세요.", False), ephemeral=False)
             return
-        await interaction.followup.send(embed=theme.notice(f"{channel.mention}에 상점을 열었어요! {message.jump_url}"), ephemeral=True)
+        await interaction.followup.send(embed=theme.notice(f"{channel.mention}에 상점을 열었어요! {message.jump_url}"), ephemeral=False)
 
     @app_commands.command(name="상점해제", description="이 채널의 할로윈 상점을 없애요 (관리자)")
     @app_commands.guild_only()
@@ -95,11 +96,11 @@ class Shop(commands.Cog):
             await channel.get_partial_message(row["message"]).delete()
         except discord.HTTPException:
             pass
-        await interaction.response.send_message(embed=theme.notice(f"{channel.mention}의 상점을 없앴어요. 물품과 가방은 그대로예요."), ephemeral=True)
+        await interaction.response.send_message(embed=theme.notice(f"{channel.mention}의 상점을 없앴어요. 물품과 가방은 그대로예요."), ephemeral=False)
 
     # ---------------------------------------------------------------- 물품 등록
     async def _finish(self, interaction, text):
-        await interaction.response.send_message(embed=theme.notice(text), ephemeral=True)
+        await interaction.response.send_message(embed=theme.notice(text), ephemeral=False)
         await refresh_panels(self.bot, interaction.guild)
 
     @app_commands.command(name="물품등록", description="상점에 물품을 등록해요 (관리자)")
@@ -208,7 +209,7 @@ class Shop(commands.Cog):
         warning = f"가방에 있는 **{held:,}개**도 함께 사라져요. " if held else ""
         await interaction.response.send_message(
             embed=theme.make_embed("🗑️ 정말 지울까요?", f"{row['emoji']} **{row['name']}**\n{warning}되돌릴 수 없어요.", color=theme.RED),
-            view=ConfirmDelete(self.bot, interaction.user.id, row["id"], row["name"]), ephemeral=True)
+            view=ConfirmDelete(self.bot, interaction.user.id, row["id"], row["name"]), ephemeral=False)
 
     @app_commands.command(name="물품목록", description="등록된 모든 물품을 봅니다 (관리자)")
     @app_commands.guild_only()
@@ -227,7 +228,7 @@ class Shop(commands.Cog):
         listed = len(store.items(gid, shop_only=True))
         text = "\n".join(lines)[:3800] or "등록된 물품이 없어요."
         await interaction.response.send_message(
-            embed=theme.make_embed("📜 물품 목록", f"{text}\n\n상점에 진열 {listed}/{MAX_SHOP_ITEMS}", color=theme.PURPLE), ephemeral=True)
+            embed=theme.make_embed("📜 물품 목록", f"{text}\n\n상점에 진열 {listed}/{MAX_SHOP_ITEMS}", color=theme.PURPLE), ephemeral=False)
 
     @edit_item.autocomplete("item")
     @delete_item.autocomplete("item")

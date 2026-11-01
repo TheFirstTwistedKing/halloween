@@ -4,6 +4,7 @@ from __future__ import annotations
 import discord
 
 import theme
+from owner import owner_only
 from store import StoreError
 
 
@@ -19,7 +20,7 @@ class Confirm(discord.ui.View):
         self.add_item(no)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return interaction.user.id == self.admin_id
+        return await owner_only(interaction, self.admin_id)
 
     async def confirm(self, interaction: discord.Interaction):
         self.stop()

@@ -66,7 +66,7 @@ class RealPathTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.store.item_by_name(100, "몰래 물품"))
         embed, kwargs = self.sent_embed()
         self.assertIn("관리자만", embed.description)
-        self.assertTrue(kwargs["ephemeral"])
+        self.assertFalse(kwargs["ephemeral"])
 
     async def test_settings_with_a_number_a_choice_and_a_boolean(self):
         options = [{"name": "재화확률", "type": 10, "value": 80.5}, {"name": "패키지방식", "type": 3, "value": "first"},
@@ -81,7 +81,7 @@ class RealPathTests(unittest.IsolatedAsyncioTestCase):
         await self.bot.tree._call(self.interaction("가방"))
         embed, kwargs = self.sent_embed()
         self.assertEqual(embed.title, "🎒 u의 가방")
-        self.assertTrue(kwargs["ephemeral"])
+        self.assertFalse(kwargs["ephemeral"])
         names = {c.name for c in self.bot.tree.get_commands()}
         self.assertFalse({"경험치교환", "경험치지급"} & names)
 

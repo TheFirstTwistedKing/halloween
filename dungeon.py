@@ -43,6 +43,8 @@ class Run:
     enemy: dict | None = None
     weapon: str | None = None
     shield: str | None = None
+    spare_weapon: str | None = None                 # 예비 칸(이번 던전 동안만): 장착하지 않고 가지고 있는 무기 1개
+    spare_shield: str | None = None                 # 예비 방패 1개. 예비 칸은 무기 1·방패 1이 전부이고 던전이 끝나면 사라진다.
     regen_amount: int = 0
     regen_turns: int = 0
     events: list = field(default_factory=list)      # 방금 있었던 일(화면에 보여준다)
@@ -332,21 +334,85 @@ def _pending(run: Run, bal: Balance) -> Gear | None:
     return gear
 
 
+def _label(gear: Gear) -> str:
+    return f"{gear.emoji} **{gear.name}**"
+
+
+def _valid(key: str | None, slot: str, bal: Balance) -> str | None:
+    """그 칸에 놓을 수 있는 장비의 key. 관리자가 지웠거나 종류가 다르면 없는 것으로 본다."""
+    gear = bal.gear_by_key.get(key) if key else None
+    return key if gear is not None and gear.slot == slot else None
+
+
 def equip_pending(run: Run, bal: Balance | None = None) -> list[str]:
-    """상자에서 나온 장비를 장착한다. 같은 칸에 있던 장비는 사라진다."""
+    """상자에서 나온 장비를 장착한다. 같은 칸에 장착하고 있던 장비는 예비 칸이 비어 있으면 거기로 옮기고, 차 있으면 사라진다."""
+    bal = bal or DEFAULT
     had = run.pending_gear
-    gear = _pending(run, bal or DEFAULT)
+    gear = _pending(run, bal)
     if gear is None:
         if had:                                          # 그 사이 지워진 장비: 오류로 막지 않고 대기만 풀어 앞으로 갈 수 있게 한다.
             run.events = ["❔ 그 장비는 사라졌어요. 앞으로 나아갈 수 있어요."]
             return run.events
         raise DungeonError("장착할 장비가 없어요.")
-    if gear.slot == "shield":
-        run.shield = gear.key
-    else:
-        run.weapon = gear.key
+    slot = "shield" if gear.slot == "shield" else "weapon"
+    old = _valid(getattr(run, slot), slot, bal)
+    setattr(run, slot, gear.key)
     run.pending_gear = None
-    run.events = [f"{gear.emoji} **{gear.name}**을(를) 장착했어요!"]
+    run.events = [f"{_label(gear)}을(를) 장착했어요!"]
+    if old:
+        spare_free = _valid(getattr(run, f"spare_{slot}"), slot, bal) is None
+        if spare_free:
+            setattr(run, f"spare_{slot}", old)
+        run.events.append(f"┕ 기존 {_label(bal.gear_by_key[old])}은(는) " + ("예비 칸으로 옮겼어요." if spare_free else "예비 칸이 차 있어서 사라졌어요."))
+    return run.events
+
+
+def stash_pending(run: Run, bal: Balance | None = None) -> list[str]:
+    """상자에서 나온 장비를 장착하지 않고 예비 칸에 넣는다. 그 종류의 예비 칸이 비어 있어야 한다(무기 1개·방패 1개만 넣을 수 있다)."""
+    bal = bal or DEFAULT
+    had = run.pending_gear
+    gear = _pending(run, bal)
+    if gear is None:
+        if had:
+            run.events = ["❔ 그 장비는 사라졌어요. 앞으로 나아갈 수 있어요."]
+            return run.events
+        raise DungeonError("예비 칸에 넣을 장비가 없어요.")
+    slot = "shield" if gear.slot == "shield" else "weapon"
+    if _valid(getattr(run, f"spare_{slot}"), slot, bal) is not None:
+        held = bal.gear_by_key[getattr(run, f"spare_{slot}")]
+        raise DungeonError(f"예비 {'방패' if slot == 'shield' else '무기'} 칸이 이미 차 있어요 ({held.emoji} {held.name}). "
+                           "먼저 [🎒 장비]에서 바꾸거나 팔아 주세요. 또는 [장착]으로 바로 쓰세요.")
+    setattr(run, f"spare_{slot}", gear.key)
+    run.pending_gear = None
+    run.events = [f"📥 {_label(gear)}을(를) 예비 {'방패' if slot == 'shield' else '무기'} 칸에 넣었어요."]
+    return run.events
+
+
+def swap_spare(run: Run, slot: str, bal: Balance | None = None) -> list[str]:
+    """장착한 장비와 예비 칸의 장비를 서로 바꾼다(slot: weapon | shield). 한쪽이 비어 있으면 넣기(장착한 것을 예비로)나
+    꺼내기(예비를 장착)가 된다. 싸우는 중에는 바꿀 수 없다."""
+    bal = bal or DEFAULT
+    if slot not in ("weapon", "shield"):
+        raise DungeonError("알 수 없는 장비 칸이에요.")
+    if run.finished:
+        raise DungeonError("끝난 던전에서는 바꿀 수 없어요.")
+    if run.in_battle:
+        raise DungeonError("싸우는 중에는 장비를 바꿀 수 없어요. 싸움이 끝난 뒤에 바꿔 주세요.")
+    name = "방패" if slot == "shield" else "무기"
+    equipped, spare = _valid(getattr(run, slot), slot, bal), _valid(getattr(run, f"spare_{slot}"), slot, bal)
+    if equipped is None and spare is None:
+        setattr(run, slot, None)
+        setattr(run, f"spare_{slot}", None)
+        raise DungeonError(f"바꿀 {name}가 없어요. 장착한 것도 예비도 비어 있어요.")        # 무기·방패는 받침이 없어서 '가'다.
+    setattr(run, slot, spare)
+    setattr(run, f"spare_{slot}", equipped)
+    if equipped and spare:
+        run.events = [f"🔄 {name}를 교체했어요: {_label(bal.gear_by_key[equipped])} → {_label(bal.gear_by_key[spare])}",
+                      f"┕ {_label(bal.gear_by_key[equipped])}은(는) 예비 칸으로 갔어요."]
+    elif equipped:
+        run.events = [f"📥 {_label(bal.gear_by_key[equipped])}을(를) 예비 칸에 넣었어요. 지금은 {'맨몸 가드' if slot == 'shield' else '맨손'}이에요."]
+    else:
+        run.events = [f"📤 예비 칸의 {_label(bal.gear_by_key[spare])}을(를) 꺼내 장착했어요!"]
     return run.events
 
 
@@ -371,7 +437,8 @@ def sellable(run: Run, bal: Balance | None = None) -> list[dict]:
     id: pending / weapon / shield / item:<key>. 관리자가 지웠거나 판매가를 0으로 한 것은 나오지 않는다."""
     bal = bal or DEFAULT
     out = []
-    for slot, key, tag in (("pending", run.pending_gear, "새 장비"), ("weapon", run.weapon, "장착 중"), ("shield", run.shield, "장착 중")):
+    for slot, key, tag in (("pending", run.pending_gear, "새 장비"), ("weapon", run.weapon, "장착 중"), ("shield", run.shield, "장착 중"),
+                           ("spare_weapon", run.spare_weapon, "예비"), ("spare_shield", run.spare_shield, "예비")):
         gear = bal.gear_by_key.get(key) if key else None
         if gear and gear.sell_price > 0:
             out.append({"id": slot, "kind": "gear", "name": gear.name, "emoji": gear.emoji, "qty": 1, "price": gear.sell_price, "tag": tag})
@@ -410,6 +477,8 @@ def sell(run: Run, picks, mode: str = "all", bal: Balance | None = None) -> tupl
             run.weapon = None
         elif entry["id"] == "shield":
             run.shield = None
+        elif entry["id"] in ("spare_weapon", "spare_shield"):
+            setattr(run, entry["id"], None)
         else:
             key = entry["id"].split(":", 1)[1]
             run.items[key] -= qty

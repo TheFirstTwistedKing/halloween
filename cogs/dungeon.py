@@ -42,6 +42,10 @@ def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=No
         weapon, shield = bal.gear_by_key.get(run.weapon), bal.gear_by_key.get(run.shield)
         gear = [f"{weapon.emoji} {weapon.name}" if weapon else "👊 맨손", f"{shield.emoji} {shield.name}" if shield else "✋ 맨몸 가드"]
         embed.add_field(name="🎒 장비", value=" · ".join(gear), inline=False)
+        spare = [bal.gear_by_key.get(run.spare_weapon), bal.gear_by_key.get(run.spare_shield)]
+        if any(spare):                                    # 예비 칸은 비어 있으면 보여 주지 않는다.
+            embed.add_field(name="📦 예비", inline=False,
+                            value=" · ".join(f"{g.emoji} {g.name}" if g else f"{label} —" for g, label in zip(spare, ("⚔️", "🛡️"))))
         held = [f"{bal.item_by_key[k].emoji} {bal.item_by_key[k].name} ×{n}" for k, n in run.items.items() if k in bal.item_by_key]
         if held:                                          # 관리자가 지운 아이템만 남았다면 칸 자체를 숨긴다(빈 칸은 디스코드가 거절한다).
             embed.add_field(name="🧪 소지품", value="\n".join(held), inline=False)
@@ -76,6 +80,9 @@ class DungeonView(discord.ui.View):
             self._button("상자 열기", "🎁", "chest", discord.ButtonStyle.success)
         elif run.pending_gear:
             self._button("장착", "✅", "equip", discord.ButtonStyle.success)
+            gear = bal.gear_by_key.get(run.pending_gear)
+            if gear and dungeon._valid(getattr(run, f"spare_{'shield' if gear.slot == 'shield' else 'weapon'}"), gear.slot, bal) is None:
+                self._button("예비에 넣기", "📥", "stash", discord.ButtonStyle.primary)      # 그 종류의 예비 칸이 비어 있을 때만
             self._button("버리기", "🗑️", "discard", discord.ButtonStyle.secondary)
             pending = next((e for e in for_sale if e["id"] == "pending"), None)
             if pending:                                   # 새 장비를 바로 파는 지름길
@@ -84,6 +91,8 @@ class DungeonView(discord.ui.View):
             self._button("앞으로" if run.room else "출발", "🚪", "advance", discord.ButtonStyle.success)
         if not run.in_battle and any(e["id"] != "pending" for e in for_sale):
             self._button("판매", "💰", "open_sell", discord.ButtonStyle.secondary)
+        if not run.in_battle and (run.weapon or run.shield or run.spare_weapon or run.spare_shield):
+            self._button("장비", "🎒", "open_equip", discord.ButtonStyle.secondary)
         if not run.pending_gear and any(k in bal.item_by_key for k in run.items):
             self.add_item(ItemSelect(run, bal))
         self._button("나가기", "🏃", "ask_quit", discord.ButtonStyle.secondary)
@@ -99,6 +108,9 @@ class DungeonView(discord.ui.View):
                 return
             if action == "open_sell":
                 await open_sell(interaction, self.client, self.rev)
+                return
+            if action == "open_equip":
+                await open_equip(interaction, self.client, self.rev)
                 return
             if action == "sell_pending":
                 await respond_sell(interaction, self.client, self.rev, ["pending"], "all", stay=False)
@@ -277,6 +289,84 @@ async def respond_sell(interaction: discord.Interaction, client, rev: int, picks
             view=SellView(client, interaction.user.id, run, bal, cur))
         return
     await interaction.response.edit_message(embed=run_embed(run, None, bal, cur), view=DungeonView(client, interaction.user.id, run, bal))
+
+
+def gear_text(gear) -> str:
+    """장비 화면의 한 칸: '🏏 낡은 몽둥이 — 공격 피해량 +30'. 비어 있으면 '—'."""
+    return f"{gear.emoji} **{gear.name}** — {gear.description}" if gear else "—"
+
+
+def equip_embed(run: Run, bal, result: bool = False) -> discord.Embed:
+    """장비 화면: 장착한 무기·방패와 예비 칸. result=True면 방금 한 교체(run.events)를 맨 위에 보여 준다."""
+    intro = ("**무기 1개·방패 1개**를 예비 칸에 가지고 있다가 장착한 것과 서로 바꿀 수 있어요.\n"
+             "예비 칸은 이번 던전 동안만 쓰고, 던전을 나가거나 쓰러지면 사라져요.")
+    embed = theme.make_embed("🎒 장비", "\n".join(run.events) if result and run.events else intro, color=theme.ORANGE)
+    for slot, name, icon, bare in (("weapon", "무기", "⚔️", "👊 맨손"), ("shield", "방패", "🛡️", "✋ 맨몸 가드")):
+        on = dungeon._valid(getattr(run, slot), slot, bal)
+        spare = dungeon._valid(getattr(run, f"spare_{slot}"), slot, bal)
+        embed.add_field(name=f"{icon} {name}", inline=False,
+                        value=f"**장착**: {gear_text(bal.gear_by_key.get(on)) if on else bare}\n**예비**: {gear_text(bal.gear_by_key.get(spare)) if spare else '비어 있어요'}")
+    return embed
+
+
+class EquipView(discord.ui.View):
+    """장비 화면: 장착한 것과 예비를 바꾼다. 던전 화면과 같은 메시지에서 바뀌어 나오고, 연 사람만 조작할 수 있다."""
+
+    def __init__(self, client, user_id: int, run: Run, bal):
+        super().__init__(timeout=900)
+        self.client, self.user_id, self.rev = client, user_id, run.rev
+        for slot, name, icon in (("weapon", "무기", "⚔️"), ("shield", "방패", "🛡️")):
+            on, spare = dungeon._valid(getattr(run, slot), slot, bal), dungeon._valid(getattr(run, f"spare_{slot}"), slot, bal)
+            if on and spare:
+                label = f"{name} 교체"
+            elif on:
+                label = f"{name} 예비에 넣기"
+            elif spare:
+                label = f"{name} 꺼내 장착"
+            else:
+                label = f"{name} 교체"
+            button = discord.ui.Button(label=label, emoji=icon, style=discord.ButtonStyle.primary, disabled=not (on or spare), row=0)
+            button.callback = self._swap(slot)
+            self.add_item(button)
+        back = discord.ui.Button(label="돌아가기", emoji="↩️", style=discord.ButtonStyle.secondary, row=0)
+        back.callback = self.back
+        self.add_item(back)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await owner_only(interaction, self.user_id)
+
+    def _swap(self, slot: str):
+        async def callback(interaction: discord.Interaction):
+            client = self.client
+            outcome = await service.act(client.store, client.locks, client.rng, interaction.guild_id, interaction.user.id, self.rev, f"swap_{slot}")
+            if not outcome.ok:
+                await interaction.response.send_message(embed=theme.notice(outcome.text, False), ephemeral=True)
+                return
+            bal = client.store.balance(interaction.guild_id)
+            await interaction.response.edit_message(embed=equip_embed(outcome.run, bal, result=True), view=EquipView(client, interaction.user.id, outcome.run, bal))
+        return callback
+
+    async def back(self, interaction: discord.Interaction):
+        run = await service.peek(self.client.store, interaction.guild_id, interaction.user.id)
+        if run is None or run.rev != self.rev:
+            await interaction.response.send_message(embed=theme.notice("지난 화면이에요. `/던전`으로 다시 열어 주세요.", False), ephemeral=True)
+            return
+        bal = self.client.store.balance(interaction.guild_id)
+        await interaction.response.edit_message(
+            embed=run_embed(run, None, bal, self.client.store.currency(interaction.guild_id)), view=DungeonView(self.client, interaction.user.id, run, bal))
+
+
+async def open_equip(interaction: discord.Interaction, client, rev: int):
+    """던전 화면의 [🎒 장비] 버튼: 같은 메시지를 장비 화면으로 바꾼다."""
+    run = await service.peek(client.store, interaction.guild_id, interaction.user.id)
+    if run is None or run.rev != rev:
+        await interaction.response.send_message(embed=theme.notice("지난 화면이에요. `/던전`으로 다시 열어 주세요.", False), ephemeral=True)
+        return
+    if run.in_battle:
+        await interaction.response.send_message(embed=theme.notice("싸우는 중에는 장비를 바꿀 수 없어요.", False), ephemeral=True)
+        return
+    bal = client.store.balance(interaction.guild_id)
+    await interaction.response.edit_message(embed=equip_embed(run, bal), view=EquipView(client, interaction.user.id, run, bal))
 
 
 class Dungeon(commands.Cog):

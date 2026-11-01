@@ -187,7 +187,7 @@ def advance(run: Run, rng, bal: Balance | None = None) -> list[str]:
         run.kind = "empty"                               # 관리자가 몬스터를 모두 지웠다면(검사를 통과한 설정이면 없는 일) 빈 방으로 둔다.
     if run.kind in ("monster", "boss"):
         table = bal.bosses if run.kind == "boss" else bal.monsters
-        monster = table[rng.randint(0, len(table) - 1)]
+        monster = pick_weighted(rng, table)               # 몬스터마다 정한 '등장' 비율대로(기본은 모두 같은 확률)
         run.enemy, run.phase = _spawn(monster, run.floor, bal), "battle"
         text = (f"👑 미니 보스의 방! **{monster.name}**이(가) 나타났어요!" if monster.boss
                 else f"⚠️ 몬스터 조우! **{monster.name}**이(가) 나타났어요!")

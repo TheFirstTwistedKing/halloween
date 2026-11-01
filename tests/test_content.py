@@ -237,7 +237,7 @@ class ContentLogicTests(ContentFixture):
 
     def test_describe_lines(self):
         line = content.describe("monsters", entity_dict(balance.MONSTERS[3]))
-        self.assertEqual(line, "🐀 **거대 쥐** — HP 90 · 공격 45 · 회피 30%")
+        self.assertEqual(line, "🐀 **거대 쥐** — HP 90 · 공격 45 · 회피 30% · 등장 1")
         self.assertNotIn("회피", content.describe("bosses", entity_dict(balance.BOSSES[0])))
         self.assertIn("공격 피해량 +35", content.describe("gear", entity_dict(balance.GEAR[2])))
 
@@ -277,7 +277,7 @@ class RuntimeEffectTests(unittest.IsolatedAsyncioTestCase):
         bal = self.store.balance(G)
         run = dungeon.new_run(bal=bal)
         run.room, run.phase = 1, "cleared"                              # 다음은 2번째 방(빈방 또는 잡몹)
-        dungeon.advance(run, Scripted(randoms=[0.99]), bal)               # 0.99 → 잡몹
+        dungeon.advance(run, Scripted(randoms=[0.99, 0.0]), bal)       # 0.99 → 잡몹, 몬스터는 하나뿐
         self.assertEqual((run.enemy["name"], run.enemy["hp"], run.enemy["damage"], run.enemy["dodge"]), ("드래곤", 321, 77, 0))
 
     def test_a_custom_weapon_changes_damage_and_a_custom_shield_changes_guard(self):
@@ -345,17 +345,17 @@ class RuntimeEffectTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(f.value for f in embed.fields))
         view = DungeonView(self.w.bot, U, run, bal)
         self.assertFalse(any(type(c).__name__ == "ItemSelect" for c in view.children))   # 고를 수 있는 게 없으면 선택창도 없다
-        out = await service.act(self.store, self.locks, Scripted(randoms=[0.5]), G, U, run.rev, "advance")
+        out = await service.act(self.store, self.locks, Scripted(randoms=[0.5, 0.0]), G, U, run.rev, "advance")
         self.assertTrue(out.ok)
 
     def test_simulation_runs_on_custom_content(self):
         self.store.update_settings(G, dungeon={"일반.층수": 1})                  # 한 층으로 보면 잡몹의 영향이 또렷하다(보스가 벽인 100개 방에서는 묻힌다).
         base = balance_sim.simulate(self.store.balance(G), 300, seed=3)["attack"]["clear"]
-        content.add(self.store, G, "monsters", dict(name="허수아비", emoji="🎃", hp=1, damage=0, dodge=0))
+        content.add(self.store, G, "monsters", dict(name="괴물", emoji="👹", hp=100000, damage=5000, dodge=0))
         for name in ("거대 박쥐", "슬라임", "마녀", "거대 쥐"):
             content.delete(self.store, G, ("monsters",), name)
-        easy = balance_sim.simulate(self.store.balance(G), 300, seed=3)["attack"]["clear"]
-        self.assertGreater(easy, base)                                         # 잡몹이 허수아비뿐이라 쉬워진다
+        hard = balance_sim.simulate(self.store.balance(G), 300, seed=3)["attack"]["clear"]
+        self.assertLess(hard, base)                                            # 잡몹이 넘을 수 없는 괴물뿐이라 어려워진다
 
 
 class ContentCommandTests(unittest.IsolatedAsyncioTestCase):

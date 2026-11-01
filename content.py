@@ -146,6 +146,6 @@ def describe(section: str, data: dict) -> str:
     head = f"{entity.emoji} **{entity.name}**"
     if section in ("monsters", "bosses"):
         dodge = "" if section == "bosses" else f" · 회피 {entity.dodge}%"
-        return f"{head} — HP {entity.hp:,} · 공격 {entity.damage:,}{dodge}"
+        return f"{head} — HP {entity.hp:,} · 공격 {entity.damage:,}{dodge} · 등장 {entity.weight:g}"
     sell = f"판매 {entity.sell_price:,}" if entity.sell_price else "판매 불가"
     return f"{head} ({entity.tier}) — {entity.description} · 등장 {entity.weight:g} · {sell}"

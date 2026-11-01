@@ -4,10 +4,12 @@ import random
 import unittest
 
 import balance
+import content
 import dungeon
 from balance import Balance, check_entity, check_value, entity_dict
 from cogs.content_admin import ContentAdmin
-from tests.helpers import World, sent_embed
+from store import Store
+from tests.helpers import Scripted, World, sent_embed
 
 G = 100
 Choice = type("Choice", (), {"__init__": lambda self, value: setattr(self, "value", value)})
@@ -85,6 +87,85 @@ class DecimalChanceTests(unittest.TestCase):
             self.assertEqual(dungeon.pick_weighted(type("R", (), {"random": lambda self, d=draw: d})(), bal.gear).key, expected, draw)
 
 
+def monster(weight=None, boss=False):
+    data = dict(key="m", name="드래곤", emoji="🐉", hp=500, damage=80, dodge=0 if boss else 5)
+    if weight is not None:
+        data["weight"] = weight
+    return data
+
+
+class MonsterWeightTests(unittest.TestCase):
+    def test_decimal_weights_are_accepted_for_monsters_and_bosses(self):
+        for section in ("monsters", "bosses"):
+            for value in (0, 0.5, 0.0125, 3, 999.9999):
+                entity, problem = check_entity(section, monster(value, section == "bosses"))
+                self.assertIsNone(problem, (section, value))
+                self.assertEqual(entity.weight, value)
+            for value in (-0.1, 1000.5, float("nan"), float("inf"), True, "2", 0.00001):
+                entity, problem = check_entity(section, monster(value, section == "bosses"))
+                self.assertIsNone(entity, (section, value))
+                self.assertIn("weight", problem)
+
+    def test_monsters_saved_before_this_feature_count_as_weight_1(self):
+        entity, problem = check_entity("monsters", monster())
+        self.assertIsNone(problem)
+        self.assertEqual(entity.weight, 1)
+        self.assertEqual([m.weight for m in balance.MONSTERS + balance.BOSSES], [1] * 7)        # 기본 몬스터는 전부 같은 확률
+
+    def test_monster_weight_survives_a_save_and_load(self):
+        entity, _ = check_entity("monsters", monster(0.35))
+        loaded, problem = check_entity("monsters", json.loads(json.dumps(entity_dict(entity))))
+        self.assertIsNone(problem)
+        self.assertEqual(loaded, entity)
+
+    def test_dungeon_settings_take_decimal_monster_and_boss_weights(self):
+        self.assertEqual(check_value("몬스터.슬라임.등장", 0.5), (0.5, None))
+        self.assertEqual(check_value("보스.해골 왕.등장", 2.25), (2.25, None))
+        self.assertIsNotNone(check_value("몬스터.슬라임.등장", -1)[1])
+        bal = Balance.build({"몬스터.슬라임.등장": 0.5, "보스.해골 왕.등장": 4})
+        self.assertEqual(next(m.weight for m in bal.monsters if m.name == "슬라임"), 0.5)
+        self.assertEqual(next(b.weight for b in bal.bosses if b.name == "해골 왕"), 4)
+
+    def test_default_pick_is_still_an_even_split(self):
+        bal = Balance.build({})
+        for draw, expected in ((0.0, "giant_bat"), (0.2499, "giant_bat"), (0.25, "slime"), (0.4999, "slime"),
+                               (0.5, "witch"), (0.75, "giant_rat"), (0.9999, "giant_rat")):
+            self.assertEqual(dungeon.pick_weighted(Scripted(randoms=[draw]), bal.monsters).key, expected, draw)
+
+    def test_a_decimal_weight_really_changes_which_monster_shows_up(self):
+        bal = Balance.build({"몬스터.거대 박쥐.등장": 0.5, "몬스터.슬라임.등장": 1.5, "몬스터.마녀.등장": 0, "몬스터.거대 쥐.등장": 0})
+        rng, counts = random.Random(11), {}
+        for _ in range(20000):
+            run = dungeon.new_run(bal=bal)
+            run.room, run.phase = 1, "cleared"
+            dungeon.advance(run, Scripted(randoms=[0.99, rng.random()]), bal)               # 0.99 = 잡몹 방
+            counts[run.enemy["name"]] = counts.get(run.enemy["name"], 0) + 1
+        self.assertEqual(set(counts), {"거대 박쥐", "슬라임"})                               # 0은 절대 안 나온다
+        self.assertAlmostEqual(counts["거대 박쥐"] / 20000, 0.25, delta=0.015)
+
+    def test_boss_weights_decide_the_boss_too(self):
+        bal = Balance.build({"보스.해골 왕.등장": 0, "보스.거대 슬라임.등장": 0, "보스.고블린 왕.등장": 0.001})
+        run = dungeon.new_run(bal=bal)
+        run.room, run.phase = dungeon.ROOMS - 1, "cleared"
+        dungeon.advance(run, Scripted(randoms=[0.0]), bal)
+        self.assertEqual(run.enemy["name"], "고블린 왕")
+
+    def test_zeroing_every_monster_weight_is_refused_with_a_reason(self):
+        store = Store(":memory:")
+        for m in balance.MONSTERS[:-1]:
+            content.edit(store, G, ("monsters",), m.name, {"weight": 0})
+        with self.assertRaisesRegex(content.ContentError, "등장"):
+            content.edit(store, G, ("monsters",), balance.MONSTERS[-1].name, {"weight": 0})
+        for b in balance.BOSSES[:-1]:
+            content.edit(store, G, ("bosses",), b.name, {"weight": 0})
+        with self.assertRaisesRegex(content.ContentError, "등장"):
+            content.edit(store, G, ("bosses",), balance.BOSSES[-1].name, {"weight": 0})
+
+    def test_the_list_line_shows_the_weight(self):
+        entity, _ = check_entity("monsters", monster(0.35))
+        self.assertIn("등장 0.35", content.describe("monsters", entity_dict(entity)))
+
+
 class DecimalCommandTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.w = World()
@@ -133,4 +214,33 @@ class DecimalCommandTests(unittest.IsolatedAsyncioTestCase):
         for command in (ContentAdmin.gear_add, ContentAdmin.gear_edit, ContentAdmin.potion_add, ContentAdmin.potion_edit):
             weight = next(p for p in command.parameters if p.name == "weight")
             self.assertEqual(weight.type.name, "number", command.name)          # 디스코드의 소수 옵션 형식
+            self.assertEqual((weight.min_value, weight.max_value), (0, 1000), command.name)
+
+    async def test_monster_add_and_edit_take_decimal_weight(self):
+        i = await self.run_cmd(ContentAdmin.monster_add, self.ask(), "드래곤", "🐉", 500, 80, 5, False, 0.35)
+        self.assertIn("등장 0.35", self.text(i))
+        self.assertEqual(next(m.weight for m in self.store.balance(G).monsters if m.name == "드래곤"), 0.35)
+        i = await self.run_cmd(ContentAdmin.monster_edit, self.ask(), "드래곤", weight=0.0125)
+        self.assertIn("등장 0.0125", self.text(i))
+        self.assertEqual(next(m.weight for m in self.store.balance(G).monsters if m.name == "드래곤"), 0.0125)
+        i = await self.run_cmd(ContentAdmin.monster_edit, self.ask(), "슬라임", weight=2.5)         # 기본 몬스터도 고칠 수 있다
+        self.assertEqual(next(m.weight for m in self.store.balance(G).monsters if m.name == "슬라임"), 2.5)
+        i = await self.run_cmd(ContentAdmin.monster_add, self.ask(), "마왕", "😈", 1500, 200, 0, True, 0.2)
+        self.assertEqual(next(b.weight for b in self.store.balance(G).bosses if b.name == "마왕"), 0.2)
+
+    async def test_monster_add_without_a_weight_means_equal_chance(self):
+        await self.run_cmd(ContentAdmin.monster_add, self.ask(), "드래곤", "🐉", 500, 80)
+        self.assertEqual(next(m.weight for m in self.store.balance(G).monsters if m.name == "드래곤"), 1)
+
+    async def test_monster_edit_that_would_zero_everything_is_refused(self):
+        for name in ("거대 박쥐", "슬라임", "마녀"):
+            await self.run_cmd(ContentAdmin.monster_edit, self.ask(), name, weight=0)
+        i = await self.run_cmd(ContentAdmin.monster_edit, self.ask(), "거대 쥐", weight=0)
+        self.assertIn("등장", self.text(i))
+        self.assertEqual(next(m.weight for m in self.store.balance(G).monsters if m.name == "거대 쥐"), 1)
+
+    def test_monster_options_are_declared_as_decimals(self):
+        for command in (ContentAdmin.monster_add, ContentAdmin.monster_edit):
+            weight = next(p for p in command.parameters if p.name == "weight")
+            self.assertEqual(weight.type.name, "number", command.name)
             self.assertEqual((weight.min_value, weight.max_value), (0, 1000), command.name)

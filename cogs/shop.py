@@ -103,6 +103,28 @@ class Shop(commands.Cog):
         await interaction.response.send_message(embed=theme.notice(text), ephemeral=False)
         await refresh_panels(self.bot, interaction.guild)
 
+    @app_commands.command(name="물품추가", description="새 물품을 만들어요. 상점에는 올리지 않아요 (이름·이모지·설명만) (관리자)")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.rename(name="이름", emoji="이모지", description="설명")
+    @app_commands.describe(name="물품 이름 (30자까지)", emoji="아이콘 (기본 🎃)", description="설명 (200자까지)")
+    async def create_plain_item(self, interaction: discord.Interaction, name: str, emoji: str = "🎃", description: str = ""):
+        """상점과 상관없이 물품만 만든다. 패키지 결과·연금술 재료·지급용처럼 상점에 올리지 않는 물품에 쓴다(상점 25칸에도 안 들어간다)."""
+        if not await require_admin(interaction):
+            return
+        store, gid = self.bot.store, interaction.guild_id
+        store.ensure_defaults(gid)                                   # 열쇠·쓰레기 같은 기본 물품과 이름이 겹치는지도 알아야 한다.
+        try:
+            item = store.create_item(gid, name.strip(), emoji=emoji.strip(), description=description.strip())
+        except StoreError as exc:
+            await self._deny(interaction, str(exc))
+            return
+        await interaction.response.send_message(embed=theme.notice(
+            f"{item['emoji']} **{item['name']}**을(를) 만들었어요. 상점에는 올라가지 않았어요.\n"
+            "이어서 이렇게 쓸 수 있어요:\n"
+            "• 상점에 올리기 `/상점진열`\n• 패키지에서 나오게 하기 `/패키지결과 추가`\n"
+            "• 연금술 재료·결과물로 쓰기 `/연금술레시피 추가`\n• 유저에게 주기 `/물품지급`"), ephemeral=False)
+
     @app_commands.command(name="물품등록", description="상점에 물품을 등록해요 (관리자)")
     @app_commands.guild_only()
     @app_commands.default_permissions(administrator=True)

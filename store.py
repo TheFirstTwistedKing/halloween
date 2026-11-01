@@ -395,8 +395,16 @@ class Store:
         if not cfg["seeded"]:
             with self.db:
                 for key, (name, emoji, description) in SYSTEM_ITEMS.items():
-                    self.db.execute("INSERT OR IGNORE INTO items(guild, name, emoji, description, kind, system) "
-                                    "VALUES(?,?,?,?,'item',?)", (guild, name, emoji, description, key))
+                    if self.db.execute("SELECT 1 FROM items WHERE guild=? AND system=?", (guild, key)).fetchone():
+                        continue
+                    # 기본 물품을 만들기 전에 관리자가 같은 이름의 물품을 먼저 만들었다면(예: '열쇠') 그 물품을 기본 물품으로 이어받는다.
+                    # 그냥 두면 이름이 겹쳐 기본 물품이 안 만들어지고 아래에서 KeyError가 난다. 이름·가격·가방 속 개수는 그대로다.
+                    same = self.db.execute("SELECT id FROM items WHERE guild=? AND lower(name)=lower(?) AND kind='item'", (guild, name)).fetchone()
+                    if same:
+                        self.db.execute("UPDATE items SET system=? WHERE id=?", (key, same["id"]))
+                    else:
+                        self.db.execute("INSERT INTO items(guild, name, emoji, description, kind, system) VALUES(?,?,?,?,'item',?)",
+                                        (guild, name, emoji, description, key))
             ids = {row["system"]: row["id"] for row in
                    self.db.execute("SELECT id, system FROM items WHERE guild=? AND system IS NOT NULL", (guild,)).fetchall()}
             self.update_settings(guild, seeded=True, entry_item=ids["key"], entry_cost=1, package_table=first_package_table(ids))

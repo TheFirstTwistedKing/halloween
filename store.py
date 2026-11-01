@@ -19,6 +19,7 @@ CANDY_NAME = "할로윈 재화"
 CANDY_MAX = 99999                # 보유할 수 있는 최대 재화
 MAX_SHOP_ITEMS = 25              # 선택창 한도(디스코드): 상점에 올릴 수 있는 물품 수
 QTY_MAX = 999                    # 한 번에 사고팔 수 있는 수량
+TICKET_MAX = 99_999              # 한 사람이 가질 수 있는 히든 칭호 획득권의 최대(관리자 지급 기준)
 MAX_RECIPES = 100                # 서버마다 연금술 레시피 수 한도
 SEED_VERSION = 1                 # 기본 물품·패키지 결과표의 버전. 올리면 이미 운영 중인 서버도 한 번 이전한다(_upgrade_seed).
 PACKAGE_CANDY = 50
@@ -854,6 +855,17 @@ class Store:
             self.db.execute("DELETE FROM packages WHERE message=?", (message,))
 
     # ---- 던전 ----
+    def add_tickets(self, guild: int, user: int, amount: int) -> int:
+        """히든 칭호 획득권을 더하거나(양수) 뺀다(음수). 0 아래로는 내려가지 않고 TICKET_MAX를 넘지 않는다. 실제로 바뀐 개수를 돌려준다."""
+        with self.db:
+            old = self.tickets(guild, user)
+            new = min(TICKET_MAX, max(0, old + amount))
+            if new:
+                self.db.execute("INSERT INTO tickets VALUES(?,?,?) ON CONFLICT(guild,user) DO UPDATE SET count=excluded.count", (guild, user, new))
+            else:
+                self.db.execute("DELETE FROM tickets WHERE guild=? AND user=?", (guild, user))
+        return new - old
+
     def tickets(self, guild: int, user: int) -> int:
         """가진 히든 칭호 획득권 수."""
         row = self.db.execute("SELECT count FROM tickets WHERE guild=? AND user=?", (guild, user)).fetchone()

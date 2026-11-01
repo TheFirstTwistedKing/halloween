@@ -189,6 +189,59 @@ class Shop(commands.Cog):
             return
         await self._finish(interaction, f"{updated['emoji']} **{updated['name']}**을(를) 고쳤어요.\n" + self._flags(updated, self.bot.store.currency(interaction.guild_id)))
 
+    @app_commands.command(name="상점진열", description="이미 만든 물품(열쇠 같은 것)을 상점에 올려요. 가격을 정하면 살 수·팔 수 있어요 (관리자)")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.rename(item="물품", buy_price="구입가", sell_price="판매가", sell_max="판매최대")
+    @app_commands.describe(item="상점에 올릴 물품 (아직 상점에 없는 것부터 자동완성돼요)", buy_price="사람들이 살 수 있게 하려면 구입 가격(1 이상)",
+                           sell_price="사람들이 팔 수 있게 하려면 판매 가격. 음수면 팔 때 재화를 내요", sell_max=SELL_MAX_HELP)
+    async def shelve_item(self, interaction: discord.Interaction, item: str, buy_price: app_commands.Range[int, 1, 1_000_000_000] | None = None,
+                          sell_price: app_commands.Range[int, -1_000_000_000, 1_000_000_000] | None = None,
+                          sell_max: app_commands.Range[int, -1_000_000_000, 1_000_000_000] | None = None):
+        if not await require_admin(interaction):
+            return
+        store, gid = self.bot.store, interaction.guild_id
+        store.ensure_defaults(gid)
+        row = store.item_by_name(gid, item)
+        if row is None:
+            await self._deny(interaction, "그런 물품이 없어요. 이름은 자동완성에서 골라 주세요.")
+            return
+        if row["kind"] == "role":
+            await self._deny(interaction, "역할은 `/역할등록`으로 상점에 올려요.")
+            return
+        if buy_price is None and sell_price is None:
+            await self._deny(interaction, "구입가나 판매가 중 하나는 적어 주세요. 구입가를 적으면 살 수 있고, 판매가를 적으면 팔 수 있어요.")
+            return
+        if sell_max is not None and sell_price is None:
+            await self._deny(interaction, "판매최대는 판매가와 함께 적어 주세요.")
+            return
+        changes = {}
+        if buy_price is not None:
+            changes.update(buyable=True, buy_price=buy_price)
+        if sell_price is not None:                                  # 판매 설정은 한 벌이라 판매최대를 안 적으면 고정 판매가가 된다.
+            changes.update(sellable=True, sell_price=sell_price, sell_max=sell_max)
+        try:
+            updated = store.update_item(gid, row["id"], **changes)
+        except StoreError as exc:
+            await self._deny(interaction, str(exc))
+            return
+        note = "" if store.shops(gid) else "\n(아직 열려 있는 상점이 없어요. `/상점등록`으로 채널에 상점을 열어 주세요.)"
+        await self._finish(interaction, f"{updated['emoji']} **{updated['name']}**을(를) 상점에 올렸어요.\n"
+                           + self._flags(updated, store.currency(gid)) + note)
+
+    @shelve_item.autocomplete("item")
+    async def shelve_autocomplete(self, interaction: discord.Interaction, current: str):
+        """상점에 아직 없는 물품을 먼저 보여 준다. 이미 올라간 물품도 고를 수 있다(가격을 다시 정한다)."""
+        if interaction.guild_id is None:
+            return []
+        store, gid = self.bot.store, interaction.guild_id
+        store.ensure_defaults(gid)
+        needle = current.strip().lower()
+        rows = [r for r in store.items(gid) if r["kind"] == "item" and needle in r["name"].lower()]
+        rows.sort(key=lambda r: bool(r["buyable"] or r["sellable"]))           # 상점에 없는 것이 앞으로 (나머지는 만든 순서 그대로)
+        return [app_commands.Choice(name=(f"{r['emoji']} {r['name']}" + (" · 진열 중" if r["buyable"] or r["sellable"] else ""))[:100], value=r["name"])
+                for r in rows[:25]]
+
     @app_commands.command(name="물품삭제", description="물품을 지워요. 가방에 있던 것도 사라져요 (관리자)")
     @app_commands.guild_only()
     @app_commands.default_permissions(administrator=True)

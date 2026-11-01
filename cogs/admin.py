@@ -8,6 +8,7 @@ import theme
 from owner import owner_only
 from access import require_admin
 from josa import eun_neun, i_ga
+from store import TICKET_MAX
 
 LOG = logging.getLogger("halloween")
 NO_MEMBERS_INTENT = ("이 명령어는 봇이 서버 멤버 목록을 볼 수 있어야 해요. 설정 방법:\n"
@@ -196,6 +197,31 @@ class Admin(commands.Cog):
         now, cur = store.wallet(gid, target.id), store.currency(gid)
         await interaction.response.send_message(
             embed=theme.notice(f"{target.mention}의 {i_ga(cur.name)} {changed:+,}만큼 바뀌었어요. (지금 {cur.money(now)})"), ephemeral=False)
+
+    @app_commands.command(name="획득권지급", description="🎟️ 히든 칭호 획득권을 주거나(+) 회수해요(−). 수량 0이면 지금 몇 장인지만 봐요 (관리자)")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.rename(target="대상", amount="수량")
+    @app_commands.describe(target="획득권을 조정할 사람", amount="더할 장수(+) 또는 뺄 장수(−). 가진 것보다 많이 빼도 0까지만 줄어요")
+    async def give_ticket(self, interaction: discord.Interaction, target: discord.Member,
+                          amount: app_commands.Range[int, -TICKET_MAX, TICKET_MAX]):
+        """던전 클리어로 얻는 🎟️ 히든 칭호 획득권은 물품이 아니라 별도 숫자라서 /물품지급으로는 못 다룬다. 이 명령어로 조정한다."""
+        if not await require_admin(interaction):
+            return
+        store, gid = self.bot.store, interaction.guild_id
+        if problem := self._bad_target(target):
+            await interaction.response.send_message(embed=theme.notice(problem, False), ephemeral=False)
+            return
+        if amount == 0:
+            await interaction.response.send_message(embed=theme.notice(
+                f"{target.mention}의 🎟️ 히든 칭호 획득권은 지금 **{store.tickets(gid, target.id):,}장**이에요. (수량이 0이면 바뀌는 게 없어요)", False), ephemeral=False)
+            return
+        changed = store.add_tickets(gid, target.id, amount)
+        now = store.tickets(gid, target.id)
+        LOG.info("획득권 조정: 관리자 %s → 대상 %s, 요청 %+d장, 실제 %+d장, 지금 %d장 (서버 %s)", interaction.user.id, target.id, amount, changed, now, gid)
+        note = "" if changed == amount else (" (가진 만큼만 회수했어요)" if amount < 0 else f" (최대 {TICKET_MAX:,}장까지만 가질 수 있어요)")
+        await interaction.response.send_message(
+            embed=theme.notice(f"{target.mention}의 🎟️ 히든 칭호 획득권이 {changed:+,}장 바뀌었어요.{note} (지금 {now:,}장)"), ephemeral=False)
 
     @app_commands.command(name="역할재화지급", description="그 역할을 가진 모든 사람에게 재화를 주거나(+) 회수해요(−) (관리자)")
     @app_commands.guild_only()

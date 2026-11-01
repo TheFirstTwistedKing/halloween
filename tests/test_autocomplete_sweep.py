@@ -16,7 +16,7 @@ from store import Store
 ADMIN = str(discord.Permissions(administrator=True).value)
 G = 100
 LONG_EMOJI = "<a:" + "e" * 32 + ":" + "1" * 25 + ">"          # 서버 이모지로 가능한 가장 긴 모양
-EXTENSIONS = ("cogs.economy", "cogs.admin", "cogs.shop", "cogs.dungeon", "cogs.dungeon_admin", "cogs.rules_admin", "cogs.content_admin")
+EXTENSIONS = ("cogs.economy", "cogs.admin", "cogs.shop", "cogs.dungeon", "cogs.dungeon_admin", "cogs.rules_admin", "cogs.content_admin", "cogs.alchemy")
 
 
 class SweepBase(unittest.IsolatedAsyncioTestCase):
@@ -80,7 +80,7 @@ class SweepBase(unittest.IsolatedAsyncioTestCase):
 
     async def sweep(self):
         found = self.targets()
-        self.assertGreaterEqual(len(found), 21)
+        self.assertGreaterEqual(len(found), 25)
         for path, option in found:
             for text in ("", "열", "a", "일반", "💎"):
                 label = f"{' '.join(path)} · {option} · '{text}'"
@@ -93,7 +93,8 @@ class FreshServerTests(SweepBase):
         found = await self.sweep()
         names = {" ".join(p) + ":" + o for p, o in found}
         for expected in ("물품수정:물품", "물품삭제:물품", "상점진열:물품", "물품지급:물품", "던전입장물품:물품", "던전설정:항목", "던전설정초기화:항목",
-                         "몬스터 수정:대상", "장비 삭제:대상", "소모품 수정:대상", "패키지결과 수정:결과", "패키지결과 추가:물품", "던전보상 수정:보상"):
+                         "몬스터 수정:대상", "장비 삭제:대상", "소모품 수정:대상", "패키지결과 수정:결과", "패키지결과 추가:물품", "던전보상 수정:보상",
+                         "연금술레시피 추가:결과물", "연금술레시피 추가:재료1", "연금술레시피 추가:재료3", "연금술레시피 삭제:결과물"):
             self.assertIn(expected, names)
 
     async def test_the_item_lists_are_not_empty_on_a_new_server(self):

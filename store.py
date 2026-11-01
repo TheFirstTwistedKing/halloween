@@ -9,6 +9,7 @@ import sqlite3
 from pathlib import Path
 from typing import NamedTuple
 
+import alchemy
 from josa import i_ga
 
 import balance as balance_rules
@@ -18,6 +19,7 @@ CANDY_NAME = "할로윈 재화"
 CANDY_MAX = 99999                # 보유할 수 있는 최대 재화
 MAX_SHOP_ITEMS = 25              # 선택창 한도(디스코드): 상점에 올릴 수 있는 물품 수
 QTY_MAX = 999                    # 한 번에 사고팔 수 있는 수량
+MAX_RECIPES = 100                # 서버마다 연금술 레시피 수 한도
 SEED_VERSION = 1                 # 기본 물품·패키지 결과표의 버전. 올리면 이미 운영 중인 서버도 한 번 이전한다(_upgrade_seed).
 PACKAGE_CANDY = 50
 MAX_PACKAGE_ENTRIES = 20
@@ -248,6 +250,10 @@ class Store:
                 message INTEGER, user INTEGER, result TEXT NOT NULL, PRIMARY KEY(message, user));
             CREATE TABLE IF NOT EXISTS package_cooldowns(
                 guild INTEGER, user INTEGER, at REAL NOT NULL, PRIMARY KEY(guild, user));
+            CREATE TABLE IF NOT EXISTS recipes(
+                id INTEGER PRIMARY KEY AUTOINCREMENT, guild INTEGER NOT NULL, result INTEGER NOT NULL, ingredients TEXT NOT NULL);
+            CREATE UNIQUE INDEX IF NOT EXISTS recipes_ingredients ON recipes(guild, ingredients);
+            CREATE UNIQUE INDEX IF NOT EXISTS recipes_result ON recipes(guild, result);
             CREATE TABLE IF NOT EXISTS dungeons(
                 guild INTEGER, user INTEGER, data TEXT NOT NULL, PRIMARY KEY(guild, user));
             CREATE TABLE IF NOT EXISTS tickets(
@@ -479,7 +485,122 @@ class Store:
             out.append("패키지 결과표(`/패키지결과 목록`)")
         if any(r["item"] == item_id for r in cfg["clear_rewards"]):
             out.append("던전 클리어 보상(`/던전보상 목록`)")
+        if any(item_id == r["result"] or item_id in r["ingredients"] for r in self.recipes(guild)):
+            out.append("연금술 레시피(`/연금술레시피 목록`)")
         return out
+
+    # ---- 연금술 ----
+    def recipes(self, guild: int) -> list[dict]:
+        """이 서버의 연금술 레시피 [{id, result, ingredients: [물품 id, ...](작은 id부터)}]."""
+        return [{"id": r["id"], "result": r["result"], "ingredients": json.loads(r["ingredients"])}
+                for r in self.db.execute("SELECT id, result, ingredients FROM recipes WHERE guild=? ORDER BY id", (guild,))]
+
+    def recipe_for(self, guild: int, ingredients) -> dict | None:
+        """재료(순서·중복 상관없이 같은 구성)에 맞는 레시피. 없으면 None."""
+        key = json.dumps(sorted(ingredients))
+        row = self.db.execute("SELECT id, result, ingredients FROM recipes WHERE guild=? AND ingredients=?", (guild, key)).fetchone()
+        return {"id": row["id"], "result": row["result"], "ingredients": json.loads(row["ingredients"])} if row else None
+
+    def recipe_price(self, guild: int, ingredients) -> int:
+        """재료들의 지금 판매가로 계산한 합성물의 판매가."""
+        return alchemy.combined_price([self.item(guild, i)["sell_price"] for i in ingredients])
+
+    def alchemy_stock(self, guild: int, user: int):
+        """이 사람의 가방에서 레시피 재료로 쓰이는 물품(만든 순서). 합성 화면의 선택지에 쓴다."""
+        used = sorted({i for r in self.recipes(guild) for i in r["ingredients"]})
+        if not used:
+            return []
+        marks = ",".join("?" * len(used))
+        return self.db.execute(
+            f"SELECT items.*, inventory.qty AS qty FROM inventory JOIN items ON items.id = inventory.item "
+            f"WHERE inventory.guild=? AND inventory.user=? AND items.kind='item' AND items.id IN ({marks}) ORDER BY items.id",
+            (guild, user, *used)).fetchall()
+
+    def add_recipe(self, guild: int, result_id: int, ingredient_ids) -> dict:
+        """레시피를 더한다. 결과물의 판매가는 재료 판매가로 정해 바로 적용한다(상점 자리가 있으면 판매도 켠다).
+        {recipe, price, listed(상점에 올라가 있는지)}를 돌려준다. 규칙에 어긋나면 StoreError."""
+        ids = sorted(ingredient_ids)
+        if not alchemy.MIN_INGREDIENTS <= len(ids) <= alchemy.MAX_INGREDIENTS:
+            raise StoreError(f"재료는 {alchemy.MIN_INGREDIENTS}~{alchemy.MAX_INGREDIENTS}개로 정해 주세요.")
+        if len(self.recipes(guild)) >= MAX_RECIPES:
+            raise StoreError(f"레시피는 최대 {MAX_RECIPES}개까지예요.")
+        rows = {i: self.item(guild, i) for i in {*ids, result_id}}
+        if any(row is None for row in rows.values()):
+            raise StoreError("그런 물품이 없어요.")
+        if any(row["kind"] != "item" for row in rows.values()):
+            raise StoreError("연금술에는 물품만 쓸 수 있어요. 역할은 안 돼요.")
+        result = rows[result_id]
+        if result_id in ids:
+            raise StoreError("결과물이 재료로 들어갈 수는 없어요.")
+        existing = self.recipes(guild)
+        results = {r["result"] for r in existing}
+        used = {i for r in existing for i in r["ingredients"]}
+        if result_id in results:
+            raise StoreError(f"{result['emoji']} {result['name']}은(는) 이미 다른 레시피의 결과물이에요. 한 물품에는 레시피를 하나만 둘 수 있어요.")
+        if result_id in used:
+            raise StoreError(f"{result['emoji']} {result['name']}은(는) 다른 레시피의 재료예요. 재료는 결과물이 될 수 없어요.")
+        for i in set(ids):
+            if i in results:
+                raise StoreError(f"{rows[i]['emoji']} {rows[i]['name']}은(는) 연금술 결과물이라 재료로 쓸 수 없어요. (합성물을 다시 합칠 수는 없어요)")
+            if rows[i]["sell_price"] < 1 or rows[i]["sell_max"] is not None:
+                raise StoreError(f"{rows[i]['emoji']} {rows[i]['name']}의 판매가가 1 이상의 고정값이어야 재료로 쓸 수 있어요. (지금: 음수·0·범위 판매가는 값을 정할 수 없어요)")
+        if self.recipe_for(guild, ids) is not None:
+            other = self.item(guild, self.recipe_for(guild, ids)["result"])
+            raise StoreError(f"같은 재료의 레시피가 이미 있어요: {other['emoji']} {other['name']}")
+        price = alchemy.combined_price([rows[i]["sell_price"] for i in ids])
+        top = self.currency(guild).max
+        if price > top:
+            raise StoreError(f"합성물의 판매가가 {price:,}이라 재화 최대({top:,})를 넘어요. 재료의 판매가를 낮춰 주세요.")
+        listed_count = self.db.execute("SELECT COUNT(*) AS n FROM items WHERE guild=? AND (buyable=1 OR sellable=1) AND id<>?",
+                                       (guild, result_id)).fetchone()["n"]
+        can_list = bool(result["sellable"] or result["buyable"]) or listed_count < MAX_SHOP_ITEMS
+        with self.db:
+            cursor = self.db.execute("INSERT INTO recipes(guild, result, ingredients) VALUES(?,?,?)", (guild, result_id, json.dumps(ids)))
+            self.db.execute("UPDATE items SET sell_price=?, sell_max=NULL, sellable=? WHERE guild=? AND id=?",
+                            (price, 1 if (can_list or result["sellable"]) else 0, guild, result_id))
+        listed = bool(self.item(guild, result_id)["sellable"] or self.item(guild, result_id)["buyable"])
+        return {"recipe": {"id": cursor.lastrowid, "result": result_id, "ingredients": ids}, "price": price, "listed": listed}
+
+    def delete_recipe(self, guild: int, result_id: int) -> bool:
+        """결과물로 레시피를 찾아 지운다. 결과물 물품과 그 판매가는 그대로 둔다."""
+        with self.db:
+            return self.db.execute("DELETE FROM recipes WHERE guild=? AND result=?", (guild, result_id)).rowcount > 0
+
+    def _refresh_recipe_prices(self, guild: int, ingredient_id: int) -> None:
+        """재료의 판매가가 바뀌면 그 재료를 쓰는 레시피의 결과물 판매가를 다시 계산한다."""
+        with self.db:
+            for recipe in self.recipes(guild):
+                if ingredient_id in recipe["ingredients"]:
+                    self.db.execute("UPDATE items SET sell_price=?, sell_max=NULL WHERE guild=? AND id=?",
+                                    (self.recipe_price(guild, recipe["ingredients"]), guild, recipe["result"]))
+
+    def alchemize(self, guild: int, user: int, ingredient_ids) -> dict:
+        """재료를 합친다: 맞는 레시피가 있고 재료를 다 가졌으면 재료를 빼고 결과물을 1개 넣는다(한 덩어리).
+        레시피가 없거나 재료가 모자라면 아무것도 바꾸지 않고 StoreError. 시간 제한은 부르는 쪽(alchemy.is_open)이 본다."""
+        ids = sorted(ingredient_ids)
+        if not alchemy.MIN_INGREDIENTS <= len(ids) <= alchemy.MAX_INGREDIENTS:
+            raise StoreError(f"재료는 {alchemy.MIN_INGREDIENTS}~{alchemy.MAX_INGREDIENTS}개를 골라 주세요.")
+        recipe = self.recipe_for(guild, ids)
+        if recipe is None:
+            raise StoreError("그런 조합의 레시피는 없어요. 재료는 그대로예요.")
+        need = {i: ids.count(i) for i in set(ids)}
+        for item_id, count in need.items():
+            have = self.qty(guild, user, item_id)
+            if have < count:
+                row = self.item(guild, item_id)
+                raise StoreError(f"{row['emoji']} {row['name']}이(가) {count}개 필요해요. (보유 {have}개)")
+        result = self.item(guild, recipe["result"])
+        if result is None:
+            raise StoreError("결과물이 사라졌어요. 관리자에게 알려 주세요.")
+        with self.db:                                         # add_item은 따로 저장하므로 쓰지 않고 한 번에 처리한다.
+            for item_id, count in need.items():                # 인벤토리는 수량 0을 허용하지 않아서, 다 쓰면 행을 지운다.
+                if self.qty(guild, user, item_id) == count:
+                    self.db.execute("DELETE FROM inventory WHERE guild=? AND user=? AND item=?", (guild, user, item_id))
+                else:
+                    self.db.execute("UPDATE inventory SET qty=qty-? WHERE guild=? AND user=? AND item=?", (count, guild, user, item_id))
+            self.db.execute("INSERT INTO inventory VALUES(?,?,?,1) ON CONFLICT(guild,user,item) DO UPDATE SET qty=qty+1",
+                            (guild, user, recipe["result"]))
+        return {"recipe": recipe, "result": result, "price": result["sell_price"]}
 
     def create_item(self, guild, name, *, emoji="🎃", description="", kind="item", role_id=None,
                     buy_price=0, sell_price=0, buyable=False, sellable=False, sell_max=None):
@@ -525,6 +646,13 @@ class Store:
             merged["sell_max"] = None
         self._check_prices(guild, merged["buyable"], merged["sellable"], merged["buy_price"], merged["sell_price"],
                            merged["sell_max"], row["kind"])
+        price_changed = (merged["sell_price"], merged["sell_max"]) != (row["sell_price"], row["sell_max"])
+        if price_changed:                                         # 연금술과 얽힌 물품의 판매가 규칙
+            for recipe in self.recipes(guild):
+                if item_id == recipe["result"]:
+                    raise StoreError("연금술 결과물의 판매가는 재료 판매가로 자동 계산돼요. 직접 바꾸려면 먼저 `/연금술레시피 삭제`로 레시피를 지워 주세요.")
+                if item_id in recipe["ingredients"] and (merged["sell_price"] < 1 or merged["sell_max"] is not None):
+                    raise StoreError("이 물품은 연금술 재료라서 판매가를 1 이상의 고정값으로만 정할 수 있어요. 다른 값으로 바꾸려면 먼저 레시피를 지워 주세요.")
         listed = self.db.execute("SELECT COUNT(*) AS n FROM items WHERE guild=? AND (buyable=1 OR sellable=1) AND id<>?",
                                  (guild, item_id)).fetchone()["n"]
         if (merged["buyable"] or merged["sellable"]) and listed >= MAX_SHOP_ITEMS:
@@ -537,6 +665,8 @@ class Store:
                                  merged["sell_max"], int(merged["buyable"]), int(merged["sellable"]), guild, item_id))
         except sqlite3.IntegrityError as exc:
             raise StoreError("같은 이름의 물품이 이미 있어요.") from exc
+        if price_changed:
+            self._refresh_recipe_prices(guild, item_id)
         return self.item(guild, item_id)
 
     def holdings(self, guild: int, item_id: int) -> int:

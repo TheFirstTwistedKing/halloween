@@ -41,7 +41,7 @@ class Gear:
     emoji: str
     slot: str                    # weapon | shield
     tier: str
-    weight: int                  # 상자에서 나올 가중치. 좋은 장비일수록 낮다.
+    weight: float                # 상자에서 나올 가중치(소수 가능). 좋은 장비일수록 낮다.
     attack: int = 0              # 공격 피해량 추가
     crit: int = 0                # 크리티컬 확률(%). 크리티컬은 피해 2배
     dodge: int | None = None     # 잡몹의 회피 확률을 이 값으로 바꾼다(보스에게는 적용되지 않는다)
@@ -57,7 +57,7 @@ class Consumable:
     name: str
     emoji: str
     tier: str
-    weight: int
+    weight: float                # 상자에서 나올 가중치(소수 가능)
     heal: int = 0
     full: bool = False           # HP를 전부 회복
     regen: int = 0               # 턴이 지날 때마다 회복하는 양
@@ -167,6 +167,23 @@ def _num(data: dict, key: str, low, high, default=0, none_ok=False):
     return int(value), None
 
 
+WEIGHT_MAX = 1000
+WEIGHT_DECIMALS = 4                      # 등장 비율은 소수 넷째 자리까지 쓴다(0.0001 단위)
+
+
+def _weight(data: dict, key: str = "weight"):
+    """등장 비율: 0~1000, 소수 가능(넷째 자리까지). 정수로 딱 떨어지면 int로 돌려줘서 저장·표시가 깔끔하다."""
+    value = data.get(key, 0)
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value != value or value in (float("inf"), float("-inf")):
+        return None, f"{key} 값은 0~{WEIGHT_MAX} 사이의 숫자여야 해요."
+    if not 0 <= value <= WEIGHT_MAX:
+        return None, f"{key} 값은 0~{WEIGHT_MAX} 사이의 숫자여야 해요."
+    rounded = round(float(value), WEIGHT_DECIMALS)
+    if value > 0 and rounded == 0:
+        return None, f"{key} 값이 너무 작아요. 소수 넷째 자리(0.0001)까지만 쓸 수 있어요."
+    return (int(rounded) if rounded.is_integer() else rounded), None
+
+
 def check_entity(section: str, data) -> tuple[object | None, str | None]:
     """사전 하나를 몬스터·장비·소모품으로 바꾸고 검사한다. (개체, None) 또는 (None, 이유). 이모지 형식은 명령어 쪽에서 따로 본다."""
     if section not in SECTIONS or not isinstance(data, dict):
@@ -201,8 +218,10 @@ def check_entity(section: str, data) -> tuple[object | None, str | None]:
         slot = data.get("slot")
         if slot not in ("weapon", "shield"):
             return None, "장비 종류는 무기·방패 중 하나여야 해요."
-        n, problem = numbers(("weight", 0, 1000, 0), ("attack", 0, 100000, 0), ("crit", 0, 100, 0),
-                             ("sell_price", 0, SELL_MAX, SELL_DEFAULT[tier]))
+        n, problem = numbers(("attack", 0, 100000, 0), ("crit", 0, 100, 0), ("sell_price", 0, SELL_MAX, SELL_DEFAULT[tier]))
+        if problem:
+            return None, problem
+        n["weight"], problem = _weight(data)
         if problem:
             return None, problem
         extra = {}
@@ -220,8 +239,11 @@ def check_entity(section: str, data) -> tuple[object | None, str | None]:
         gear = Gear(key, name, emoji, slot, tier, n["weight"], attack=n["attack"], crit=n["crit"], dodge=extra["dodge"],
                     guard=extra["guard"], reflect=extra["reflect"], sell_price=n["sell_price"])
         return replace(gear, description=describe_gear(gear)), None
-    n, problem = numbers(("weight", 0, 1000, 0), ("heal", 0, 100000, 0), ("regen", 0, 100000, 0), ("regen_turns", 0, 1000, 0),
+    n, problem = numbers(("heal", 0, 100000, 0), ("regen", 0, 100000, 0), ("regen_turns", 0, 1000, 0),
                          ("sell_price", 0, SELL_MAX, SELL_DEFAULT[tier]))
+    if problem:
+        return None, problem
+    n["weight"], problem = _weight(data)
     if problem:
         return None, problem
     full = data.get("full", False)
@@ -331,7 +353,7 @@ def _build_params() -> dict[str, Param]:
         else:
             add(f"장비.{g.name}.가드", "장비", g.guard, 0, 100, note="가드 성공 시 피해 감소(%)")
             add(f"장비.{g.name}.반사", "장비", g.reflect, 0, 500, note="가드 성공 시 반사 피해(%)")
-        add(f"장비.{g.name}.등장", "장비", g.weight, 0, 1000, note="상자에서 나올 가중치(비율). 전부 0이면 안 돼요")
+        add(f"장비.{g.name}.등장", "장비", g.weight, 0, WEIGHT_MAX, integer=False, note="상자에서 나올 가중치(비율, 소수 가능). 전부 0이면 안 돼요")
 
     for c in CONSUMABLES:
         if c.regen:
@@ -339,7 +361,7 @@ def _build_params() -> dict[str, Param]:
             add(f"아이템.{c.name}.지속턴", "아이템", c.regen_turns, 1, 1000)
         elif not c.full:
             add(f"아이템.{c.name}.회복량", "아이템", c.heal, 0, 100000)
-        add(f"아이템.{c.name}.등장", "아이템", c.weight, 0, 1000, note="상자에서 나올 가중치(비율). 전부 0이면 안 돼요")
+        add(f"아이템.{c.name}.등장", "아이템", c.weight, 0, WEIGHT_MAX, integer=False, note="상자에서 나올 가중치(비율, 소수 가능). 전부 0이면 안 돼요")
     return out
 
 

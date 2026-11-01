@@ -53,7 +53,7 @@ async def enter(store: Store, locks, guild_id: int, user_id: int) -> Outcome:
         run.hp = min(run.hp, bal.max_hp)             # 관리자가 최대 체력을 낮췄다면 맞춘다.
         run.bump()                                   # 이전에 띄워 둔 화면은 이제 지난 화면이 된다.
         entry = entry_label(store, guild_id)
-        run.events = ([f"🏚️ {entry + '을(를) 내고 ' if entry else ''}던전에 들어왔어요! 앞으로 방이 {dungeon.ROOMS}번 나와요."] if started
+        run.events = ([f"🏚️ {entry + '을(를) 내고 ' if entry else ''}던전에 들어왔어요! {bal.floors}층까지 올라가야 해요. (한 층에 방이 {dungeon.ROOMS}개)"] if started
                       else ["📖 진행 중이던 던전을 이어서 해요. (입장 물품은 쓰지 않아요)"])
         store.save_dungeon(guild_id, user_id, run.to_json())
         return Outcome(True, run=run, started=started)

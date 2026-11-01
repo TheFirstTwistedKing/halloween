@@ -18,6 +18,8 @@ NOW = time.time()
 
 class PackageFixture(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        global NOW
+        NOW = time.time()          # 시험마다 지금 시각으로 다시 잡는다(불러온 시각 기준이면 전체 시험이 10초를 넘길 때 패키지가 미리 만료된다).
         self.w = World()
         self.channel = self.w.channel(400)
         self.w.bot.get_channel = lambda cid: self.w.channels.get(cid)

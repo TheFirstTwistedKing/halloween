@@ -281,7 +281,7 @@ class ClearRewardTests(RulesFixture):
         import dungeon
         run = (await service.enter(self.store, self.w.bot.locks, G, U)).run
         data = json.loads(run.to_json())
-        data.update(room=dungeon.ROOMS, phase="cleared")
+        data.update(floor=dungeon.FLOORS, room=dungeon.ROOMS, phase="cleared")
         self.store.save_dungeon(G, U, json.dumps(data))
         return await service.act(self.store, self.w.bot.locks, rng, G, U, run.rev, "advance")
 

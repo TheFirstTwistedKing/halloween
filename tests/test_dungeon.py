@@ -83,7 +83,7 @@ class RuleTests(unittest.TestCase):
 
     def test_last_room_ends_the_dungeon(self):
         run = dungeon.new_run()
-        run.room = dungeon.ROOMS
+        run.floor, run.room = dungeon.FLOORS, dungeon.ROOMS                     # 마지막 층의 마지막 방(보스)을 마친 상태
         dungeon.advance(run, Scripted())
         self.assertEqual(run.phase, "clear")
         self.assertTrue(run.finished)
@@ -297,7 +297,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_a_full_clear_pays_the_reward_exactly_once(self):
         run = (await service.enter(self.store, self.locks, G, U)).run
         data = json.loads(run.to_json())
-        data.update(room=dungeon.ROOMS, phase="cleared", kind="boss")      # 마지막 방(보스)을 막 이긴 상태
+        data.update(floor=dungeon.FLOORS, room=dungeon.ROOMS, phase="cleared", kind="boss")      # 마지막 층의 보스를 막 이긴 상태
         self.store.save_dungeon(G, U, json.dumps(data))
         run = dungeon.Run.from_json(json.dumps(data))
         low, _ = dungeon.CLEAR_CANDY

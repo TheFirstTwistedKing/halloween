@@ -27,14 +27,14 @@ def _best_heal(run, bal):
 
 
 def play(rng, policy: str, bal: Balance) -> tuple[bool, int]:
-    """던전 한 판. (클리어했는지, 마지막으로 도달한 방)."""
+    """던전 한 판. (클리어했는지, 마지막으로 도달한 방: 처음부터 세어 몇 번째 방인지)."""
     run = dungeon.new_run(bal=bal)
     dungeon.advance(run, rng, bal)
-    for _ in range(5000):                                   # 무한 루프 안전장치
+    for _ in range(5000 * bal.floors):                      # 무한 루프 안전장치(층이 많을수록 판이 길다)
         if run.phase == "dead":
-            return False, run.room
+            return False, run.stage
         if run.phase == "clear":
-            return True, run.room
+            return True, run.stage
         if run.pending_gear:
             gear = bal.gear_by_key[run.pending_gear]
             if gear.slot == "weapon":
@@ -71,11 +71,11 @@ def play(rng, policy: str, bal: Balance) -> tuple[bool, int]:
                 dungeon.advance(run, rng, bal)
         else:
             break
-    return False, run.room
+    return False, run.stage
 
 
 def simulate(bal: Balance = DEFAULT, runs: int = 1000, seed: int | None = None) -> dict:
-    """세 가지 플레이 방식으로 각각 runs판씩 돌린다. {방식: {clear, avg_room, deaths}} (clear는 0~1, deaths는 방 번호별 비율)."""
+    """세 가지 플레이 방식으로 각각 runs판씩 돌린다. {방식: {clear, avg_room, deaths}} (clear는 0~1, avg_room·deaths의 방은 처음부터 세어 몇 번째 방인지, deaths는 그 방별 비율)."""
     out = {}
     for key, label in POLICIES:
         rng = random.Random(None if seed is None else seed + len(out))

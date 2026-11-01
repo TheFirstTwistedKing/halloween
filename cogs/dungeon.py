@@ -30,7 +30,7 @@ def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=No
     elif ended == "quit":
         color, title = theme.PURPLE, "🚪 던전에서 나왔어요"
     else:
-        color, title = theme.ORANGE, f"🏚️ 던전 — 방 {max(run.room, 1)}/{ROOMS}"
+        color, title = theme.ORANGE, f"🏚️ 던전 — {max(run.floor, 1)}/{bal.floors}층 · 방 {max(run.room, 1)}/{ROOMS}"
     embed = theme.make_embed(title, "\n".join(run.events) or None, color=color)
     if run.enemy and not ended:
         enemy = run.enemy

@@ -68,6 +68,7 @@ class Consumable:
     sell_price: int = 0          # 던전 안에서 팔 때 받는 재화(개당). 0이면 팔 수 없다.
     modify: str | None = None    # 무기 개조: 쓰면 지금 든 무기가 이 무기(key)로 바뀐다. 개조 소모품은 회복 효과가 없다.
     conditions: tuple = ()       # 사용 조건 ((종류, 값), ...). 전부 만족해야 쓸 수 있다. 비면 언제나 쓸 수 있다(아래 COND_* 참고).
+    material: bool = False       # 개조 재료: 효과가 없고, /장비개조 레시피에 있는 무기를 들고 쓰면 그 무기가 개조된다.
 
 
 @dataclass(frozen=True)
@@ -100,6 +101,8 @@ def describe_gear(gear: Gear) -> str:
 
 
 def describe_item(item: Consumable) -> str:
+    if item.material:
+        return "특정 무기를 개조하는 재료예요"
     if item.modify:
         return "들고 있는 무기를 다른 무기로 개조해요"
     if item.full:
@@ -244,7 +247,11 @@ def check_conditions(raw):
 
 def item_summary(item: Consumable, bal) -> str:
     """소모품 설명 한 줄: 효과(개조면 목표 무기 이름) + 사용 조건."""
-    if item.modify:
+    if item.material:
+        recipes = [(bal.gear_by_key[w], bal.gear_by_key[r]) for w, i, r in bal.mods if i == item.key]
+        text = "개조 재료" + (": " + ", ".join(f"{w.name}→{r.name}" for w, r in recipes[:3]) + (" 외" if len(recipes) > 3 else "")
+                              if recipes else "(쓸 수 있는 무기가 아직 없어요)")
+    elif item.modify:
         gear = bal.gear_by_key.get(item.modify)
         text = f"무기를 {gear.emoji} {gear.name}(으)로 개조" if gear else "무기 개조(목표 무기가 사라졌어요)"
     else:
@@ -344,10 +351,15 @@ def check_entity(section: str, data) -> tuple[object | None, str | None]:
     modify = data.get("modify")
     if modify is not None and (not isinstance(modify, str) or not 1 <= len(modify) <= 40):
         return None, "개조할 무기가 올바르지 않아요."
+    material = data.get("material", False)
+    if not isinstance(material, bool):
+        return None, "material 값이 올바르지 않아요."
+    if material and modify:
+        return None, "개조 재료와 '개조무기'(쓰면 정해진 무기로 바뀌는 소모품)는 함께 쓸 수 없어요."
     conditions, problem = check_conditions(data.get("conditions"))
     if problem:
         return None, problem
-    if modify:                                          # 개조 소모품: 회복 효과는 없다.
+    if modify or material:                              # 개조 소모품·개조 재료: 회복 효과는 없다.
         full = False
         n["heal"] = n["regen"] = n["regen_turns"] = 0
     elif full:
@@ -361,7 +373,7 @@ def check_entity(section: str, data) -> tuple[object | None, str | None]:
     else:
         n["regen_turns"] = 0
     item = Consumable(key, name, emoji, tier, n["weight"], heal=n["heal"], full=full, regen=n["regen"], regen_turns=n["regen_turns"],
-                      sell_price=n["sell_price"], modify=modify or None, conditions=conditions)
+                      sell_price=n["sell_price"], modify=modify or None, conditions=conditions, material=material)
     return replace(item, description=describe_item(item)), None
 
 
@@ -532,18 +544,26 @@ class Balance:
     bosses: tuple = BOSSES
     gear: tuple = GEAR
     consumables: tuple = CONSUMABLES
+    mods: tuple = ()             # 장비 개조 레시피 ((무기 key, 재료 key, 결과 무기 key), ...). 만든 쪽에서 쓸 수 있는 것만 남긴다(build).
     gear_by_key: dict = field(init=False, repr=False, compare=False)
     item_by_key: dict = field(init=False, repr=False, compare=False)
     monster_by_key: dict = field(init=False, repr=False, compare=False)
+    mod_by_pair: dict = field(init=False, repr=False, compare=False)
 
     def __post_init__(self):
         object.__setattr__(self, "gear_by_key", {g.key: g for g in self.gear})
         object.__setattr__(self, "item_by_key", {c.key: c for c in self.consumables})
         object.__setattr__(self, "monster_by_key", {m.key: m for m in self.monsters + self.bosses})
+        object.__setattr__(self, "mod_by_pair", {(w, i): r for w, i, r in self.mods})
+
+    def mod_result(self, weapon_key: str | None, item_key: str) -> str | None:
+        """이 무기(맨손이면 None)를 든 채 이 재료를 쓰면 바뀌는 무기의 key. 레시피가 없으면 None."""
+        return self.mod_by_pair.get((weapon_key, item_key))
 
     @classmethod
-    def build(cls, overrides=None, content=None) -> "Balance":
-        """기본값 위에 숫자 덮어쓰기(overrides)를 얹고, 관리자가 만든 콘텐츠(content)가 있는 구역은 그것으로 통째로 바꾼다."""
+    def build(cls, overrides=None, content=None, mods=None) -> "Balance":
+        """기본값 위에 숫자 덮어쓰기(overrides)를 얹고, 관리자가 만든 콘텐츠(content)가 있는 구역은 그것으로 통째로 바꾼다.
+        mods는 장비 개조 레시피 [{weapon, item, result}, ...]: 무기·재료·결과가 지금 실제로 있는 것만 남긴다."""
         o = clean(overrides)
         custom = clean_content(content)
 
@@ -576,13 +596,35 @@ class Balance:
                                  dodge=get(f"몬스터.{m.name}.회피"), weight=get(f"몬스터.{m.name}.등장")) for m in MONSTERS)
         bosses = tuple(replace(b, hp=get(f"보스.{b.name}.체력"), damage=get(f"보스.{b.name}.공격"), weight=get(f"보스.{b.name}.등장"))
                        for b in BOSSES)
+        final_gear, final_items = custom.get("gear", tuple(gear)), custom.get("consumables", tuple(items))
         return cls(
             max_hp=get("일반.최대체력"), floors=get("일반.층수"), floor_scale=get("일반.층당강화"), floor_heal=get("일반.층이동회복"), revive_heal=get("일반.부활체력"),
             base_damage=get("일반.맨손공격력"), guard_chance=get("방어.성공확률"),
             guard_base=get("방어.기본피해감소"), guard_heal=get("방어.회복률"), reflect_base=get("방어.기본반사"),
             clear_candy=(get("보상.최소"), get("보상.최대")), ticket_chance=get("보상.획득권확률"), room_plan=plan,
             monsters=custom.get("monsters", monsters), bosses=custom.get("bosses", bosses),
-            gear=custom.get("gear", tuple(gear)), consumables=custom.get("consumables", tuple(items)))
+            gear=final_gear, consumables=final_items, mods=clean_mods(mods, final_gear, final_items))
+
+
+MAX_MODS = 50                    # 서버마다 장비 개조 레시피 수 한도
+
+
+def clean_mods(raw, gear, items) -> tuple:
+    """저장된 개조 레시피에서 쓸 수 있는 것만 ((무기, 재료, 결과), ...)로 꺼낸다. 무기·결과는 실제 무기여야 하고 서로 달라야 하며,
+    재료는 '개조 재료' 소모품이어야 한다. 같은 (무기, 재료)가 겹치면 앞의 것만 쓴다."""
+    if not isinstance(raw, (list, tuple)):
+        return ()
+    weapons = {g.key for g in gear if g.slot == "weapon"}
+    materials = {c.key for c in items if c.material}
+    out, seen = [], set()
+    for entry in raw[:MAX_MODS]:
+        if not isinstance(entry, dict):
+            continue
+        weapon, item, result = entry.get("weapon"), entry.get("item"), entry.get("result")
+        if weapon in weapons and result in weapons and weapon != result and item in materials and (weapon, item) not in seen:
+            seen.add((weapon, item))
+            out.append((weapon, item, result))
+    return tuple(out)
 
 
 DEFAULT = Balance.build({})

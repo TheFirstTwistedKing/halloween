@@ -22,9 +22,9 @@ def bar(value: int, maximum: int, full: str, width: int = BAR) -> str:
 
 def _ready_mark(run: Run, item, bal) -> str:
     """조건부 소모품 표시: 조건을 만족해 지금 쓸 수 있으면 ✨, 아직이면 🔒. 조건이 없으면 빈 문자열."""
-    if not item.conditions:
+    if not item.conditions and not item.material:
         return ""
-    return " 🔒" if dungeon.unmet_conditions(run, item, bal) else " ✨"
+    return " ✨" if dungeon.can_use_now(run, item, bal) else " 🔒"
 
 
 def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=None) -> discord.Embed:

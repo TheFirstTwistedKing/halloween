@@ -6,11 +6,12 @@
 from __future__ import annotations
 
 import json
+import random
 from dataclasses import asdict, dataclass, field
 
 from balance import (BASE_DAMAGE, BASE_DODGE, BOSSES, CLEAR_CANDY, CONSUMABLES, DEFAULT, FLOOR_HEAL, FLOOR_SCALE, FLOORS,  # noqa: F401  (다시 내보냄)
                      GEAR, GUARD_BASE, GUARD_CHANCE, GUARD_HEAL, MAX_HP, MONSTERS, REFLECT_BASE, ROOM_PLAN, ROOMS,
-                     TICKET_CHANCE, TIER_ORDER, Balance, Consumable, EVENT_TAG, Gear, Monster, condition_text, floor_scaled, reduce_damage)
+                     TICKET_CHANCE, TIER_ORDER, Balance, Consumable, EVENT_TAG, Gear, Monster, SecretBoss, condition_text, floor_scaled, reduce_damage)
 
 GEAR_BY_KEY = {g.key: g for g in GEAR}          # 기본값 표(이름·이모지 조회용). 실제 수치는 bal에서 읽는다.
 ITEM_BY_KEY = {c.key: c for c in CONSUMABLES}
@@ -62,7 +63,7 @@ class Run:
     @property
     def stage(self) -> int:
         """처음부터 세어 몇 번째 방인지(시뮬레이터 통계용). 1층 3번째 방이면 3, 2층 1번째 방이면 ROOMS + 1."""
-        return (max(self.floor, 1) - 1) * ROOMS + self.room
+        return (max(self.floor, 1) - 1) * ROOMS + min(self.room, ROOMS)         # 11번째(시크릿) 방은 그 층의 마지막 방으로 센다
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), ensure_ascii=False)
@@ -164,8 +165,13 @@ def _spawn(monster: Monster, floor: int = 1, bal: Balance | None = None) -> dict
     """몬스터를 floor층에 맞게 만든다. 체력과 공격은 층마다 floor_scale%씩 늘어난다(회피는 그대로)."""
     percent = (bal or DEFAULT).floor_scale
     hp = max(1, floor_scaled(monster.hp, floor, percent))
-    return {"key": monster.key, "name": monster.name, "emoji": monster.emoji, "hp": hp, "max_hp": hp,
-            "damage": floor_scaled(monster.damage, floor, percent), "dodge": monster.dodge, "boss": monster.boss, "stunned": False}
+    enemy = {"key": monster.key, "name": monster.name, "emoji": monster.emoji, "hp": hp, "max_hp": hp,
+             "damage": floor_scaled(monster.damage, floor, percent), "dodge": monster.dodge, "boss": monster.boss, "stunned": False}
+    if isinstance(monster, SecretBoss):                  # 시크릿 보스: 드롭·연출 정보를 같이 담는다(싸우는 도중 설정이 바뀌어도 이 싸움은 그대로).
+        enemy.update(secret=True, intro=monster.intro, image=monster.image,
+                     drops={"gear": monster.drop_gear, "gear_chance": monster.drop_gear_chance, "item": monster.drop_item,
+                            "item_chance": monster.drop_item_chance, "amount": monster.drop_item_amount})
+    return enemy
 
 
 def advance(run: Run, rng, bal: Balance | None = None) -> list[str]:
@@ -173,6 +179,14 @@ def advance(run: Run, rng, bal: Balance | None = None) -> list[str]:
     마지막 층이라면 던전이 끝난다."""
     bal = bal or DEFAULT
     climb: list[str] = []
+    if run.room == ROOMS and run.kind == "boss" and bal.secret_chance > 0 and sum(s.weight for s in bal.secrets) > 0 \
+            and rng.random() * 100 < bal.secret_chance:
+        boss = pick_weighted(rng, bal.secrets)            # 보스를 이기고 올라가려는 순간 1%(기본) 확률로 11번째 방이 열린다.
+        run.room, run.kind = ROOMS + 1, "secret"
+        run.enemy, run.phase = _spawn(boss, run.floor, bal), "battle"
+        run.last.append("secret_intro")                   # 화면이 특별한 등장 연출을 보여 주라는 표시
+        run.events = [f"🌌 **시크릿 방**이 열렸어요! **{boss.name}**이(가) 나타났어요!"]
+        return run.events
     if run.room >= ROOMS:
         if run.floor >= bal.floors:
             run.phase, run.enemy, run.kind = "clear", None, ""
@@ -228,12 +242,40 @@ def _end_turn(run: Run, bal: Balance) -> list[str]:
     return [f"👻 영혼 에센스: HP +{run.hp - before} (남은 {run.regen_turns}턴)"]
 
 
-def _after_player_action(run: Run, reduction: int, bal: Balance) -> list[str]:
+def secret_drops(run: Run, rng, bal: Balance) -> list[str]:
+    """쓰러뜨린 시크릿 보스의 드롭을 준다: 장비와 아이템을 각자 확률로 굴리고, 둘 다 안 나오면 **반드시 하나는** 준다(확률이 더 높은 쪽, 같으면 장비).
+    장비는 상자처럼 장착/예비/버리기를 정해야 하고, 아이템은 소지품에 들어간다. 없어진 장비·아이템은 건너뛴다. 줄 수 있는 게 하나도 없으면 빈 목록."""
+    spec = run.enemy.get("drops") or {}
+    gear, item = bal.gear_by_key.get(spec.get("gear")), bal.item_by_key.get(spec.get("item"))
+    got_gear = gear is not None and rng.random() * 100 < spec.get("gear_chance", 100)
+    got_item = item is not None and rng.random() * 100 < spec.get("item_chance", 100)
+    if not (got_gear or got_item):
+        if gear is not None and (item is None or spec.get("gear_chance", 100) >= spec.get("item_chance", 100)):
+            got_gear = True
+        elif item is not None:
+            got_item = True
+    events = []
+    if got_gear and not run.pending_gear:
+        run.pending_gear = gear.key
+        run.loot.append(gear.name)
+        events.append(f"{gear.emoji} **{gear.name}** ({gear.tier}) — {gear.description}\n┕ 장착할지, 예비에 넣을지, 버릴지 정해 주세요.")
+    if got_item:
+        amount = max(1, int(spec.get("amount", 1)))
+        run.items[item.key] = run.items.get(item.key, 0) + amount
+        run.loot.append(item.name)
+        run.last.append(f"item_gain:{item.key}")
+        events.append(f"{item.emoji} **{item.name}** ×{amount} ({item.tier}) — {item.description} (소지품에 넣었어요)")
+    return ([f"🎁 **시크릿 보스의 드롭!**"] + events) if events else []
+
+
+def _after_player_action(run: Run, reduction: int, bal: Balance, rng=None) -> list[str]:
     """플레이어 행동 뒤: 적이 살아 있으면 적이 공격하고, 턴이 끝난다."""
     events = []
     if run.enemy["hp"] <= 0:
         events.append(f"🎉 **{run.enemy['name']}**을(를) 쓰러뜨렸어요!")
         run.phase = "cleared"
+        if run.enemy.get("secret"):
+            events += secret_drops(run, rng or random, bal)
     else:
         events += _enemy_attack(run, reduction)
     return events + _end_turn(run, bal)
@@ -253,12 +295,12 @@ def player_attack(run: Run, rng, bal: Balance | None = None) -> list[str]:
             damage, crit = damage * 2, True
         run.enemy["hp"] = max(0, run.enemy["hp"] - damage)
         events = [f"{'💥 크리티컬! ' if crit else '⚔️ '}{run.enemy['name']}에게 **{damage}** 피해를 줬어요."]
-    events += _after_player_action(run, 0, bal)
+    events += _after_player_action(run, 0, bal, rng)
     run.events = events
     return events
 
 
-def player_defend(run: Run, guard_ok: bool, bal: Balance | None = None) -> list[str]:
+def player_defend(run: Run, guard_ok: bool, bal: Balance | None = None, rng=None) -> list[str]:
     """방어: 가드에 성공하면 이번 피해를 줄이고, 맞은 공격의 일부만큼 HP를 회복하고, 그 공격의 일부를 몬스터에게 반사하고,
     몬스터의 다음 공격을 막는다. 실패하면 그대로 맞는다. 이미 기절한 몬스터 앞에서는 가드를 굴리지 않는다(어차피 공격하지 못한다)."""
     bal = bal or DEFAULT
@@ -279,6 +321,8 @@ def player_defend(run: Run, guard_ok: bool, bal: Balance | None = None) -> list[
             if enemy["hp"] <= 0:
                 events.append(f"🎉 **{enemy['name']}**을(를) 쓰러뜨렸어요!")
                 run.phase = "cleared"
+                if enemy.get("secret"):
+                    events += secret_drops(run, rng or random, bal)
             else:
                 enemy["stunned"] = True
                 events.append(f"💫 {enemy['name']}이(가) 충격으로 다음 공격을 하지 못해요!")

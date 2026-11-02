@@ -205,7 +205,7 @@ def _apply(run: Run, rng, action: str, arg: str | None, guard_ok: bool | None, b
         if run.phase != "battle":
             return "지금은 싸울 상대가 없어요."
         ok = dungeon.roll_guard(rng, bal, run) if guard_ok is None else bool(guard_ok)       # 따로 정해 주지 않으면 낀 방패의 성공률로 굴린다
-        dungeon.player_defend(run, ok, bal)
+        dungeon.player_defend(run, ok, bal, rng)
     elif action == "item":
         dungeon.use_consumable(run, arg or "", bal)
     elif action == "chest":

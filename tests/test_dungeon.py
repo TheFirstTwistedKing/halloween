@@ -301,8 +301,8 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.store.save_dungeon(G, U, json.dumps(data))
         run = dungeon.Run.from_json(json.dumps(data))
         low, _ = dungeon.CLEAR_CANDY
-        final = Scripted(randoms=[0.0], ints=[low])                    # 획득권도 나오는 추첨
-        results = await asyncio.gather(self.go(final, "advance", run.rev), self.go(Scripted(), "advance", run.rev))
+        final = Scripted(randoms=[0.99, 0.0], ints=[low])               # 시크릿 방은 안 열리고(0.99), 획득권은 나오는 추첨(0.0)
+        results = await asyncio.gather(self.go(final, "advance", run.rev), self.go(Scripted(randoms=[0.99]), "advance", run.rev))
         self.assertEqual(sorted(r.ok for r in results), [False, True])  # 겹친 요청 중 하나만 성공
         done = next(r for r in results if r.ok)
         self.assertEqual((done.ended, done.reward.candy, done.reward.ticket, done.reward.tickets_total), ("clear", low, True, 1))

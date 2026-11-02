@@ -28,7 +28,7 @@ class AscendTests(unittest.TestCase):
     def test_beating_the_boss_of_a_floor_takes_you_up_to_room_one_of_the_next(self):
         run = at_boss_cleared(1)
         self.assertTrue(run.can_advance)
-        dungeon.advance(run, Scripted())
+        dungeon.advance(run, Scripted(randoms=[0.99]))   # 맨 앞 난수는 시크릿 방 추첨(1% 미만이어야 열린다)
         self.assertEqual((run.floor, run.room, run.phase, run.kind), (2, 1, "chest", "chest"))   # 첫 방은 늘 상자
         self.assertFalse(run.finished)
         self.assertIn("⬆️ **2층**", run.events[0])
@@ -37,16 +37,16 @@ class AscendTests(unittest.TestCase):
 
     def test_climbing_heals_half_of_the_lost_hp(self):
         run = at_boss_cleared(3, hp=400)
-        dungeon.advance(run, Scripted())
+        dungeon.advance(run, Scripted(randoms=[0.99]))   # 맨 앞 난수는 시크릿 방 추첨(1% 미만이어야 열린다)
         self.assertEqual(run.hp, 700)                              # 잃은 600의 절반
         self.assertIn("HP +300", run.events[0])
         run = at_boss_cleared(3, hp=1)
-        dungeon.advance(run, Scripted())
+        dungeon.advance(run, Scripted(randoms=[0.99]))
         self.assertEqual(run.hp, 1 + 999 * 50 // 100)
 
     def test_full_hp_has_nothing_to_heal(self):
         run = at_boss_cleared(3)
-        dungeon.advance(run, Scripted())
+        dungeon.advance(run, Scripted(randoms=[0.99]))   # 맨 앞 난수는 시크릿 방 추첨(1% 미만이어야 열린다)
         self.assertEqual(run.hp, 1000)
         self.assertNotIn("HP +", run.events[0])
 
@@ -54,31 +54,31 @@ class AscendTests(unittest.TestCase):
         for rate, expected in ((0, 400), (100, 1000), (25, 550)):
             bal = Balance.build({"일반.층이동회복": rate})
             run = at_boss_cleared(2, hp=400)
-            dungeon.advance(run, Scripted(), bal)
+            dungeon.advance(run, Scripted(randoms=[0.99]), bal)
             self.assertEqual(run.hp, expected, rate)
 
     def test_the_last_boss_clears_the_dungeon_and_no_other_boss_does(self):
         for floor in range(1, dungeon.FLOORS):
             run = at_boss_cleared(floor)
-            dungeon.advance(run, Scripted())
+            dungeon.advance(run, Scripted(randoms=[0.99]))   # 맨 앞 난수는 시크릿 방 추첨(1% 미만이어야 열린다)
             self.assertEqual((run.phase == "clear", run.floor), (False, floor + 1), floor)
         run = at_boss_cleared(dungeon.FLOORS)
-        dungeon.advance(run, Scripted())
+        dungeon.advance(run, Scripted(randoms=[0.99]))
         self.assertEqual(run.phase, "clear")
         self.assertIn("10층", run.events[0])
 
     def test_the_number_of_floors_is_adjustable(self):
         bal = Balance.build({"일반.층수": 3})
         run = at_boss_cleared(2)
-        dungeon.advance(run, Scripted(), bal)
+        dungeon.advance(run, Scripted(randoms=[0.99]), bal)
         self.assertEqual(run.floor, 3)
         run = at_boss_cleared(3)
-        dungeon.advance(run, Scripted(), bal)
+        dungeon.advance(run, Scripted(randoms=[0.99]), bal)
         self.assertEqual(run.phase, "clear")
         self.assertIn("3층", run.events[0])
         lowered = Balance.build({"일반.층수": 2})                    # 진행 중에 층수를 줄이면 이미 넘은 층이어도 이번 보스로 클리어
         run = at_boss_cleared(5)
-        dungeon.advance(run, Scripted(), lowered)
+        dungeon.advance(run, Scripted(randoms=[0.99]), lowered)
         self.assertEqual(run.phase, "clear")
 
     def test_a_middle_room_is_not_a_floor_change(self):
@@ -185,7 +185,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         data = json.loads(out.run.to_json())
         data.update(floor=1, room=dungeon.ROOMS, phase="cleared", kind="boss", hp=300)
         self.store.save_dungeon(G, U, json.dumps(data))
-        done = await service.act(self.store, self.locks, Scripted(), G, U, out.run.rev, "advance")
+        done = await service.act(self.store, self.locks, Scripted(randoms=[0.99]), G, U, out.run.rev, "advance")
         self.assertTrue(done.ok)
         self.assertIsNone(done.ended)                                     # 아직 끝나지 않았다
         self.assertIsNone(done.reward)
@@ -199,7 +199,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         data.update(floor=10, room=dungeon.ROOMS, phase="cleared", kind="boss")
         self.store.save_dungeon(G, U, json.dumps(data))
         low, _ = dungeon.CLEAR_CANDY
-        done = await service.act(self.store, self.locks, Scripted(randoms=[0.99], ints=[low]), G, U, out.run.rev, "advance")
+        done = await service.act(self.store, self.locks, Scripted(randoms=[0.99, 0.99], ints=[low]), G, U, out.run.rev, "advance")
         self.assertEqual((done.ended, done.reward.candy), ("clear", low))
         self.assertIsNone(self.store.dungeon_run(G, U))
 

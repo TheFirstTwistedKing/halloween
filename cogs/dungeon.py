@@ -19,6 +19,7 @@ from dungeon import ROOMS, Run
 BAR = 10
 log = logging.getLogger("halloween")
 AUTO_DELAY = 1.6               # 빠른진행이 한 걸음마다 쉬는 시간(초). 디스코드의 메시지 수정 제한을 넘지 않게 한다.
+SECRET_FRAME_DELAY = 1.1        # 시크릿 보스 등장 연출에서 한 장면이 머무는 시간(초)
 AUTO_MAX_SECONDS = 14 * 60     # 디스코드는 버튼을 누른 뒤 15분이 지나면 그 메시지를 더 못 고친다: 그 전에 멈추고 이어서 하게 한다.
 
 
@@ -44,12 +45,16 @@ def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=No
         color, title = theme.RED, "💀 쓰러졌어요…"
     elif ended == "quit":
         color, title = theme.PURPLE, "🚪 던전에서 나왔어요"
+    elif run.kind == "secret":
+        color, title = theme.GOLD, f"🌌 시크릿 방 — {max(run.floor, 1)}/{bal.floors}층"
     else:
         color, title = theme.ORANGE, f"🏚️ 던전 — {max(run.floor, 1)}/{bal.floors}층 · 방 {max(run.room, 1)}/{ROOMS}"
     embed = theme.make_embed(title, "\n".join(run.events) or None, color=color)
     if run.enemy and not ended:
         enemy = run.enemy
-        embed.add_field(name=f"{enemy['emoji']} {enemy['name']}" + (" 👑" if enemy["boss"] else "") + (" 💫 기절(다음 공격 못 함)" if enemy.get("stunned") else ""), inline=False,
+        if enemy.get("image"):
+            embed.set_image(url=enemy["image"])                # 시크릿 보스의 그림(움직이는 gif도 돼요)
+        embed.add_field(name=f"{enemy['emoji']} {enemy['name']}" + (" 🌌 SECRET" if enemy.get("secret") else " 👑" if enemy["boss"] else "") + (" 💫 기절(다음 공격 못 함)" if enemy.get("stunned") else ""), inline=False,
                         value=f"{bar(enemy['hp'], enemy['max_hp'], '🟥')} {enemy['hp']}/{enemy['max_hp']}")
     embed.add_field(name="❤️ HP", inline=False, value=f"{bar(run.hp, bal.max_hp, '🟩')} {run.hp}/{bal.max_hp}")
     if not ended:
@@ -78,6 +83,37 @@ def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=No
     if run.loot and ended:
         embed.add_field(name="🧾 이번에 얻은 것", value=", ".join(run.loot[-10:]), inline=False)
     return embed
+
+
+def secret_intro_frames(enemy: dict) -> list[discord.Embed]:
+    """시크릿 보스 등장 연출: 같은 메시지를 장면마다 고쳐서 움직이는 것처럼 보이게 한다(어둠 → 경고 → 이름이 드러남 → 등장)."""
+    name, emoji = enemy["name"], enemy["emoji"]
+    cover = "？" * min(len(name), 12)
+    half = name[: max(1, len(name) // 2)] + "？" * (min(len(name), 12) - max(1, len(name) // 2))
+    final = theme.make_embed("🌌 S E C R E T   B O S S 🌌", f"# {emoji} 『 {name} 』\n" + (f"*{enemy['intro']}*" if enemy.get("intro") else ""), color=theme.GOLD)
+    if enemy.get("image"):
+        final.set_image(url=enemy["image"])
+    return [
+        theme.make_embed("…", "⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛\n⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛\n⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛", color=0x050507),
+        theme.make_embed("🌑 ……", "공기가 무겁게 가라앉는다.\n발밑의 그림자가 길게 늘어난다…", color=0x2B1B4A),
+        theme.make_embed("⚠️ ⚠️ ⚠️  WARNING  ⚠️ ⚠️ ⚠️", "**알 수 없는 거대한 기운이 다가온다!**", color=theme.RED),
+        theme.make_embed("👁️ 무언가 눈을 떴다", f"# 『 {cover} 』", color=0x7A1F1F),
+        theme.make_embed("👁️ 이름이 드러난다…", f"# 『 {half} 』", color=0xB5651D),
+        final,
+    ]
+
+
+async def play_secret_intro(interaction: discord.Interaction, enemy: dict, *, first_is_response: bool, view=None):
+    """등장 연출 장면들을 차례로 보여 준다. 마지막 장면(보스 등장)이 머문 뒤 반환하니, 호출한 쪽이 전투 화면으로 바꾼다."""
+    frames = secret_intro_frames(enemy)
+    for number, frame in enumerate(frames):
+        if number:
+            await asyncio.sleep(SECRET_FRAME_DELAY)
+        if number == 0 and first_is_response:
+            await interaction.response.edit_message(embed=frame, view=view)
+        else:
+            await interaction.edit_original_response(embed=frame, view=view)
+    await asyncio.sleep(SECRET_FRAME_DELAY)
 
 
 class DungeonView(discord.ui.View):
@@ -191,6 +227,10 @@ async def respond(interaction: discord.Interaction, client, rev: int, action: st
         return
     run = outcome.run
     view = None if outcome.ended else DungeonView(client, interaction.user.id, run, bal)
+    if "secret_intro" in run.last and not outcome.ended and not from_confirm:      # 시크릿 방이 열렸다: 특별한 등장 연출을 먼저 보여 준다.
+        await play_secret_intro(interaction, run.enemy, first_is_response=True)
+        await interaction.edit_original_response(embed=run_embed(run, outcome, bal, client.store.currency(interaction.guild_id)), view=view)
+        return
     if from_confirm:
         # 확인창(별도 메시지)에서 눌렀다. 던전 화면은 그 메시지에서 따로 바꿀 수 없으니 결과만 알린다.
         await interaction.response.edit_message(embed=run_embed(run, outcome, bal, client.store.currency(interaction.guild_id)), view=None)
@@ -335,6 +375,8 @@ async def run_auto(interaction: discord.Interaction, client, user_id: int, view)
             if outcome.ended:
                 await interaction.edit_original_response(embed=auto_embed(outcome.run, outcome, bal, cur), view=None)
                 return
+            if "secret_intro" in outcome.run.last:             # 빠른진행 중에도 시크릿 보스 등장 연출은 그대로 보여 준다.
+                await play_secret_intro(interaction, outcome.run.enemy, first_is_response=False, view=view)
             await interaction.edit_original_response(embed=auto_embed(outcome.run, outcome, bal, cur), view=view)
     except asyncio.CancelledError:
         raise

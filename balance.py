@@ -14,6 +14,7 @@ BASE_DAMAGE = 20                 # 맨손 공격력
 ROOMS = 10                       # 한 층의 방은 10개(고정). 10번째 방은 미니 보스
 FLOORS = 10                      # 올라가야 하는 층 수. 마지막 층의 보스를 이기면 클리어
 FLOOR_SCALE = 4                  # 층이 하나 오를 때마다 몬스터·보스의 체력과 공격이 1층의 몇 %씩 늘어나는지
+SECRET_CHANCE = 1.0                # 보스를 이기고 올라갈 때 11번째 방(시크릿 보스)이 생길 확률(%)
 REVIVE_HEAL = 50                 # 부활권으로 되살아날 때 최대 HP의 몇 %로 일어나는지
 FLOOR_HEAL = 50                  # 위 층으로 올라갈 때 잃은 HP의 몇 %를 회복하는지
 BASE_DODGE = 10                  # 잡몹 기본 회피 10% (보스는 회피 불가)
@@ -83,6 +84,26 @@ class Monster:
     weight: float = 1            # 같은 방 종류(잡몹끼리, 보스끼리)에서 나올 가중치(소수 가능). 기본은 모두 1 = 같은 확률
 
 
+@dataclass(frozen=True)
+class SecretBoss:
+    """시크릿 보스: 보스를 이기고 올라갈 때 가끔(기본 1%) 열리는 11번째 방의 보스. 장비나 아이템을 반드시 하나는 떨어뜨린다."""
+    key: str
+    name: str
+    emoji: str
+    hp: int
+    damage: int
+    weight: float = 1                  # 시크릿 보스가 여럿일 때 나올 비율(소수 가능)
+    drop_gear: str | None = None       # 떨어뜨릴 장비(key)
+    drop_gear_chance: float = 100      # 장비가 떨어질 확률(%)
+    drop_item: str | None = None       # 떨어뜨릴 소모품(key)
+    drop_item_chance: float = 100
+    drop_item_amount: int = 1
+    intro: str = ""                    # 나타날 때 연출에 나오는 한마디
+    image: str = ""                    # 연출·전투 화면에 붙일 그림 주소(움직이는 gif도 돼요)
+    boss: bool = True                  # 보스처럼 회피 불가
+    dodge: int = 0
+
+
 def describe_gear(gear: Gear) -> str:
     """장비 설명을 지금 수치로 만든다(관리자가 값을 바꿔도 설명이 거짓말이 되지 않게)."""
     if gear.slot == "weapon":
@@ -149,6 +170,10 @@ MONSTERS = (                                                    # 원래 수치�
     Monster("witch", "마녀", "🧙", 135, 135),
     Monster("giant_rat", "거대 쥐", "🐀", 90, 45, dodge=30),        # 특수: 회피 확률 30%
 )
+SECRET_BOSSES = (
+    SecretBoss("void_lord", "공허의 군주", "🌌", 1600, 200, drop_gear="gun", drop_gear_chance=50, drop_item="golden_soup", drop_item_chance=60,
+               intro="어둠 속에서 거대한 눈동자가 천천히 떠오른다…"),
+)
 BOSSES = (                                                      # 보스는 회피 불가(dodge=0)
     Monster("skeleton_king", "해골 왕", "💀", 900, 135, dodge=0, boss=True),
     Monster("giant_slime", "거대 슬라임", "🟩", 1125, 90, dodge=0, boss=True),
@@ -157,9 +182,9 @@ BOSSES = (                                                      # 보스는 회�
 
 
 # ---------------------------------------------------------------- 던전 콘텐츠(몬스터·보스·장비·소모품을 관리자가 더하고 빼고 바꾼다)
-SECTIONS = ("monsters", "bosses", "gear", "consumables")
-SECTION_LABELS = {"monsters": "몬스터", "bosses": "보스", "gear": "장비", "consumables": "소모품"}
-SECTION_LIMITS = {"monsters": 25, "bosses": 25, "gear": 50, "consumables": 50}
+SECTIONS = ("monsters", "bosses", "gear", "consumables", "secrets")
+SECTION_LABELS = {"monsters": "몬스터", "bosses": "보스", "gear": "장비", "consumables": "소모품", "secrets": "시크릿 보스"}
+SECTION_LIMITS = {"monsters": 25, "bosses": 25, "gear": 50, "consumables": 50, "secrets": 10}
 NAME_MAX = 30
 
 
@@ -266,17 +291,52 @@ WEIGHT_MAX = 1000
 WEIGHT_DECIMALS = 4                      # 등장 비율은 소수 넷째 자리까지 쓴다(0.0001 단위)
 
 
-def _weight(data: dict, key: str = "weight", default=0):
-    """등장 비율: 0~1000, 소수 가능(넷째 자리까지). 정수로 딱 떨어지면 int로 돌려줘서 저장·표시가 깔끔하다."""
+def _decimal(data: dict, key: str, high: float, default=0):
+    """0~high 사이의 소수(넷째 자리까지). 정수로 딱 떨어지면 int로 돌려줘서 저장·표시가 깔끔하다."""
     value = data.get(key, default)
     if isinstance(value, bool) or not isinstance(value, (int, float)) or value != value or value in (float("inf"), float("-inf")):
-        return None, f"{key} 값은 0~{WEIGHT_MAX} 사이의 숫자여야 해요."
-    if not 0 <= value <= WEIGHT_MAX:
-        return None, f"{key} 값은 0~{WEIGHT_MAX} 사이의 숫자여야 해요."
+        return None, f"{key} 값은 0~{high:g} 사이의 숫자여야 해요."
+    if not 0 <= value <= high:
+        return None, f"{key} 값은 0~{high:g} 사이의 숫자여야 해요."
     rounded = round(float(value), WEIGHT_DECIMALS)
     if value > 0 and rounded == 0:
         return None, f"{key} 값이 너무 작아요. 소수 넷째 자리(0.0001)까지만 쓸 수 있어요."
     return (int(rounded) if rounded.is_integer() else rounded), None
+
+
+def _weight(data: dict, key: str = "weight", default=0):
+    """등장 비율: 0~1000, 소수 가능(넷째 자리까지)."""
+    return _decimal(data, key, WEIGHT_MAX, default)
+
+
+def _check_secret(data: dict, key: str, name: str, emoji: str, numbers):
+    n, problem = numbers(("hp", 1, 1000000, 1), ("damage", 0, 100000, 0), ("drop_item_amount", 1, 99, 1))
+    if problem:
+        return None, problem
+    weight, problem = _weight(data, default=1)
+    if problem:
+        return None, problem
+    drops = {}
+    for field_name, label in (("drop_gear", "드롭 장비"), ("drop_item", "드롭 아이템")):
+        value = data.get(field_name)
+        if value not in (None, "") and (not isinstance(value, str) or not 1 <= len(value) <= 40):
+            return None, f"{label}가 올바르지 않아요."
+        drops[field_name] = value or None
+    if drops["drop_gear"] is None and drops["drop_item"] is None:
+        return None, "시크릿 보스는 드롭할 장비나 아이템이 하나는 있어야 해요."
+    chances = {}
+    for field_name in ("drop_gear_chance", "drop_item_chance"):
+        chances[field_name], problem = _decimal(data, field_name, 100, 100)
+        if problem:
+            return None, problem
+    intro, image = data.get("intro", ""), data.get("image", "")
+    if not isinstance(intro, str) or len(intro) > 200:
+        return None, "등장 문구는 200자까지예요."
+    if not isinstance(image, str) or len(image) > 300 or (image and (not image.startswith(("http://", "https://")) or any(c.isspace() for c in image))):
+        return None, "그림은 공백 없는 http:// 또는 https:// 주소(300자까지)여야 해요."
+    boss = SecretBoss(key, name, emoji, n["hp"], n["damage"], weight, drops["drop_gear"], chances["drop_gear_chance"], drops["drop_item"],
+                      chances["drop_item_chance"], n["drop_item_amount"], intro.strip(), image)
+    return boss, None
 
 
 def check_entity(section: str, data) -> tuple[object | None, str | None]:
@@ -300,6 +360,8 @@ def check_entity(section: str, data) -> tuple[object | None, str | None]:
             out[spec[0]] = value
         return out, None
 
+    if section == "secrets":
+        return _check_secret(data, key, name, emoji, numbers)
     if section in ("monsters", "bosses"):
         boss = section == "bosses"
         n, problem = numbers(("hp", 1, 100000, 1), ("damage", 0, 100000, 0), ("dodge", 0, 95, BASE_DODGE))
@@ -439,6 +501,7 @@ def _build_params() -> dict[str, Param]:
     add("일반.층수", "일반", FLOORS, 1, 100, note="올라가야 하는 층 수(한 층은 방 10개). 마지막 층의 보스를 이기면 클리어")
     add("일반.층당강화", "일반", FLOOR_SCALE, 0, 200, note="층이 하나 오를 때마다 몬스터·보스의 체력과 공격이 1층의 몇 %씩 늘어날지(0이면 그대로)")
     add("일반.층이동회복", "일반", FLOOR_HEAL, 0, 100, note="위 층으로 올라갈 때 잃은 HP의 몇 %를 회복할지")
+    add("일반.시크릿확률", "일반", SECRET_CHANCE, 0, 100, integer=False, note="보스를 이기고 올라갈 때 11번째 방(시크릿 보스)이 생길 확률(%). 소수 가능, 0이면 안 생겨요")
     add("일반.부활체력", "일반", REVIVE_HEAL, 1, 100, note="부활권으로 되살아날 때 최대 HP의 몇 %로 일어날지")
     add("보상.최소", "일반", CLEAR_CANDY[0], 0, 99999, note="클리어 보상 재화 최소")
     add("보상.최대", "일반", CLEAR_CANDY[1], 0, 99999, note="클리어 보상 재화 최대")
@@ -532,6 +595,8 @@ class Balance:
     floor_scale: int = FLOOR_SCALE
     floor_heal: int = FLOOR_HEAL
     revive_heal: int = REVIVE_HEAL
+    secrets: tuple = SECRET_BOSSES   # 시크릿 보스들
+    secret_chance: float = SECRET_CHANCE
     base_damage: int = BASE_DAMAGE
     guard_chance: int = GUARD_CHANCE
     guard_base: int = GUARD_BASE
@@ -553,7 +618,7 @@ class Balance:
     def __post_init__(self):
         object.__setattr__(self, "gear_by_key", {g.key: g for g in self.gear})
         object.__setattr__(self, "item_by_key", {c.key: c for c in self.consumables})
-        object.__setattr__(self, "monster_by_key", {m.key: m for m in self.monsters + self.bosses})
+        object.__setattr__(self, "monster_by_key", {m.key: m for m in self.monsters + self.bosses + self.secrets})
         object.__setattr__(self, "mod_by_pair", {(w, i): r for w, i, r in self.mods})
 
     def mod_result(self, weapon_key: str | None, item_key: str) -> str | None:
@@ -598,7 +663,7 @@ class Balance:
                        for b in BOSSES)
         final_gear, final_items = custom.get("gear", tuple(gear)), custom.get("consumables", tuple(items))
         return cls(
-            max_hp=get("일반.최대체력"), floors=get("일반.층수"), floor_scale=get("일반.층당강화"), floor_heal=get("일반.층이동회복"), revive_heal=get("일반.부활체력"),
+            max_hp=get("일반.최대체력"), floors=get("일반.층수"), floor_scale=get("일반.층당강화"), floor_heal=get("일반.층이동회복"), revive_heal=get("일반.부활체력"), secret_chance=get("일반.시크릿확률"), secrets=custom.get("secrets", SECRET_BOSSES),
             base_damage=get("일반.맨손공격력"), guard_chance=get("방어.성공확률"),
             guard_base=get("방어.기본피해감소"), guard_heal=get("방어.회복률"), reflect_base=get("방어.기본반사"),
             clear_candy=(get("보상.최소"), get("보상.최대")), ticket_chance=get("보상.획득권확률"), room_plan=plan,

@@ -60,7 +60,7 @@ def play(rng, policy: str, bal: Balance) -> tuple[bool, int]:
             elif policy == "attack" or stunned:
                 dungeon.player_attack(run, rng, bal)
             elif policy == "defend" or run.hp < bal.max_hp * 0.6:
-                dungeon.player_defend(run, dungeon.roll_guard(rng, bal, run), bal)
+                dungeon.player_defend(run, dungeon.roll_guard(rng, bal, run), bal, rng)
             else:
                 dungeon.player_attack(run, rng, bal)
         elif run.can_advance:

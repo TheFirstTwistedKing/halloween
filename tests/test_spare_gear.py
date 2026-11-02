@@ -364,7 +364,9 @@ class ScreenTests(unittest.IsolatedAsyncioTestCase):
 class FullRunTests(unittest.IsolatedAsyncioTestCase):
     async def test_a_whole_dungeon_with_swaps_still_reaches_the_end(self):
         """상자에서 나온 장비를 예비에 넣고 중간중간 장비를 바꾸면서 10층까지 끝까지 해도 오류 없이 클리어된다."""
+        from cogs import dungeon as dungeon_cog
         w = World(random.Random(5))
+        old_delay, dungeon_cog.SECRET_FRAME_DELAY = dungeon_cog.SECRET_FRAME_DELAY, 0                  # 시크릿 방 연출을 기다리지 않는다
         try:
             store, bot = w.store, w.bot
             store.ensure_defaults(G)
@@ -406,7 +408,8 @@ class FullRunTests(unittest.IsolatedAsyncioTestCase):
                     pick = btn("앞으로") or btn("출발")
                 inter = w.interaction()
                 await pick.callback(inter)
-                kwargs = inter.response.edit_message.await_args.kwargs
+                shown = inter.edit_original_response.await_args or inter.response.edit_message.await_args       # 시크릿 방 연출 뒤에는 마지막으로 고친 화면이 현재 화면이다
+                kwargs = shown.kwargs
                 if kwargs["view"] is None:
                     self.assertIn("클리어", kwargs["embed"].title)
                     break
@@ -416,6 +419,7 @@ class FullRunTests(unittest.IsolatedAsyncioTestCase):
             self.assertGreater(swaps, 0)
             self.assertGreater(stashes, 0)
         finally:
+            dungeon_cog.SECRET_FRAME_DELAY = old_delay
             await w.close()
 
 

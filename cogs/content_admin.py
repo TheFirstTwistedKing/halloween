@@ -8,6 +8,7 @@ from discord.ext import commands
 import content
 import theme
 from access import require_admin
+import balance
 from balance import (COND_EVENT, COND_ITEM, COND_LABELS, COND_STATE, MAX_CONDITIONS, SECTION_LABELS, SECTIONS, SELL_MAX, TIER_ORDER,
                      condition_text)
 from confirm import Confirm
@@ -294,6 +295,44 @@ class ContentAdmin(commands.Cog):
             entity = content.add(self.bot.store, interaction.guild_id, "secrets", data)
             return "secrets", self._entity_dict(entity)
         await self._run(interaction, go, "➕ 시크릿 보스를 만들었어요.")
+
+    @secret.command(name="확률", description="시크릿 방이 열릴 확률(%)을 바꿔요. 값을 비우면 지금 확률을 보여줘요 (관리자)")
+    @app_commands.rename(percent="퍼센트")
+    @app_commands.describe(percent="보스를 이길 때마다 시크릿 방이 열릴 확률(%). 소수도 돼요(예: 2.5). 0이면 안 열려요")
+    async def secret_chance(self, interaction: discord.Interaction, percent: app_commands.Range[float, 0, 100] | None = None):
+        if not await require_admin(interaction):
+            return
+        store, gid, key = self.bot.store, interaction.guild_id, "일반.시크릿확률"
+        param = balance.PARAMS[key]
+        overrides = dict(store.settings(gid)["dungeon"])
+        old = overrides.get(key, param.default)
+        floors = store.balance(gid).floors
+
+        def per_run(value):
+            return f"보스를 이길 때마다 이 확률로 열려요. {floors}층을 모두 오르면 한 판에 한 번 이상 열릴 확률은 약 {(1 - (1 - value / 100) ** floors) * 100:.0f}%예요."
+        if percent is None:
+            await interaction.response.send_message(embed=theme.notice(
+                f"🌌 지금 시크릿 방 확률은 **{old:g}%**예요 (기본 {param.default:g}%).\n{per_run(old)}\n`/시크릿보스 확률 퍼센트:`로 바꿔요."), ephemeral=False)
+            return
+        new, problem = balance.check_value(key, percent)
+        if problem:
+            await self._deny(interaction, problem)
+            return
+        if new == old:
+            await self._deny(interaction, f"시크릿 방 확률은 이미 {old:g}%예요.")
+            return
+        if new == param.default:
+            overrides.pop(key, None)                       # 기본값으로 돌아오면 기록을 지운다.
+        else:
+            overrides[key] = new
+        problem = balance.validate(overrides, store.settings(gid)["dungeon_content"])
+        if problem:
+            await self._deny(interaction, problem)
+            return
+        store.update_settings(gid, dungeon=overrides)
+        extra = "" if new > 0 else "\n⚠️ 0%라서 시크릿 방이 열리지 않아요."
+        await interaction.response.send_message(embed=theme.notice(
+            f"🌌 시크릿 방 확률: {old:g}% → **{new:g}%** (기본 {param.default:g}%)\n{per_run(new)}{extra}\n지금 진행 중인 던전에도 바로 적용돼요."), ephemeral=False)
 
     @secret.command(name="수정", description="시크릿 보스의 값을 고쳐요. 바꿀 것만 적으세요. 드롭장비·드롭아이템·등장문구·그림은 -를 적으면 지워요 (관리자)")
     @app_commands.rename(target="대상", new_name="새이름", emoji="이모지", hp="체력", damage="공격", drop_gear="드롭장비", gear_chance="장비확률",

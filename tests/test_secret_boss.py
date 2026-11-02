@@ -12,7 +12,7 @@ import dungeon_service as service
 from balance import Balance, SecretBoss, check_entity, check_value, entity_dict
 from cogs import dungeon as cog
 from cogs.content_admin import ContentAdmin
-from cogs.dungeon import DungeonView, respond, run_embed, secret_intro_frames
+from cogs.dungeon import DungeonView, respond, run_embed, secret_intro_frames, start_auto   # 시험 시작 때 한 번 불러 와야 cog(시간 설정)와 같은 모듈을 쓴다
 from dungeon import Run
 from services import Locks
 from store import Store
@@ -57,7 +57,7 @@ class EntityTests(unittest.TestCase):
             self.assertIn(boss.drop_gear, [g.key for g in balance.GEAR])
             self.assertIn(boss.drop_item, [c.key for c in balance.CONSUMABLES])
         self.assertEqual(Balance.build({}).secrets, balance.SECRET_BOSSES)
-        self.assertEqual(Balance.build({}).secret_chance, 1.0)
+        self.assertEqual(Balance.build({}).secret_chance, 10.0)
 
     def test_a_valid_secret_boss_round_trips_through_json(self):
         entity, problem = check_entity("secrets", secret(drop_gear_chance=12.5, drop_item_amount=3, intro="나타났다", image="https://x.test/a.gif", weight=0.5))
@@ -103,9 +103,9 @@ class EntityTests(unittest.TestCase):
 
 
 class RoomTests(unittest.TestCase):
-    def test_beating_a_boss_has_a_one_percent_chance_to_open_the_eleventh_room(self):
+    def test_beating_a_boss_has_a_ten_percent_chance_to_open_the_eleventh_room(self):
         bal = Balance.build({})
-        for draw, opens in ((0.0, True), (0.00999, True), (0.01, False), (0.99, False)):
+        for draw, opens in ((0.0, True), (0.09999, True), (0.1, False), (0.99, False)):
             run = boss_cleared(bal)
             rng = Scripted(randoms=[draw, 0.0] if opens else [draw])
             dungeon.advance(run, rng, bal)
@@ -380,9 +380,8 @@ class ScreenTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(i.response.edit_message.await_args.kwargs["embed"].title, "…")
 
     async def test_the_cinematic_also_plays_during_quick_play(self):
-        from cogs.dungeon import start_auto
         self.w.bot.rng = random.Random(4)
-        self.store.update_settings(G, dungeon={"일반.시크릿확률": 100})
+        self.store.update_settings(G, dungeon={"일반.시크릿확률": 100, "일반.층수": 1, "일반.맨손공격력": 100000, "일반.최대체력": 100000})   # 한 층, 한 방에 쓰러뜨린다
         key = self.store.ensure_system_items(G)["key"]
         self.store.add_item(G, U, key, 2)
         out = await service.enter(self.store, self.bot.locks, G, U)
@@ -494,6 +493,52 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("시크릿 보스 1개", fields)
         self.assertIn("공허의 군주", fields["시크릿 보스 1개"])
         self.assertIn("드롭(하나는 반드시)", fields["시크릿 보스 1개"])
+
+    async def test_the_default_chance_is_ten_percent_and_the_command_shows_it(self):
+        self.assertEqual(self.store.balance(G).secret_chance, 10.0)
+        text = await self.run_cmd(ContentAdmin.secret_chance)
+        self.assertIn("지금 시크릿 방 확률은 **10%**", text)
+        self.assertIn("기본 10%", text)
+        self.assertIn("65%", text)                                                    # 10층을 오르면 한 판에 한 번 이상 열릴 확률 1-(0.9^10)
+        self.assertEqual(self.store.settings(G)["dungeon"], {})                         # 보기만 해서는 아무것도 바꾸지 않는다
+
+    async def test_set_the_chance_with_decimals_zero_and_full(self):
+        text = await self.run_cmd(ContentAdmin.secret_chance, 2.5)
+        self.assertIn("10% → **2.5%**", text)
+        self.assertEqual((self.store.balance(G).secret_chance, self.store.settings(G)["dungeon"]), (2.5, {"일반.시크릿확률": 2.5}))
+        self.assertIn("2.5%", await self.run_cmd(ContentAdmin.secret_chance))
+        text = await self.run_cmd(ContentAdmin.secret_chance, 0)
+        self.assertIn("열리지 않아요", text)
+        self.assertEqual(self.store.balance(G).secret_chance, 0)
+        await self.run_cmd(ContentAdmin.secret_chance, 100)
+        self.assertEqual(self.store.balance(G).secret_chance, 100)
+        bal = self.store.balance(G)
+        run = boss_cleared(bal)
+        dungeon.advance(run, Scripted(randoms=[0.9999, 0.0]), bal)                    # 100%면 어떤 난수로도 열린다
+        self.assertEqual(run.kind, "secret")
+
+    async def test_going_back_to_the_default_clears_the_override_and_a_repeat_is_refused(self):
+        await self.run_cmd(ContentAdmin.secret_chance, 3)
+        text = await self.run_cmd(ContentAdmin.secret_chance, 10)
+        self.assertIn("3% → **10%**", text)
+        self.assertEqual(self.store.settings(G)["dungeon"], {})                         # 기본값이면 기록을 지운다
+        self.assertIn("이미 10%예요", await self.run_cmd(ContentAdmin.secret_chance, 10))
+
+    async def test_the_command_and_the_dungeon_setting_are_the_same_value(self):
+        await self.run_cmd(ContentAdmin.secret_chance, 4)
+        self.assertEqual(self.store.balance(G).secret_chance, 4)
+        from cogs.dungeon_admin import DungeonAdmin
+        admin = DungeonAdmin(self.w.bot)
+        i = self.w.interaction(admin=True)
+        await DungeonAdmin.set_param.callback(admin, i, "일반.시크릿확률", 6.5)
+        self.assertEqual(self.store.balance(G).secret_chance, 6.5)
+        self.assertIn("6.5%", await self.run_cmd(ContentAdmin.secret_chance))
+
+    async def test_the_chance_command_is_admin_only_and_range_checked(self):
+        self.assertIn("관리자만", await self.run_cmd(ContentAdmin.secret_chance, 50, admin=False))
+        self.assertEqual(self.store.balance(G).secret_chance, 10)
+        option = next(p for p in ContentAdmin.secret_chance.parameters if p.name == "percent")
+        self.assertEqual((option.type.name, option.min_value, option.max_value, option.required), ("number", 0, 100, False))
 
     async def test_admin_only_and_autocomplete(self):
         for command, args in ((ContentAdmin.secret_add, ("왕", "🌌", 10, 1)), (ContentAdmin.secret_edit, ("공허의 군주",)), (ContentAdmin.secret_delete, ("공허의 군주",))):

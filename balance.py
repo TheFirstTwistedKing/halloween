@@ -14,7 +14,7 @@ BASE_DAMAGE = 20                 # 맨손 공격력
 ROOMS = 10                       # 한 층의 방은 10개(고정). 10번째 방은 미니 보스
 FLOORS = 10                      # 올라가야 하는 층 수. 마지막 층의 보스를 이기면 클리어
 FLOOR_SCALE = 4                  # 층이 하나 오를 때마다 몬스터·보스의 체력과 공격이 1층의 몇 %씩 늘어나는지
-SECRET_CHANCE = 1.0                # 보스를 이기고 올라갈 때 11번째 방(시크릿 보스)이 생길 확률(%)
+SECRET_CHANCE = 10.0               # 보스를 이기고 올라갈 때 11번째 방(시크릿 보스)이 생길 확률(%)
 REVIVE_HEAL = 50                 # 부활권으로 되살아날 때 최대 HP의 몇 %로 일어나는지
 FLOOR_HEAL = 50                  # 위 층으로 올라갈 때 잃은 HP의 몇 %를 회복하는지
 BASE_DODGE = 10                  # 잡몹 기본 회피 10% (보스는 회피 불가)
@@ -86,7 +86,7 @@ class Monster:
 
 @dataclass(frozen=True)
 class SecretBoss:
-    """시크릿 보스: 보스를 이기고 올라갈 때 가끔(기본 1%) 열리는 11번째 방의 보스. 장비나 아이템을 반드시 하나는 떨어뜨린다."""
+    """시크릿 보스: 보스를 이기고 올라갈 때 가끔(기본 10%) 열리는 11번째 방의 보스. 장비나 아이템을 반드시 하나는 떨어뜨린다."""
     key: str
     name: str
     emoji: str
@@ -171,7 +171,7 @@ MONSTERS = (                                                    # 원래 수치�
     Monster("giant_rat", "거대 쥐", "🐀", 90, 45, dodge=30),        # 특수: 회피 확률 30%
 )
 SECRET_BOSSES = (
-    SecretBoss("void_lord", "공허의 군주", "🌌", 1600, 200, drop_gear="gun", drop_gear_chance=50, drop_item="golden_soup", drop_item_chance=60,
+    SecretBoss("void_lord", "공허의 군주", "🌌", 1200, 150, drop_gear="gun", drop_gear_chance=50, drop_item="golden_soup", drop_item_chance=60,
                intro="어둠 속에서 거대한 눈동자가 천천히 떠오른다…"),
 )
 BOSSES = (                                                      # 보스는 회피 불가(dodge=0)

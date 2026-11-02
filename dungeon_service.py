@@ -8,9 +8,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import dungeon
+import dungeon_auto
 from dungeon import DungeonError, Run
 from store import Store, StoreError
 
+AUTO_REFUSE = "⏩ 빠른진행 중이에요. ⏹ 멈추기를 누르면 직접 진행할 수 있어요."
 ACTIONS = ("advance", "attack", "defend", "item", "chest", "equip", "stash", "swap_weapon", "swap_shield", "discard", "quit")
 
 
@@ -41,8 +43,9 @@ def entry_label(store: Store, guild_id: int) -> str:
     return f"{item['emoji']} {item['name']} {cfg['entry_cost']}개" if item else ""
 
 
-async def enter(store: Store, locks, guild_id: int, user_id: int) -> Outcome:
-    """던전에 들어간다. 진행 중인 던전이 있으면 입장 물품 없이 이어서 하고, 없으면 입장 물품을 낸다."""
+async def enter(store: Store, locks, guild_id: int, user_id: int, auto_running: bool = False) -> Outcome:
+    """던전에 들어간다. 진행 중인 던전이 있으면 입장 물품 없이 이어서 하고, 없으면 입장 물품을 낸다.
+    빠른진행이 켜져 있는데 그걸 돌리는 작업이 없다면(auto_running=False: 봇이 다시 켜졌거나 끊겼다) 빠른진행을 끄고 이어서 한다."""
     async with locks.get(guild_id, user_id):
         bal = store.balance(guild_id)
         try:
@@ -51,17 +54,23 @@ async def enter(store: Store, locks, guild_id: int, user_id: int) -> Outcome:
             return Outcome(False, str(exc))
         run = Run.from_json(data)
         run.hp = min(run.hp, bal.max_hp)             # 관리자가 최대 체력을 낮췄다면 맞춘다.
+        was_auto = run.auto and not auto_running
+        if was_auto:
+            run.auto = False
         run.bump()                                   # 이전에 띄워 둔 화면은 이제 지난 화면이 된다.
         entry = entry_label(store, guild_id)
         run.events = ([f"🏚️ {entry + '을(를) 내고 ' if entry else ''}던전에 들어왔어요! {bal.floors}층까지 올라가야 해요. (한 층에 방이 {dungeon.ROOMS}개)"] if started
                       else ["📖 진행 중이던 던전을 이어서 해요. (입장 물품은 쓰지 않아요)"])
+        if was_auto:
+            run.events.append("⏸ 빠른진행이 멈춰 있어요(봇이 다시 켜졌거나 중간에 끊겼어요). 다시 켜도 이 던전에서는 입장 물품을 더 내지 않아요.")
         store.save_dungeon(guild_id, user_id, run.to_json())
         return Outcome(True, run=run, started=started)
 
 
 async def act(store: Store, locks, rng, guild_id: int, user_id: int, rev: int, action: str,
-              arg: str | None = None, guard_ok: bool | None = None) -> Outcome:
-    """버튼 하나를 처리한다. rev는 그 버튼이 붙어 있던 화면의 번호."""
+              arg: str | None = None, guard_ok: bool | None = None, auto: bool = False) -> Outcome:
+    """버튼 하나를 처리한다. rev는 그 버튼이 붙어 있던 화면의 번호. auto=True는 빠른진행(컴퓨터)이 하는 행동이다.
+    빠른진행 중에는 사람이 누른 행동(나가기만 빼고)을 받지 않는다."""
     if action not in ACTIONS:
         return Outcome(False, "알 수 없는 행동이에요.")
     async with locks.get(guild_id, user_id):
@@ -73,6 +82,10 @@ async def act(store: Store, locks, rng, guild_id: int, user_id: int, rev: int, a
         run.hp = min(run.hp, bal.max_hp)
         if run.rev != rev:
             return Outcome(False, "지난 화면이에요. 가장 최근 화면에서 눌러 주세요. (안 보이면 `/던전`)", stale=True)
+        if auto and not run.auto:
+            return Outcome(False, "빠른진행이 멈췄어요.", run=run, stale=True)
+        if run.auto and not auto and action != "quit":
+            return Outcome(False, AUTO_REFUSE, run=run)
         try:
             problem = _apply(run, rng, action, arg, guard_ok, bal)
         except DungeonError as exc:
@@ -100,6 +113,8 @@ async def sell(store: Store, locks, guild_id: int, user_id: int, rev: int, picks
         run.hp = min(run.hp, bal.max_hp)
         if run.rev != rev:
             return Outcome(False, "지난 화면이에요. 가장 최근 화면에서 눌러 주세요. (안 보이면 `/던전`)", stale=True)
+        if run.auto:
+            return Outcome(False, AUTO_REFUSE, run=run)
         try:
             total, sold = dungeon.sell(run, picks, mode, bal)
         except DungeonError as exc:
@@ -115,6 +130,52 @@ async def sell(store: Store, locks, guild_id: int, user_id: int, rev: int, picks
         except StoreError as exc:
             return Outcome(False, str(exc), run=run)
         return Outcome(True, run=run, notes=[total])
+
+
+async def set_auto(store: Store, locks, guild_id: int, user_id: int, rev: int, on: bool) -> Outcome:
+    """빠른진행을 켜거나 끈다. 켤 때는 이 던전에서 처음이면 입장 물품을 한 번 더 낸다(껐다 켜도 다시 내지 않는다).
+    notes에 낸 입장 물품 문구가 들어온다(안 냈으면 비어 있다). 끌 때는 화면 번호를 따지지 않는다(지난 화면의 멈추기 버튼도 먹는다)."""
+    async with locks.get(guild_id, user_id):
+        data = store.dungeon_run(guild_id, user_id)
+        if data is None:
+            return Outcome(False, "진행 중인 던전이 없어요. `/던전`으로 다시 들어와 주세요.", stale=True)
+        bal = store.balance(guild_id)
+        run = Run.from_json(data)
+        run.hp = min(run.hp, bal.max_hp)
+        if on:
+            if run.rev != rev:
+                return Outcome(False, "지난 화면이에요. 가장 최근 화면에서 눌러 주세요. (안 보이면 `/던전`)", stale=True)
+            if run.auto:
+                return Outcome(True, run=run)
+            charge = not run.auto_paid
+            label = entry_label(store, guild_id) if charge else ""
+            run.auto = run.auto_paid = True
+            run.events = ["⏩ **빠른진행**을 켰어요! 이제 컴퓨터가 알아서 진행해요." + (f" ({label}을(를) 한 번 더 냈어요)" if label else "")]
+            run.bump()
+            try:
+                store.start_auto(guild_id, user_id, run.to_json(), charge)
+            except StoreError as exc:
+                return Outcome(False, str(exc), run=run)
+            return Outcome(True, run=run, notes=[label])
+        if not run.auto:
+            return Outcome(True, run=run)
+        run.auto = False
+        run.events = ["⏹ 빠른진행을 멈췄어요. 이제 직접 진행해요."]
+        run.bump()
+        store.save_dungeon(guild_id, user_id, run.to_json())
+        return Outcome(True, run=run)
+
+
+async def auto_step(store: Store, locks, rng, guild_id: int, user_id: int) -> Outcome:
+    """빠른진행이 한 걸음 간다: 컴퓨터가 다음 행동을 골라(dungeon_auto) 사람이 누른 것과 똑같은 경로로 처리한다.
+    던전이 끝났거나 빠른진행이 꺼졌으면 stale=True로 알린다."""
+    run = await peek(store, guild_id, user_id)
+    if run is None:
+        return Outcome(False, "던전이 끝났어요.", stale=True)
+    if not run.auto:
+        return Outcome(False, "빠른진행이 멈췄어요.", run=run, stale=True)
+    action, arg = dungeon_auto.choose(run, store.balance(guild_id))
+    return await act(store, locks, rng, guild_id, user_id, run.rev, action, arg, auto=True)
 
 
 async def peek(store: Store, guild_id: int, user_id: int) -> Run | None:

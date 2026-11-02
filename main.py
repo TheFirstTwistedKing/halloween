@@ -54,6 +54,7 @@ class HalloweenBot(commands.Bot):
                          chunk_guilds_at_startup=False)
         self.store = store
         self.locks = Locks()
+        self.autos: dict = {}                         # 빠른진행을 돌리고 있는 작업 {(서버, 사람): asyncio 작업}
         self.rng = rng or random.Random()
         self.guild_ids = frozenset(guild_ids or [])
         self._purged = False

@@ -52,6 +52,8 @@ class Run:
     rev: int = 0                                    # 화면 번호. 행동마다 올라가서 지난 화면의 버튼을 가려낸다.
     items: dict = field(default_factory=dict)       # 가지고 있는 소모품 {key: 개수}
     pending_gear: str | None = None                 # 상자에서 나와 아직 장착/버림을 정하지 않은 장비
+    auto: bool = False                              # 빠른진행 중(컴퓨터가 알아서 진행). 켜 둔 채 봇이 꺼지면 다음에 /던전을 열 때 꺼진다.
+    auto_paid: bool = False                         # 이 던전에서 빠른진행 비용(입장 물품 한 번 더)을 이미 냈다: 껐다 켜도 다시 내지 않는다.
     last: list = field(default_factory=list)        # 바로 직전 행동에서 일어난 일(소모품 사용 조건에 쓴다): guard_success·guard_fail·attack_hit·attack_miss·item_gain:키·item_use:키
 
     def bump(self) -> None:

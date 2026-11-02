@@ -323,7 +323,7 @@ class ScreenTests(unittest.IsolatedAsyncioTestCase):
 
     def test_new_gear_has_a_quick_sell_button_with_the_price(self):
         view = DungeonView(self.bot, U, run_with(pending_gear="longsword", phase="chest_done"), self.store.balance(G))
-        self.assertEqual(self.labels(view), ["장착", "예비에 넣기", "버리기", "판매 +15", "나가기"])      # 소지품이 없으면 [판매] 창구는 따로 없다
+        self.assertEqual(self.labels(view), ["장착", "예비에 넣기", "버리기", "판매 +15", "빠른진행", "나가기"])      # 소지품이 없으면 [판매] 창구는 따로 없다
         view = DungeonView(self.bot, U, run_with(pending_gear="longsword", phase="chest_done", items={"candy": 1}), self.store.balance(G))
         self.assertEqual(self.labels(view)[:5], ["장착", "예비에 넣기", "버리기", "판매 +15", "판매"])
         view.to_components()                                                    # 버튼이 6개를 넘어도 두 줄로 나뉘어 규칙 안에 든다

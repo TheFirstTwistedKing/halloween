@@ -1,6 +1,10 @@
 """/던전 명령과 던전 화면(버튼·아이템 선택). 규칙은 dungeon.py, 진행·저장은 dungeon_service.py가 맡는다."""
 from __future__ import annotations
 
+import asyncio
+import logging
+import time
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -13,6 +17,9 @@ from balance import DEFAULT, item_summary
 from dungeon import ROOMS, Run
 
 BAR = 10
+log = logging.getLogger("halloween")
+AUTO_DELAY = 1.6               # 빠른진행이 한 걸음마다 쉬는 시간(초). 디스코드의 메시지 수정 제한을 넘지 않게 한다.
+AUTO_MAX_SECONDS = 14 * 60     # 디스코드는 버튼을 누른 뒤 15분이 지나면 그 메시지를 더 못 고친다: 그 전에 멈추고 이어서 하게 한다.
 
 
 def bar(value: int, maximum: int, full: str, width: int = BAR) -> str:
@@ -103,6 +110,8 @@ class DungeonView(discord.ui.View):
             self._button("장비", "🎒", "open_equip", discord.ButtonStyle.secondary)
         if not run.pending_gear and any(k in bal.item_by_key for k in run.items):
             self.add_item(ItemSelect(run, bal))
+        if not run.auto:
+            self._button("빠른진행", "⏩", "ask_auto", discord.ButtonStyle.secondary)
         self._button("나가기", "🏃", "ask_quit", discord.ButtonStyle.secondary)
 
     def _button(self, label, emoji, action, style):
@@ -113,6 +122,9 @@ class DungeonView(discord.ui.View):
                 await interaction.response.send_message(
                     embed=theme.notice("정말 나갈까요? 던전 진행과 입장에 쓴 물품이 사라져요.", False),
                     view=ConfirmQuit(self.client, self.user_id, self.rev), ephemeral=True)
+                return
+            if action == "ask_auto":
+                await ask_auto(interaction, self.client, self.rev)
                 return
             if action == "open_sell":
                 await open_sell(interaction, self.client, self.rev)
@@ -184,6 +196,157 @@ async def respond(interaction: discord.Interaction, client, rev: int, action: st
         await interaction.response.edit_message(embed=run_embed(run, outcome, bal, client.store.currency(interaction.guild_id)), view=None)
         return
     await interaction.response.edit_message(embed=run_embed(run, outcome, bal, client.store.currency(interaction.guild_id)), view=view)
+
+
+def auto_embed(run: Run, outcome=None, bal=None, cur=None) -> discord.Embed:
+    """빠른진행 중인 화면: 평소 화면에 '컴퓨터가 진행 중'이라는 안내를 붙인다."""
+    embed = run_embed(run, outcome, bal, cur)
+    if not (outcome and outcome.ended):
+        embed.set_footer(text="⏩ 빠른진행 중 · 컴퓨터가 알아서 진행해요 · ⏹ 멈추기를 누르면 직접 진행해요")
+    return embed
+
+
+class AutoView(discord.ui.View):
+    """빠른진행 중에 붙는 버튼: 멈추기 하나뿐이다(그동안 다른 행동은 서버가 받지 않는다)."""
+
+    def __init__(self, client, user_id: int):
+        super().__init__(timeout=AUTO_MAX_SECONDS + 120)
+        self.client, self.user_id = client, user_id
+        stop = discord.ui.Button(label="멈추기", emoji="⏹", style=discord.ButtonStyle.danger)
+        stop.callback = self.stop_auto
+        self.add_item(stop)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await owner_only(interaction, self.user_id)
+
+    async def stop_auto(self, interaction: discord.Interaction):
+        client = self.client
+        await service.set_auto(client.store, client.locks, interaction.guild_id, interaction.user.id, 0, False)
+        task = client.autos.get((interaction.guild_id, interaction.user.id))
+        if task is not None and not task.done():
+            # 돌리던 작업이 다음 걸음에서 멈춘 걸 알고 던전 화면으로 되돌려 놓는다(보통 2초 안).
+            await interaction.response.edit_message(embed=theme.notice("⏹ 멈추는 중이에요… 잠시 뒤 던전 화면으로 돌아와요.", False), view=None)
+            return
+        run = await service.peek(client.store, interaction.guild_id, interaction.user.id)    # 돌리던 작업이 없다(봇이 다시 켜진 뒤 등)
+        if run is None:
+            await interaction.response.edit_message(embed=theme.notice("던전이 이미 끝났어요.", False), view=None)
+            return
+        bal = client.store.balance(interaction.guild_id)
+        await interaction.response.edit_message(embed=run_embed(run, None, bal, client.store.currency(interaction.guild_id)),
+                                                view=DungeonView(client, interaction.user.id, run, bal))
+
+
+class AutoConfirm(discord.ui.View):
+    """[⏩ 빠른진행] 첫 확인: 입장 물품을 한 번 더 낸다는 걸 알리고 켜거나 취소한다."""
+
+    def __init__(self, client, user_id: int, rev: int):
+        super().__init__(timeout=120)
+        self.client, self.user_id, self.rev = client, user_id, rev
+        yes = discord.ui.Button(label="켜기", emoji="⏩", style=discord.ButtonStyle.success)
+        no = discord.ui.Button(label="취소", style=discord.ButtonStyle.secondary)
+        yes.callback, no.callback = self.confirm, self.cancel
+        self.add_item(yes)
+        self.add_item(no)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await owner_only(interaction, self.user_id)
+
+    async def confirm(self, interaction: discord.Interaction):
+        self.stop()
+        await start_auto(interaction, self.client, self.rev)
+
+    async def cancel(self, interaction: discord.Interaction):
+        self.stop()
+        client = self.client
+        run = await service.peek(client.store, interaction.guild_id, interaction.user.id)
+        if run is None:
+            await interaction.response.edit_message(embed=theme.notice("던전이 이미 끝났어요.", False), view=None)
+            return
+        bal = client.store.balance(interaction.guild_id)
+        await interaction.response.edit_message(embed=run_embed(run, None, bal, client.store.currency(interaction.guild_id)),
+                                                view=DungeonView(client, interaction.user.id, run, bal))
+
+
+async def ask_auto(interaction: discord.Interaction, client, rev: int):
+    """던전 화면의 [⏩ 빠른진행]: 이 던전에서 아직 비용을 안 냈으면 같은 메시지를 확인 화면으로 바꾸고, 냈거나 무료면 바로 켠다."""
+    run = await service.peek(client.store, interaction.guild_id, interaction.user.id)
+    if run is None or run.rev != rev:
+        await interaction.response.send_message(embed=theme.notice("지난 화면이에요. `/던전`으로 다시 열어 주세요.", False), ephemeral=True)
+        return
+    label = service.entry_label(client.store, interaction.guild_id)
+    if run.auto_paid or not label:
+        await start_auto(interaction, client, rev)
+        return
+    text = (f"**{label}**을(를) 한 번 더 내고 이번 던전을 **컴퓨터가 알아서 진행**하게 할까요?\n"
+            "• 화면이 라이브로 바뀌고, ⏹ 멈추기로 언제든 직접 진행으로 돌아올 수 있어요.\n"
+            "• 이 던전에서는 **한 번만** 내요. 껐다 켜도 다시 내지 않아요.\n"
+            "• 컴퓨터는 더 좋은 장비만 끼고, 위험하면 방어·회복을 하지만 **쓰러질 수 있어요.** 장비·소모품을 파는 일은 하지 않아요.")
+    await interaction.response.edit_message(embed=theme.make_embed("⏩ 빠른진행", text, color=theme.ORANGE), view=AutoConfirm(client, interaction.user.id, rev))
+
+
+async def start_auto(interaction: discord.Interaction, client, rev: int):
+    """빠른진행을 켜고(비용이 필요하면 내고) 라이브로 진행하는 작업을 시작한다."""
+    outcome = await service.set_auto(client.store, client.locks, interaction.guild_id, interaction.user.id, rev, True)
+    if not outcome.ok:
+        await interaction.response.send_message(embed=theme.notice(outcome.text, False), ephemeral=True)
+        return
+    bal = client.store.balance(interaction.guild_id)
+    cur = client.store.currency(interaction.guild_id)
+    view = AutoView(client, interaction.user.id)
+    await interaction.response.edit_message(embed=auto_embed(outcome.run, None, bal, cur), view=view)
+    key = (interaction.guild_id, interaction.user.id)
+    task = asyncio.get_running_loop().create_task(run_auto(interaction, client, interaction.user.id, view))
+    client.autos[key] = task
+
+
+async def run_auto(interaction: discord.Interaction, client, user_id: int, view):
+    """빠른진행 본체: 일정 간격으로 한 걸음씩 진행하며 같은 메시지를 계속 고친다. 끝나거나 멈추거나 시간이 다 되면 끝낸다."""
+    store, gid, key = client.store, interaction.guild_id, (interaction.guild_id, user_id)
+    started = time.monotonic()
+    bal, cur = store.balance(gid), store.currency(gid)
+
+    async def settle(embed_text: str | None = None):
+        """직접 진행하는 화면으로 되돌려 놓는다."""
+        run = await service.peek(store, gid, user_id)
+        if run is None:
+            await interaction.edit_original_response(embed=theme.notice(embed_text or "던전이 끝났어요.", False), view=None)
+            return
+        embed = run_embed(run, None, store.balance(gid), cur)
+        if embed_text:
+            embed.add_field(name="⚠️ 멈춘 이유", value=embed_text, inline=False)
+        await interaction.edit_original_response(embed=embed, view=DungeonView(client, user_id, run, store.balance(gid)))
+
+    try:
+        while True:
+            await asyncio.sleep(AUTO_DELAY)
+            if time.monotonic() - started > AUTO_MAX_SECONDS:
+                await service.set_auto(store, client.locks, gid, user_id, 0, False)
+                await settle("디스코드는 15분이 지나면 이 메시지를 더 고칠 수 없어서 빠른진행을 멈췄어요. ⏩를 다시 누르면 이어서 해요(입장 물품은 더 안 내요).")
+                return
+            outcome = await service.auto_step(store, client.locks, client.rng, gid, user_id)
+            if outcome.stale:                                # 멈췄거나(⏹) 던전이 끝났다
+                await settle()
+                return
+            if not outcome.ok:                               # 컴퓨터가 할 수 없는 행동에 걸렸다: 멈추고 이유를 알린다.
+                await service.set_auto(store, client.locks, gid, user_id, 0, False)
+                await settle(outcome.text)
+                return
+            bal = store.balance(gid)
+            if outcome.ended:
+                await interaction.edit_original_response(embed=auto_embed(outcome.run, outcome, bal, cur), view=None)
+                return
+            await interaction.edit_original_response(embed=auto_embed(outcome.run, outcome, bal, cur), view=view)
+    except asyncio.CancelledError:
+        raise
+    except Exception:                                        # 메시지를 못 고치게 됐다(15분 지남·삭제 등): 안전하게 꺼 둔다. 던전은 /던전으로 이어서 한다.
+        log.exception("빠른진행이 중단됐어요 (서버 %s, 사용자 %s)", gid, user_id)
+        try:
+            await service.set_auto(store, client.locks, gid, user_id, 0, False)
+        except Exception:
+            log.exception("빠른진행을 끄지 못했어요")
+    finally:
+        if client.autos.get(key) is asyncio.current_task():
+            client.autos.pop(key, None)
 
 
 def sell_embed(run: Run, bal, cur, wallet: int, result: bool = False) -> discord.Embed:
@@ -385,11 +548,17 @@ class Dungeon(commands.Cog):
     @app_commands.command(name="던전", description="🏚️ 입장 물품을 내고 던전에 들어가요 (진행 중이면 이어서 해요)")
     @app_commands.guild_only()
     async def enter(self, interaction: discord.Interaction):
-        outcome = await service.enter(self.bot.store, self.bot.locks, interaction.guild_id, interaction.user.id)
+        task = self.bot.autos.get((interaction.guild_id, interaction.user.id))
+        running = task is not None and not task.done()
+        outcome = await service.enter(self.bot.store, self.bot.locks, interaction.guild_id, interaction.user.id, auto_running=running)
         if not outcome.ok:                                   # 던전은 개인 화면이다: 입장 불가 안내도 던전 화면도 본인에게만 보인다.
             await interaction.response.send_message(embed=theme.notice(outcome.text, False), ephemeral=True)
             return
         bal = self.bot.store.balance(interaction.guild_id)
+        if running and outcome.run.auto:                     # 다른 메시지에서 빠른진행이 돌고 있다: 여기서도 멈출 수 있게 한다.
+            await interaction.response.send_message(embed=auto_embed(outcome.run, None, bal, self.bot.store.currency(interaction.guild_id)),
+                                                    view=AutoView(self.bot, interaction.user.id), ephemeral=True)
+            return
         await interaction.response.send_message(embed=run_embed(outcome.run, None, bal, self.bot.store.currency(interaction.guild_id)),
                                                 view=DungeonView(self.bot, interaction.user.id, outcome.run, bal), ephemeral=True)
 

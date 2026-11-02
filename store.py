@@ -984,22 +984,37 @@ class Store:
         if existing is not None:
             return existing, False
         self.ensure_defaults(guild)                              # 이 안에서 따로 커밋하므로 아래 거래 밖에서 먼저 한다.
-        cfg = self.settings(guild)
-        entry, cost = cfg["entry_item"], cfg["entry_cost"]
         with self.db:                                              # 입장 물품 차감과 던전 생성은 한 덩어리
-            if entry is not None:
-                item = self.item(guild, entry)
-                row = self.db.execute("SELECT qty FROM inventory WHERE guild=? AND user=? AND item=?", (guild, user, entry)).fetchone()
-                have = row["qty"] if row else 0
-                if have < cost:
-                    label = f"{item['emoji']} {item['name']}" if item else "입장 물품"
-                    raise StoreError(f"{i_ga(label)} {cost}개 필요해요. (보유 {have}개) 패키지 등에서 찾아보세요!")
-                if have > cost:
-                    self.db.execute("UPDATE inventory SET qty=qty-? WHERE guild=? AND user=? AND item=?", (cost, guild, user, entry))
-                else:
-                    self.db.execute("DELETE FROM inventory WHERE guild=? AND user=? AND item=?", (guild, user, entry))
+            self._take_entry(guild, user)
             self.db.execute("INSERT INTO dungeons VALUES(?,?,?)", (guild, user, new_data))
         return new_data, True
+
+    def _take_entry(self, guild: int, user: int) -> None:
+        """입장 물품을 정해진 개수만큼 낸다(거래 안에서 불러야 한다). 모자라면 StoreError. 무료 입장이면 아무것도 안 한다."""
+        cfg = self.settings(guild)
+        entry, cost = cfg["entry_item"], cfg["entry_cost"]
+        if entry is None:
+            return
+        item = self.item(guild, entry)
+        row = self.db.execute("SELECT qty FROM inventory WHERE guild=? AND user=? AND item=?", (guild, user, entry)).fetchone()
+        have = row["qty"] if row else 0
+        if have < cost:
+            label = f"{item['emoji']} {item['name']}" if item else "입장 물품"
+            raise StoreError(f"{i_ga(label)} {cost}개 필요해요. (보유 {have}개) 패키지 등에서 찾아보세요!")
+        if have > cost:
+            self.db.execute("UPDATE inventory SET qty=qty-? WHERE guild=? AND user=? AND item=?", (cost, guild, user, entry))
+        else:
+            self.db.execute("DELETE FROM inventory WHERE guild=? AND user=? AND item=?", (guild, user, entry))
+
+    def start_auto(self, guild: int, user: int, data: str, charge: bool) -> None:
+        """빠른진행을 켠 던전 상태를 저장한다. charge면 입장 물품을 한 번 더 내는데(이 던전에서 처음 켤 때만), 저장과 한 덩어리다.
+        물품이 모자라거나 진행 중인 던전이 없으면 아무것도 바꾸지 않고 StoreError."""
+        self.ensure_defaults(guild)
+        with self.db:
+            if charge:
+                self._take_entry(guild, user)
+            if self.db.execute("UPDATE dungeons SET data=? WHERE guild=? AND user=?", (data, guild, user)).rowcount == 0:
+                raise StoreError("진행 중인 던전이 없어요.")
 
     def save_dungeon(self, guild: int, user: int, data: str) -> None:
         """진행 상황을 저장한다. 이미 끝난(지워진) 던전은 되살리지 않는다."""

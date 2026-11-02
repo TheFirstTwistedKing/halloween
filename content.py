@@ -94,6 +94,8 @@ def edit(store: Store, guild: int, sections, name: str, changes: dict):
         new["name"] = str(new["name"]).strip()
         _unique_name(store, guild, section, new["name"], ignore_key=data["key"])
     entity = _check(section, new)
+    if section == "consumables" and not entity.material and any(m["item"] == data["key"] for m in store.settings(guild)["weapon_mods"]):
+        raise ContentError(f"**{data['name']}**은(는) 장비 개조 레시피(`/장비개조 목록`)의 재료라서 개조 재료가 아니게 바꿀 수 없어요. 먼저 그 레시피를 지워 주세요.")
     items = [entity_dict(entity) if d["key"] == data["key"] else d for d in current(store, guild, section)]
     _commit(store, guild, section, items)
     return section, next(e for e in getattr(store.balance(guild), section) if e.key == data["key"])
@@ -115,18 +117,78 @@ def delete(store: Store, guild: int, sections, name: str):
 def _used_by(store: Store, guild: int, section: str, data: dict) -> str:
     """이 개체를 다른 소모품이 쓰고 있다면 지울 수 없는 이유를, 아니면 빈 문자열을 돌려준다.
     (무기는 개조 소모품의 목표로, 소모품은 다른 소모품의 '획득/사용' 조건으로 쓰일 수 있다.)"""
+    mods = store.settings(guild)["weapon_mods"]
     if section == "gear":
         users = [d["name"] for d in current(store, guild, "consumables") if d.get("modify") == data["key"]]
-        why = "개조 목표"
+        if users:
+            return f"**{data['name']}**은(는) 소모품 {', '.join(users[:3])}의 개조 목표로 쓰이고 있어서 지울 수 없어요. 먼저 그 소모품을 바꾸거나 지워 주세요."
+        if any(data["key"] in (m["weapon"], m["result"]) for m in mods):
+            return f"**{data['name']}**은(는) 장비 개조 레시피(`/장비개조 목록`)에 쓰이고 있어서 지울 수 없어요. 먼저 그 레시피를 지워 주세요."
     elif section == "consumables":
         users = [d["name"] for d in current(store, guild, "consumables") if d["key"] != data["key"]
                  and any(c[0] in balance.COND_ITEM and c[1] == data["key"] for c in d.get("conditions") or ())]
-        why = "사용 조건"
-    else:
-        return ""
-    if not users:
-        return ""
-    return f"**{data['name']}**은(는) 소모품 {', '.join(users[:3])}의 {why}로 쓰이고 있어서 지울 수 없어요. 먼저 그 소모품을 바꾸거나 지워 주세요."
+        if users:
+            return f"**{data['name']}**은(는) 소모품 {', '.join(users[:3])}의 사용 조건으로 쓰이고 있어서 지울 수 없어요. 먼저 그 소모품을 바꾸거나 지워 주세요."
+        if any(m["item"] == data["key"] for m in mods):
+            return f"**{data['name']}**은(는) 장비 개조 레시피(`/장비개조 목록`)의 재료라서 지울 수 없어요. 먼저 그 레시피를 지워 주세요."
+    return ""
+
+
+# ---------------------------------------------------------------- 장비 개조 레시피: (무기, 재료 소모품) → 개조된 무기
+def mods(store: Store, guild: int) -> list[dict]:
+    """저장된 개조 레시피 [{id, weapon, item, result}] (키로 저장돼 있다)."""
+    return store.settings(guild)["weapon_mods"]
+
+
+def mod_names(store: Store, guild: int, entry: dict) -> tuple[str, str, str]:
+    """레시피의 (무기, 재료, 결과 무기) 이름. 지워진 것은 '(없어짐)'."""
+    bal = store.balance(guild)
+    weapon, result = bal.gear_by_key.get(entry["weapon"]), bal.gear_by_key.get(entry["result"])
+    item = bal.item_by_key.get(entry["item"])
+    return tuple(f"{x.emoji} {x.name}" if x else "(없어짐)" for x in (weapon, item, result))
+
+
+def mod_text(store: Store, guild: int, entry: dict) -> str:
+    weapon, item, result = mod_names(store, guild, entry)
+    return f"{weapon} + {item} → {result}"
+
+
+def add_mod(store: Store, guild: int, weapon: str, item: str, result: str) -> dict:
+    """무기에 재료를 쓰면 결과 무기로 바뀌는 레시피를 더한다. 이름은 자동완성에서 고른 것. 잘못되면 ContentError."""
+    saved = mods(store, guild)
+    if len(saved) >= balance.MAX_MODS:
+        raise ContentError(f"개조 레시피는 {balance.MAX_MODS}개까지예요.")
+    found = {}
+    for label, sections, name in (("무기", ("gear",), weapon), ("재료", ("consumables",), item), ("결과 무기", ("gear",), result)):
+        hit = find(store, guild, sections, name)
+        if hit is None:
+            raise ContentError(f"{label} **{name}**이(가) 없어요. 이름은 자동완성에서 골라 주세요.")
+        found[label] = hit[1]
+    for label in ("무기", "결과 무기"):
+        if found[label]["slot"] != "weapon":
+            raise ContentError(f"{label}는 무기여야 해요. **{found[label]['name']}**은(는) 방패예요.")
+    if found["재료"].get("material") is not True:
+        raise ContentError(f"**{found['재료']['name']}**은(는) 개조 재료가 아니에요. 재료는 `/소모품 추가`의 `재료`를 켜서 만들어요(회복 효과가 있는 소모품은 재료로 쓸 수 없어요).")
+    if found["무기"]["key"] == found["결과 무기"]["key"]:
+        raise ContentError("무기와 결과 무기가 같아요. 다른 무기로 바뀌어야 해요.")
+    for m in saved:
+        if m["weapon"] == found["무기"]["key"] and m["item"] == found["재료"]["key"]:
+            raise ContentError(f"이미 같은 레시피가 있어요: {mod_text(store, guild, m)}. 먼저 `/장비개조 삭제`로 지워 주세요.")
+    entry = {"id": max([m["id"] for m in saved], default=0) + 1, "weapon": found["무기"]["key"], "item": found["재료"]["key"],
+             "result": found["결과 무기"]["key"]}
+    store.update_settings(guild, weapon_mods=[*saved, entry])
+    return entry
+
+
+def delete_mod(store: Store, guild: int, ident) -> dict:
+    """번호(id)로 레시피를 지운다. 지운 레시피를 돌려준다."""
+    saved = mods(store, guild)
+    text = str(ident).strip()
+    entry = next((m for m in saved if str(m["id"]) == text), None)
+    if entry is None:
+        raise ContentError("그런 레시피가 없어요. 번호는 `/장비개조 목록`에서 확인하세요.")
+    store.update_settings(guild, weapon_mods=[m for m in saved if m is not entry and m["id"] != entry["id"]])
+    return entry
 
 
 def set_sell_price(store: Store, guild: int, sections, price: int, tier: str | None = None) -> dict[str, int]:

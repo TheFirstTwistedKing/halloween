@@ -21,6 +21,7 @@ WEIGHT_HELP = "상자에서 나올 비율. 소수도 돼요(예: 0.5, 0.05). 다
 SELL_HELP = "던전 안에서 팔 때 받는 재화(개당). 0이면 팔 수 없어요. 비우면 그대로(추가할 땐 등급별 기본값)"
 SELL_TARGETS = [Choice(name="장비와 소모품 모두", value="both"), Choice(name="장비만", value="gear"), Choice(name="소모품만", value="consumables")]
 COND_CHOICES = [Choice(name=COND_LABELS[k].format(v="N"), value=k) for k in COND_STATE + COND_EVENT]
+MATERIAL_HELP = "개조 재료로 만들까요? 재료는 효과가 없고, /장비개조 레시피에 있는 무기를 들고 쓰면 그 무기가 개조돼요"
 MODIFY_HELP = "무기 개조: 쓰면 들고 있는 무기가 이 무기로 바뀌어요(무기 이름). 회복 효과와는 함께 못 써요"
 PERMS = dict(guild_only=True, default_permissions=discord.Permissions(administrator=True))
 
@@ -172,16 +173,20 @@ class ContentAdmin(commands.Cog):
 
     @potion.command(name="추가", description="소모품을 새로 만들어요. 회복량·전체회복·지속회복·무기 개조 중 하나를 정해요 (관리자)")
     @app_commands.rename(name="이름", emoji="이모지", tier="등급", weight="등장", heal="회복량", full="전체회복", regen="지속회복량", turns="지속턴",
-                         sell_price="판매가", modify="개조무기")
+                         sell_price="판매가", modify="개조무기", material="재료")
     @app_commands.describe(weight=WEIGHT_HELP, heal="한 번에 회복하는 HP", full="HP를 전부 회복", regen="턴마다 회복하는 HP", turns="지속 회복이 이어지는 턴 수",
-                           sell_price=SELL_HELP, modify=MODIFY_HELP)
+                           sell_price=SELL_HELP, modify=MODIFY_HELP, material=MATERIAL_HELP)
     @app_commands.choices(tier=TIERS)
     async def potion_add(self, interaction: discord.Interaction, name: str, emoji: str, tier: Choice[str],
                          weight: app_commands.Range[float, 0, 1000], heal: app_commands.Range[int, 0, 100000] = 0, full: bool = False,
                          regen: app_commands.Range[int, 0, 100000] = 0, turns: app_commands.Range[int, 0, 1000] = 0,
-                         sell_price: app_commands.Range[int, 0, SELL_MAX] | None = None, modify: str | None = None):
+                         sell_price: app_commands.Range[int, 0, SELL_MAX] | None = None, modify: str | None = None, material: bool = False):
         def go():
             data = dict(name=name, emoji=emoji.strip(), tier=tier.value, weight=weight, heal=heal, full=full, regen=regen, regen_turns=turns)
+            if material:
+                if heal or full or regen or turns or modify:
+                    raise content.ContentError("개조 재료는 효과가 없어요. 회복·개조무기 옵션과 함께 쓸 수 없어요.")
+                data["material"] = True
             if modify:
                 if heal or full or regen or turns:
                     raise content.ContentError("개조 소모품은 회복 효과와 함께 쓸 수 없어요. 개조무기만 적어 주세요.")
@@ -194,29 +199,33 @@ class ContentAdmin(commands.Cog):
 
     @potion.command(name="수정", description="소모품의 값을 고쳐요. 효과를 바꾸면 이전 효과는 사라져요 (관리자)")
     @app_commands.rename(target="대상", new_name="새이름", emoji="이모지", tier="등급", weight="등장", heal="회복량", full="전체회복",
-                         regen="지속회복량", turns="지속턴", sell_price="판매가", modify="개조무기")
-    @app_commands.describe(weight=WEIGHT_HELP, sell_price=SELL_HELP, modify=MODIFY_HELP)
+                         regen="지속회복량", turns="지속턴", sell_price="판매가", modify="개조무기", material="재료")
+    @app_commands.describe(weight=WEIGHT_HELP, sell_price=SELL_HELP, modify=MODIFY_HELP, material=MATERIAL_HELP)
     @app_commands.choices(tier=TIERS)
     async def potion_edit(self, interaction: discord.Interaction, target: str, new_name: str | None = None, emoji: str | None = None,
                           tier: Choice[str] | None = None, weight: app_commands.Range[float, 0, 1000] | None = None,
                           heal: app_commands.Range[int, 1, 100000] | None = None, full: bool | None = None,
                           regen: app_commands.Range[int, 1, 100000] | None = None, turns: app_commands.Range[int, 1, 1000] | None = None,
-                          sell_price: app_commands.Range[int, 0, SELL_MAX] | None = None, modify: str | None = None):
+                          sell_price: app_commands.Range[int, 0, SELL_MAX] | None = None, modify: str | None = None, material: bool | None = None):
         def go():
             changes = dict(name=new_name, emoji=emoji and emoji.strip(), tier=tier and tier.value, weight=weight, sell_price=sell_price)
             changes = {k: v for k, v in changes.items() if v is not None}
-            if modify:                                  # 개조 소모품으로 바꾼다: 회복 효과는 지운다.
+            if material:                                # 개조 재료로 바꾼다: 효과는 모두 지운다.
+                if heal is not None or full or regen is not None or turns is not None or modify:
+                    raise content.ContentError("개조 재료는 효과가 없어요. 회복·개조무기 옵션과 함께 쓸 수 없어요.")
+                changes.update(material=True, modify=None, full=False, heal=0, regen=0, regen_turns=0)
+            elif modify:                                # 개조 소모품으로 바꾼다: 회복 효과는 지운다.
                 if heal is not None or full or regen is not None or turns is not None:
                     raise content.ContentError("개조 소모품은 회복 효과와 함께 쓸 수 없어요. 개조무기만 적어 주세요.")
-                changes.update(modify=self._weapon_key(modify, interaction.guild_id), full=False, heal=0, regen=0, regen_turns=0)
+                changes.update(modify=self._weapon_key(modify, interaction.guild_id), material=False, full=False, heal=0, regen=0, regen_turns=0)
             elif full:                                  # 효과는 하나만: 새 효과를 정하면 이전 효과를 지운다.
-                changes.update(full=True, heal=0, regen=0, regen_turns=0, modify=None)
+                changes.update(full=True, heal=0, regen=0, regen_turns=0, modify=None, material=False)
             elif regen is not None:
-                changes.update(full=False, heal=0, regen=regen, modify=None)
+                changes.update(full=False, heal=0, regen=regen, modify=None, material=False)
                 if turns is not None:
                     changes["regen_turns"] = turns
             elif heal is not None:
-                changes.update(full=False, heal=heal, regen=0, regen_turns=0, modify=None)
+                changes.update(full=False, heal=heal, regen=0, regen_turns=0, modify=None, material=False)
             elif turns is not None:
                 changes["regen_turns"] = turns
             section, entity = content.edit(self.bot.store, interaction.guild_id, ("consumables",), target, changes)
@@ -248,6 +257,79 @@ class ContentAdmin(commands.Cog):
         needle = current.strip().lower()
         return [Choice(name=f"{d['emoji']} {d['name']}"[:100], value=d["name"]) for d in content.current(self.bot.store, interaction.guild_id, "gear")
                 if d["slot"] == "weapon" and needle in d["name"].lower()][:25]
+
+    # ---------------------------------------------------------------- 장비 개조 레시피
+    mod = app_commands.Group(name="장비개조", description="특정 재료를 특정 무기에 쓰면 다른 무기로 바뀌는 레시피 (관리자)", **PERMS)
+
+    @mod.command(name="추가", description="레시피를 만들어요: 무기를 든 채 재료를 쓰면 결과 무기로 바뀌어요 (관리자)")
+    @app_commands.rename(weapon="무기", item="재료", result="결과")
+    @app_commands.describe(weapon="개조할 무기(이 무기를 들고 있어야 해요)", item="쓸 재료(개조 재료로 만든 소모품)", result="개조된 뒤의 무기")
+    async def mod_add(self, interaction: discord.Interaction, weapon: str, item: str, result: str):
+        if not await require_admin(interaction):
+            return
+        try:
+            entry = content.add_mod(self.bot.store, interaction.guild_id, weapon, item, result)
+        except content.ContentError as exc:
+            await self._deny(interaction, str(exc))
+            return
+        await interaction.response.send_message(embed=theme.notice(
+            f"🔧 개조 레시피를 만들었어요.\n{content.mod_text(self.bot.store, interaction.guild_id, entry)}\n"
+            "플레이어가 그 무기를 든 채 던전에서 재료를 쓰면 무기가 바뀌어요."), ephemeral=False)
+
+    @mod.command(name="삭제", description="개조 레시피를 지워요. 번호는 목록에서 골라요 (관리자)")
+    @app_commands.rename(ident="레시피")
+    async def mod_delete(self, interaction: discord.Interaction, ident: str):
+        if not await require_admin(interaction):
+            return
+        try:
+            entry = content.delete_mod(self.bot.store, interaction.guild_id, ident)
+        except content.ContentError as exc:
+            await self._deny(interaction, str(exc))
+            return
+        await interaction.response.send_message(embed=theme.notice(
+            f"🗑️ 개조 레시피를 지웠어요.\n{content.mod_text(self.bot.store, interaction.guild_id, entry)}"), ephemeral=False)
+
+    @mod.command(name="목록", description="개조 레시피를 봐요 (관리자)")
+    async def mod_list(self, interaction: discord.Interaction):
+        if not await require_admin(interaction):
+            return
+        store, gid = self.bot.store, interaction.guild_id
+        saved = content.mods(store, gid)
+        usable = {(w, i) for w, i, _ in store.balance(gid).mods}
+        lines = [f"`{m['id']}` {content.mod_text(store, gid, m)}" + ("" if (m["weapon"], m["item"]) in usable else " ⚠️ 쓸 수 없음(지워지거나 바뀐 항목이 있어요)")
+                 for m in saved]
+        text = "\n".join(lines) if lines else "개조 레시피가 없어요. `/소모품 추가 재료:True`로 재료를 만들고 `/장비개조 추가`로 레시피를 만들어 보세요."
+        await interaction.response.send_message(embed=theme.make_embed(f"🔧 장비 개조 레시피 {len(saved)}개", text[:3500], color=theme.PURPLE), ephemeral=False)
+
+    def _weapon_choices(self, guild_id: int, current: str) -> list:
+        needle = current.strip().lower()
+        return [Choice(name=f"{d['emoji']} {d['name']}"[:100], value=d["name"]) for d in content.current(self.bot.store, guild_id, "gear")
+                if d["slot"] == "weapon" and needle in d["name"].lower()][:25]
+
+    @mod_add.autocomplete("weapon")
+    @mod_add.autocomplete("result")
+    async def mod_weapons(self, interaction: discord.Interaction, current: str):
+        return self._weapon_choices(interaction.guild_id, current) if interaction.guild_id else []
+
+    @mod_add.autocomplete("item")
+    async def mod_materials(self, interaction: discord.Interaction, current: str):
+        if not interaction.guild_id:
+            return []
+        needle = current.strip().lower()
+        return [Choice(name=f"{d['emoji']} {d['name']}"[:100], value=d["name"]) for d in content.current(self.bot.store, interaction.guild_id, "consumables")
+                if d.get("material") and needle in d["name"].lower()][:25]
+
+    @mod_delete.autocomplete("ident")
+    async def mod_idents(self, interaction: discord.Interaction, current: str):
+        if not interaction.guild_id:
+            return []
+        needle = current.strip().lower()
+        out = []
+        for m in content.mods(self.bot.store, interaction.guild_id):
+            label = f"{m['id']}. {content.mod_text(self.bot.store, interaction.guild_id, m)}"
+            if needle in label.lower():
+                out.append(Choice(name=label[:100], value=str(m["id"])))
+        return out[:25]
 
     # ---------------------------------------------------------------- 소모품 사용 조건
     cond = app_commands.Group(name="소모품조건", description="소모품을 쓸 수 있는 조건을 붙이고 뗘요 (관리자)", **PERMS)

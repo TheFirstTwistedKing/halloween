@@ -306,9 +306,22 @@ def unmet_conditions(run: Run, item: Consumable, bal: Balance | None = None) -> 
     return [cond for cond in item.conditions if not condition_met(run, cond, bal)]
 
 
+def can_use_now(run: Run, item: Consumable, bal: Balance | None = None) -> bool:
+    """지금 이 소모품을 쓸 수 있는가: 사용 조건을 전부 만족하고, 개조 재료라면 든 무기에 맞는 레시피가 있다."""
+    bal = bal or DEFAULT
+    if unmet_conditions(run, item, bal):
+        return False
+    return not item.material or bal.mod_result(run.weapon, item.key) is not None
+
+
+def _material_hint(item: Consumable, bal: Balance) -> str:
+    recipes = [bal.gear_by_key[w].name for w, i, _ in bal.mods if i == item.key]
+    return ("이 재료로 개조할 수 있는 무기: " + ", ".join(recipes[:5]) + (" 외" if len(recipes) > 5 else "")) if recipes else "아직 이 재료로 개조할 수 있는 무기가 없어요."
+
+
 def use_consumable(run: Run, key: str, bal: Balance | None = None) -> list[str]:
     """아이템 사용. 전투 중이면 한 턴을 쓴 것으로 치고 몬스터가 공격한다. 사용 조건이 있으면 전부 만족해야 쓸 수 있고(아니면 소모되지 않는다),
-    개조 소모품은 들고 있는 무기를 지정한 무기로 바꾼다."""
+    개조 소모품은 들고 있는 무기를 지정한 무기로 바꾸고, 개조 재료는 든 무기에 맞는 레시피(/장비개조)가 있을 때 그 결과 무기로 바꾼다."""
     bal = bal or DEFAULT
     item = bal.item_by_key.get(key)
     if item is None:
@@ -320,7 +333,13 @@ def use_consumable(run: Run, key: str, bal: Balance | None = None) -> list[str]:
         names = {c.key: c.name for c in bal.consumables}
         raise DungeonError(f"지금은 {item.name}을(를) 쓸 수 없어요. 조건: " + " & ".join(condition_text(c, names) for c in unmet))
     target = None
-    if item.modify:
+    if item.material:                                   # 개조 재료: 든 무기(맨손이면 None)에 맞는 레시피가 있어야 한다.
+        result = bal.mod_result(run.weapon, key)
+        if result is None:
+            held = bal.gear_by_key.get(run.weapon)
+            raise DungeonError(f"{item.name}은(는) 지금 든 무기({held.name if held else '맨손'})에는 쓸 수 없어요. {_material_hint(item, bal)}")
+        target = bal.gear_by_key[result]
+    elif item.modify:
         target = bal.gear_by_key.get(item.modify)
         if target is None or target.slot != "weapon":
             raise DungeonError(f"{item.name}(으)로 개조할 무기가 사라졌어요.")

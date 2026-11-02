@@ -64,6 +64,7 @@ DEFAULT_SETTINGS = {
     "package_table": [],         # 패키지 결과표 [{id, kind(none|candy|item), item, amount, weight, emoji, title}]
     "clear_rewards": [],         # 던전 클리어 때 추가로 주는 물품 [{id, item, amount, chance(%)}]. 재화·획득권은 /던전설정의 보상.* 항목
     "dungeon_content": {},       # 던전 콘텐츠 {monsters|bosses|gear|consumables: [...]}. 없는 항목은 기본값 (balance.py)
+    "weapon_mods": [],           # 장비 개조 레시피 [{id, weapon, item, result}] (무기·재료·결과 무기의 key). balance.clean_mods가 쓸 수 있는 것만 고른다
     "dungeon": {},               # 던전 밸런스 중 관리자가 바꾼 값 {항목 이름: 숫자}. 비어 있으면 모두 기본값 (balance.py)
 }
 
@@ -118,6 +119,11 @@ def validate_settings(cfg: dict) -> None:
     check_clear_rewards(cfg["clear_rewards"])
     if not isinstance(cfg["dungeon_content"], dict):
         raise ValueError("던전 콘텐츠 설정이 올바르지 않아요.")
+    mods = cfg["weapon_mods"]
+    if not isinstance(mods, list) or len(mods) > balance_rules.MAX_MODS or any(
+            not isinstance(m, dict) or isinstance(m.get("id"), bool) or not isinstance(m.get("id"), int)
+            or any(not isinstance(m.get(k), str) for k in ("weapon", "item", "result")) for m in mods):
+        raise ValueError("장비 개조 설정이 올바르지 않아요.")
     channels = cfg["channels"]
     if not isinstance(channels, list) or len(channels) > 100 or any(isinstance(c, bool) or not isinstance(c, int) for c in channels):
         raise ValueError("이벤트 채널 목록이 올바르지 않아요.")
@@ -359,7 +365,7 @@ class Store:
         cached = self._balances.get(guild)
         if cached is None:
             cfg = self.settings(guild)
-            cached = self._balances[guild] = balance_rules.Balance.build(cfg["dungeon"], cfg["dungeon_content"])
+            cached = self._balances[guild] = balance_rules.Balance.build(cfg["dungeon"], cfg["dungeon_content"], cfg["weapon_mods"])
         return cached
 
     # ---- 지갑 ----

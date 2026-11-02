@@ -249,13 +249,13 @@ class ScreenTests(unittest.IsolatedAsyncioTestCase):
         self.bot, self.store = self.w.bot, self.w.store
         self.key = self.store.ensure_system_items(G)["key"]
         self.store.add_item(G, U, self.key, 2)
-        self.old = (cog.AUTO_DELAY, cog.AUTO_MAX_SECONDS)
-        cog.AUTO_DELAY = 0
+        self.old = (cog.AUTO_DELAY, cog.AUTO_MAX_SECONDS, cog.SECRET_FRAME_DELAY)
+        cog.AUTO_DELAY = cog.SECRET_FRAME_DELAY = 0
         out = await service.enter(self.store, self.bot.locks, G, U)
         self.rev = out.run.rev
 
     async def asyncTearDown(self):
-        cog.AUTO_DELAY, cog.AUTO_MAX_SECONDS = self.old
+        cog.AUTO_DELAY, cog.AUTO_MAX_SECONDS, cog.SECRET_FRAME_DELAY = self.old
         for task in list(self.bot.autos.values()):
             task.cancel()
         await self.w.close()

@@ -94,7 +94,7 @@ class ResumeOldRunsTests(unittest.IsolatedAsyncioTestCase):
         """옛 규칙에서는 10번째 방 보스를 이기면 클리어였다. 층이 생긴 뒤에는 2층으로 올라가고 10층에서 클리어한다."""
         run = await self.resume(BOSS_DOWN)
         self.assertEqual((run.floor, run.room, run.phase), (1, 10, "cleared"))
-        out = await service.act(self.store, self.locks, Scripted(), G, U, run.rev, "advance")
+        out = await service.act(self.store, self.locks, Scripted(randoms=[0.99]), G, U, run.rev, "advance")
         self.assertTrue(out.ok)
         self.assertIsNone(out.ended)
         self.assertEqual((out.run.floor, out.run.room), (2, 1))

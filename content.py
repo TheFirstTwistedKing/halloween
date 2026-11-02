@@ -12,9 +12,10 @@ from balance import SECTION_LABELS, SECTION_LIMITS, SECTIONS, TIER_ORDER, Balanc
 from store import Store, valid_emoji
 
 # 구역별로 /던전설정 숫자 항목의 이름표(구역을 직접 편집하면 그 숫자는 쓰이지 않으므로 같이 정리한다)
-LEGACY_PREFIX = {"monsters": "몬스터.", "bosses": "보스.", "gear": "장비.", "consumables": "아이템."}
+LEGACY_PREFIX = {"monsters": "몬스터.", "bosses": "보스.", "gear": "장비.", "consumables": "아이템.", "secrets": "시크릿보스."}
 # 같은 이름이 겹치면 안 되는 범위(몬스터와 보스는 같은 이름을 쓰면 헷갈린다)
-NAME_SCOPE = {"monsters": ("monsters", "bosses"), "bosses": ("monsters", "bosses"), "gear": ("gear",), "consumables": ("consumables",)}
+NAME_SCOPE = {"monsters": ("monsters", "bosses", "secrets"), "bosses": ("monsters", "bosses", "secrets"), "secrets": ("monsters", "bosses", "secrets"),
+              "gear": ("gear",), "consumables": ("consumables",)}
 
 
 class ContentError(Exception):
@@ -48,6 +49,17 @@ def _commit(store: Store, guild: int, section: str, items: list[dict]) -> None:
     store.update_settings(guild, dungeon_content=content, dungeon=overrides)
 
 
+def _check_secret_refs(store: Store, guild: int, section: str, entity) -> None:
+    """시크릿 보스가 떨어뜨릴 장비·아이템이 지금 실제로 있는지 본다."""
+    if section != "secrets":
+        return
+    bal = store.balance(guild)
+    if entity.drop_gear and entity.drop_gear not in bal.gear_by_key:
+        raise ContentError("드롭 장비가 없어요. 이름은 자동완성에서 골라 주세요.")
+    if entity.drop_item and entity.drop_item not in bal.item_by_key:
+        raise ContentError("드롭 아이템이 없어요. 이름은 자동완성에서 골라 주세요.")
+
+
 def _check(section: str, data: dict):
     entity, problem = check_entity(section, data)
     if problem:
@@ -76,6 +88,7 @@ def add(store: Store, guild: int, section: str, data: dict):
     while key in keys:
         key = "x" + secrets.token_hex(3)
     entity = _check(section, {**data, "key": key})
+    _check_secret_refs(store, guild, section, entity)
     _commit(store, guild, section, items + [entity_dict(entity)])
     return getattr(store.balance(guild), section)[-1]
 
@@ -86,7 +99,7 @@ def edit(store: Store, guild: int, sections, name: str, changes: dict):
     if hit is None:
         raise ContentError("그런 항목이 없어요. 이름은 자동완성에서 골라 주세요.")
     section, data = hit
-    changes = {k: v for k, v in changes.items() if v is not None or k in ("dodge", "guard", "reflect", "guard_chance", "modify")}
+    changes = {k: v for k, v in changes.items() if v is not None or k in ("dodge", "guard", "reflect", "guard_chance", "modify", "drop_gear", "drop_item")}
     if not changes:
         raise ContentError("바꿀 내용을 하나 이상 적어 주세요.")
     new = {**data, **changes}
@@ -94,6 +107,7 @@ def edit(store: Store, guild: int, sections, name: str, changes: dict):
         new["name"] = str(new["name"]).strip()
         _unique_name(store, guild, section, new["name"], ignore_key=data["key"])
     entity = _check(section, new)
+    _check_secret_refs(store, guild, section, entity)
     if section == "consumables" and not entity.material and any(m["item"] == data["key"] for m in store.settings(guild)["weapon_mods"]):
         raise ContentError(f"**{data['name']}**은(는) 장비 개조 레시피(`/장비개조 목록`)의 재료라서 개조 재료가 아니게 바꿀 수 없어요. 먼저 그 레시피를 지워 주세요.")
     items = [entity_dict(entity) if d["key"] == data["key"] else d for d in current(store, guild, section)]
@@ -118,6 +132,15 @@ def _used_by(store: Store, guild: int, section: str, data: dict) -> str:
     """이 개체를 다른 소모품이 쓰고 있다면 지울 수 없는 이유를, 아니면 빈 문자열을 돌려준다.
     (무기는 개조 소모품의 목표로, 소모품은 다른 소모품의 '획득/사용' 조건으로 쓰일 수 있다.)"""
     mods = store.settings(guild)["weapon_mods"]
+    if section in ("gear", "consumables"):
+        # 시크릿 보스는 드롭이 하나는 남아 있어야 한다: 이걸 지우면 그 보스의 마지막 드롭이 사라질 때만 막는다.
+        have_gear = {d["key"] for d in current(store, guild, "gear")} - ({data["key"]} if section == "gear" else set())
+        have_item = {d["key"] for d in current(store, guild, "consumables")} - ({data["key"]} if section == "consumables" else set())
+        field_name = "drop_gear" if section == "gear" else "drop_item"
+        boss_users = [d["name"] for d in current(store, guild, "secrets") if d.get(field_name) == data["key"]
+                      and d.get("drop_gear") not in have_gear and d.get("drop_item") not in have_item]
+        if boss_users:
+            return f"**{data['name']}**은(는) 시크릿 보스 {', '.join(boss_users[:3])}의 마지막 드롭이라서 지울 수 없어요. 먼저 그 시크릿 보스의 다른 드롭을 정하거나 보스를 지워 주세요."
     if section == "gear":
         users = [d["name"] for d in current(store, guild, "consumables") if d.get("modify") == data["key"]]
         if users:
@@ -226,6 +249,18 @@ def describe(section: str, data: dict, bal=None) -> str:
     """목록에 보여줄 한 줄. bal(밸런스)을 주면 개조 목표 무기·조건의 소모품 이름까지 보여 준다."""
     entity, _ = check_entity(section, data)
     head = f"{entity.emoji} **{entity.name}**"
+    if section == "secrets":
+        gear = bal.gear_by_key.get(entity.drop_gear) if bal is not None else None
+        item = bal.item_by_key.get(entity.drop_item) if bal is not None else None
+        drops = []
+        if entity.drop_gear:
+            drops.append(f"{gear.emoji} {gear.name}" if gear else (f"{entity.drop_gear}" if bal is None else "(없어진 장비)"))
+            drops[-1] += f" {entity.drop_gear_chance:g}%"
+        if entity.drop_item:
+            drops.append((f"{item.emoji} {item.name}" if item else (f"{entity.drop_item}" if bal is None else "(없어진 아이템)"))
+                          + (f" ×{entity.drop_item_amount}" if entity.drop_item_amount > 1 else "") + f" {entity.drop_item_chance:g}%")
+        return (f"{head} — HP {entity.hp:,} · 공격 {entity.damage:,} · 등장 {entity.weight:g} · 드롭(하나는 반드시): " + " / ".join(drops)
+                + (" · 🖼️ 그림 있음" if entity.image else ""))
     if section in ("monsters", "bosses"):
         dodge = "" if section == "bosses" else f" · 회피 {entity.dodge}%"
         return f"{head} — HP {entity.hp:,} · 공격 {entity.damage:,}{dodge} · 등장 {entity.weight:g}"

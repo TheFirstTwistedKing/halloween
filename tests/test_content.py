@@ -167,6 +167,7 @@ class ContentLogicTests(ContentFixture):
             content.delete(self.store, G, ("gear",), g.name)
         with self.assertRaisesRegex(content.ContentError, "장비"):
             content.delete(self.store, G, ("gear",), balance.GEAR[-1].name)
+        content.delete(self.store, G, ("secrets",), "공허의 군주")                                  # (기본 시크릿 보스의 드롭이 남아 있으면 다른 이유로 막힌다)
         for c in list(balance.CONSUMABLES)[:-1]:
             content.delete(self.store, G, ("consumables",), c.name)
         with self.assertRaisesRegex(content.ContentError, "아이템"):
@@ -300,6 +301,7 @@ class RuntimeEffectTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((run.hp, run.items), (433, {}))
 
     def test_a_chest_only_gives_what_exists(self):
+        content.delete(self.store, G, ("secrets",), "공허의 군주")                                  # 기본 시크릿 보스의 드롭이 남아 있으면 지울 수 없다
         for g in balance.GEAR:
             if g.name != "단검":
                 content.delete(self.store, G, ("gear",), g.name)
@@ -450,7 +452,7 @@ class ContentCommandTests(unittest.IsolatedAsyncioTestCase):
         i = await self.run_cmd(ContentAdmin.dungeon_list, self.ask())
         embed, _ = sent_embed(i)
         fields = {f.name: f.value for f in embed.fields}
-        self.assertEqual(set(fields), {"몬스터 5개 ✏️", "보스 3개", "장비 8개", "소모품 6개"})
+        self.assertEqual(set(fields), {"몬스터 5개 ✏️", "보스 3개", "장비 8개", "소모품 6개", "시크릿 보스 1개"})
         self.assertIn("🐉 **드래곤**", fields["몬스터 5개 ✏️"])
         for value in fields.values():
             self.assertLessEqual(len(value), 1024)

@@ -169,7 +169,7 @@ class FullStoryTests(unittest.IsolatedAsyncioTestCase):
             data = json.loads(out.run.to_json())
             data.update(floor=dungeon.FLOORS, room=dungeon.ROOMS, phase="cleared", kind="boss")
             store.save_dungeon(G, U, json.dumps(data))
-            done = await service.act(store, locks, Scripted(randoms=[0.0], ints=[50]), G, U, out.run.rev, "advance")
+            done = await service.act(store, locks, Scripted(randoms=[0.99, 0.0], ints=[50]), G, U, out.run.rev, "advance")
             self.assertEqual((done.ended, done.reward.ticket, done.reward.tickets_total), ("clear", True, 1))
             bag = {f.name: f.value for f in bag_for(w.bot, w.member).fields}
             self.assertEqual(bag["🎟️ 히든 칭호 획득권"], "×1")

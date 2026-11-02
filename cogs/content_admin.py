@@ -21,6 +21,8 @@ WEIGHT_HELP = "상자에서 나올 비율. 소수도 돼요(예: 0.5, 0.05). 다
 SELL_HELP = "던전 안에서 팔 때 받는 재화(개당). 0이면 팔 수 없어요. 비우면 그대로(추가할 땐 등급별 기본값)"
 SELL_TARGETS = [Choice(name="장비와 소모품 모두", value="both"), Choice(name="장비만", value="gear"), Choice(name="소모품만", value="consumables")]
 COND_CHOICES = [Choice(name=COND_LABELS[k].format(v="N"), value=k) for k in COND_STATE + COND_EVENT]
+CHANCE_HELP = "그 드롭이 나올 확률(%). 소수도 돼요(기본 100). 둘 다 안 나오면 확률이 더 높은 쪽이 반드시 나와요"
+IMAGE_HELP = "등장 연출과 전투 화면에 붙일 그림 주소(http/https). 움직이는 gif 주소도 돼요."
 MATERIAL_HELP = "개조 재료로 만들까요? 재료는 효과가 없고, /장비개조 레시피에 있는 무기를 들고 쓰면 그 무기가 개조돼요"
 MODIFY_HELP = "무기 개조: 쓰면 들고 있는 무기가 이 무기로 바뀌어요(무기 이름). 회복 효과와는 함께 못 써요"
 PERMS = dict(guild_only=True, default_permissions=discord.Permissions(administrator=True))
@@ -257,6 +259,88 @@ class ContentAdmin(commands.Cog):
         needle = current.strip().lower()
         return [Choice(name=f"{d['emoji']} {d['name']}"[:100], value=d["name"]) for d in content.current(self.bot.store, interaction.guild_id, "gear")
                 if d["slot"] == "weapon" and needle in d["name"].lower()][:25]
+
+    # ---------------------------------------------------------------- 시크릿 보스
+    secret = app_commands.Group(name="시크릿보스", description="보스를 이기고 올라갈 때 가끔 열리는 11번째 방의 시크릿 보스 (관리자)", **PERMS)
+
+    def _gear_key(self, name: str, guild_id: int) -> str:
+        hit = content.find(self.bot.store, guild_id, ("gear",), name)
+        if hit is None:
+            raise content.ContentError("드롭 장비가 없어요. 이름은 자동완성에서 골라 주세요.")
+        return hit[1]["key"]
+
+    def _item_key(self, name: str, guild_id: int) -> str:
+        hit = content.find(self.bot.store, guild_id, ("consumables",), name)
+        if hit is None:
+            raise content.ContentError("드롭 아이템이 없어요. 이름은 자동완성에서 골라 주세요.")
+        return hit[1]["key"]
+
+    @secret.command(name="추가", description="시크릿 보스를 만들어요. 장비나 아이템 드롭을 하나는 정해야 해요 (관리자)")
+    @app_commands.rename(name="이름", emoji="이모지", hp="체력", damage="공격", drop_gear="드롭장비", gear_chance="장비확률", drop_item="드롭아이템",
+                         item_chance="아이템확률", amount="아이템개수", weight="등장", intro="등장문구", image="그림")
+    @app_commands.describe(drop_gear="떨어뜨릴 장비(자동완성)", gear_chance=CHANCE_HELP, drop_item="떨어뜨릴 소모품(자동완성)", item_chance=CHANCE_HELP,
+                           amount="아이템을 몇 개 떨어뜨릴까요(기본 1)", weight="시크릿 보스가 여럿일 때 나올 비율. 소수도 돼요(기본 1)",
+                           intro="등장 연출에 나올 한마디(200자까지)", image=IMAGE_HELP)
+    async def secret_add(self, interaction: discord.Interaction, name: str, emoji: str, hp: app_commands.Range[int, 1, 1000000],
+                         damage: app_commands.Range[int, 0, 100000], drop_gear: str | None = None,
+                         gear_chance: app_commands.Range[float, 0, 100] = 100, drop_item: str | None = None,
+                         item_chance: app_commands.Range[float, 0, 100] = 100, amount: app_commands.Range[int, 1, 99] = 1,
+                         weight: app_commands.Range[float, 0, 1000] = 1, intro: str = "", image: str = ""):
+        def go():
+            data = dict(name=name, emoji=emoji.strip(), hp=hp, damage=damage, drop_gear_chance=gear_chance, drop_item_chance=item_chance,
+                        drop_item_amount=amount, weight=weight, intro=intro, image=image.strip())
+            data["drop_gear"] = self._gear_key(drop_gear, interaction.guild_id) if drop_gear else None
+            data["drop_item"] = self._item_key(drop_item, interaction.guild_id) if drop_item else None
+            entity = content.add(self.bot.store, interaction.guild_id, "secrets", data)
+            return "secrets", self._entity_dict(entity)
+        await self._run(interaction, go, "➕ 시크릿 보스를 만들었어요.")
+
+    @secret.command(name="수정", description="시크릿 보스의 값을 고쳐요. 바꿀 것만 적으세요. 드롭장비·드롭아이템·등장문구·그림은 -를 적으면 지워요 (관리자)")
+    @app_commands.rename(target="대상", new_name="새이름", emoji="이모지", hp="체력", damage="공격", drop_gear="드롭장비", gear_chance="장비확률",
+                         drop_item="드롭아이템", item_chance="아이템확률", amount="아이템개수", weight="등장", intro="등장문구", image="그림")
+    @app_commands.describe(drop_gear="떨어뜨릴 장비(자동완성). -는 지움", gear_chance=CHANCE_HELP, drop_item="떨어뜨릴 소모품(자동완성). -는 지움",
+                           item_chance=CHANCE_HELP, intro="등장 연출에 나올 한마디. -는 지움", image=IMAGE_HELP + " -는 지움")
+    async def secret_edit(self, interaction: discord.Interaction, target: str, new_name: str | None = None, emoji: str | None = None,
+                          hp: app_commands.Range[int, 1, 1000000] | None = None, damage: app_commands.Range[int, 0, 100000] | None = None,
+                          drop_gear: str | None = None, gear_chance: app_commands.Range[float, 0, 100] | None = None,
+                          drop_item: str | None = None, item_chance: app_commands.Range[float, 0, 100] | None = None,
+                          amount: app_commands.Range[int, 1, 99] | None = None, weight: app_commands.Range[float, 0, 1000] | None = None,
+                          intro: str | None = None, image: str | None = None):
+        def go():
+            changes = dict(name=new_name, emoji=emoji and emoji.strip(), hp=hp, damage=damage, drop_gear_chance=gear_chance,
+                           drop_item_chance=item_chance, drop_item_amount=amount, weight=weight)
+            changes = {k: v for k, v in changes.items() if v is not None}
+            if drop_gear is not None:
+                changes["drop_gear"] = None if drop_gear.strip() == "-" else self._gear_key(drop_gear, interaction.guild_id)
+            if drop_item is not None:
+                changes["drop_item"] = None if drop_item.strip() == "-" else self._item_key(drop_item, interaction.guild_id)
+            if intro is not None:
+                changes["intro"] = "" if intro.strip() == "-" else intro
+            if image is not None:
+                changes["image"] = "" if image.strip() == "-" else image.strip()
+            section, entity = content.edit(self.bot.store, interaction.guild_id, ("secrets",), target, changes)
+            return section, self._entity_dict(entity)
+        await self._run(interaction, go, "✏️ 고쳤어요.")
+
+    @secret.command(name="삭제", description="시크릿 보스를 지워요. 모두 지우면 시크릿 방이 생기지 않아요 (관리자)")
+    @app_commands.rename(target="대상")
+    async def secret_delete(self, interaction: discord.Interaction, target: str):
+        await self._run(interaction, lambda: content.delete(self.bot.store, interaction.guild_id, ("secrets",), target), "🗑️ 지웠어요.")
+
+    @secret_edit.autocomplete("target")
+    @secret_delete.autocomplete("target")
+    async def secret_names(self, interaction: discord.Interaction, current: str):
+        return names_for(self.bot.store, interaction.guild_id, ("secrets",), current) if interaction.guild_id else []
+
+    @secret_add.autocomplete("drop_gear")
+    @secret_edit.autocomplete("drop_gear")
+    async def secret_gear_names(self, interaction: discord.Interaction, current: str):
+        return names_for(self.bot.store, interaction.guild_id, ("gear",), current) if interaction.guild_id else []
+
+    @secret_add.autocomplete("drop_item")
+    @secret_edit.autocomplete("drop_item")
+    async def secret_item_names(self, interaction: discord.Interaction, current: str):
+        return names_for(self.bot.store, interaction.guild_id, ("consumables",), current) if interaction.guild_id else []
 
     # ---------------------------------------------------------------- 장비 개조 레시피
     mod = app_commands.Group(name="장비개조", description="특정 재료를 특정 무기에 쓰면 다른 무기로 바뀌는 레시피 (관리자)", **PERMS)

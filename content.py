@@ -177,28 +177,30 @@ def mod_text(store: Store, guild: int, entry: dict) -> str:
 
 
 def add_mod(store: Store, guild: int, weapon: str, item: str, result: str) -> dict:
-    """무기에 재료를 쓰면 결과 무기로 바뀌는 레시피를 더한다. 이름은 자동완성에서 고른 것. 잘못되면 ContentError."""
+    """장비(무기나 방패)에 재료를 쓰면 결과 장비로 바뀌는 레시피를 더한다. 이름은 자동완성에서 고른 것. 무기는 무기로, 방패는 방패로만 바뀐다.
+    잘못되면 ContentError."""
     saved = mods(store, guild)
     if len(saved) >= balance.MAX_MODS:
         raise ContentError(f"개조 레시피는 {balance.MAX_MODS}개까지예요.")
     found = {}
-    for label, sections, name in (("무기", ("gear",), weapon), ("재료", ("consumables",), item), ("결과 무기", ("gear",), result)):
+    for label, sections, name in (("장비", ("gear",), weapon), ("재료", ("consumables",), item), ("결과 장비", ("gear",), result)):
         hit = find(store, guild, sections, name)
         if hit is None:
             raise ContentError(f"{label} **{name}**이(가) 없어요. 이름은 자동완성에서 골라 주세요.")
         found[label] = hit[1]
-    for label in ("무기", "결과 무기"):
-        if found[label]["slot"] != "weapon":
-            raise ContentError(f"{label}는 무기여야 해요. **{found[label]['name']}**은(는) 방패예요.")
+    kinds = {"weapon": "무기", "shield": "방패"}
+    if found["장비"]["slot"] != found["결과 장비"]["slot"]:
+        raise ContentError(f"무기는 무기로, 방패는 방패로만 개조할 수 있어요. **{found['장비']['name']}**은(는) {kinds[found['장비']['slot']]}인데 "
+                           f"**{found['결과 장비']['name']}**은(는) {kinds[found['결과 장비']['slot']]}예요.")
     if found["재료"].get("material") is not True:
         raise ContentError(f"**{found['재료']['name']}**은(는) 개조 재료가 아니에요. 재료는 `/소모품 추가`의 `재료`를 켜서 만들어요(회복 효과가 있는 소모품은 재료로 쓸 수 없어요).")
-    if found["무기"]["key"] == found["결과 무기"]["key"]:
-        raise ContentError("무기와 결과 무기가 같아요. 다른 무기로 바뀌어야 해요.")
+    if found["장비"]["key"] == found["결과 장비"]["key"]:
+        raise ContentError("장비와 결과 장비가 같아요. 다른 장비로 바뀌어야 해요.")
     for m in saved:
-        if m["weapon"] == found["무기"]["key"] and m["item"] == found["재료"]["key"]:
+        if m["weapon"] == found["장비"]["key"] and m["item"] == found["재료"]["key"]:
             raise ContentError(f"이미 같은 레시피가 있어요: {mod_text(store, guild, m)}. 먼저 `/장비개조 삭제`로 지워 주세요.")
-    entry = {"id": max([m["id"] for m in saved], default=0) + 1, "weapon": found["무기"]["key"], "item": found["재료"]["key"],
-             "result": found["결과 무기"]["key"]}
+    entry = {"id": max([m["id"] for m in saved], default=0) + 1, "weapon": found["장비"]["key"], "item": found["재료"]["key"],
+             "result": found["결과 장비"]["key"]}
     store.update_settings(guild, weapon_mods=[*saved, entry])
     return entry
 

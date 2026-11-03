@@ -7,7 +7,7 @@ balance_sim의 '체력이 60% 아래일 때만 방어' 방식을 따른다: 기�
 from __future__ import annotations
 
 from balance import Balance, Consumable, Gear
-from dungeon import Run, can_use_now
+from dungeon import Run, can_use_now, mod_target
 
 DEFEND_BELOW = 60          # HP가 최대의 이 %보다 낮으면 방어한다
 ASSUMED_DODGE = 10         # 장비 비교에 쓰는 잡몹 회피(%)
@@ -35,15 +35,28 @@ def _plain_heals(run: Run, bal: Balance) -> list[Consumable]:
     return out
 
 
+def _stronger(bal: Balance, held: Gear | None, target: Gear) -> bool:
+    """target이 held보다 강한가: 무기는 기대 공격력, 방패는 가드 점수로 비교한다."""
+    if target.slot == "weapon":
+        return _dps(bal, target) > _dps(bal, held)
+    return _shield_score(bal, target) > _shield_score(bal, held)
+
+
 def _upgrade_item(run: Run, bal: Balance) -> str | None:
-    """지금 써서 들고 있는 무기가 더 강해지는 개조 소모품(고정 개조·재료 레시피)이 있으면 그 key."""
-    held = _dps(bal, bal.gear_by_key.get(run.weapon))
+    """지금 써서 들고 있는 장비(무기·방패)가 더 강해지는 개조 소모품(고정 개조·재료 레시피)이 있으면 그 key."""
     for key in run.items:
         item = bal.item_by_key.get(key)
         if item is None or not can_use_now(run, item, bal):
             continue
-        target = bal.gear_by_key.get(bal.mod_result(run.weapon, key)) if item.material else bal.gear_by_key.get(item.modify) if item.modify else None
-        if target is not None and target.key != run.weapon and target.slot == "weapon" and _dps(bal, target) > held:
+        if item.material:
+            held, target = mod_target(run, key, bal)
+        elif item.modify:
+            held, target = bal.gear_by_key.get(run.weapon), bal.gear_by_key.get(item.modify)
+        else:
+            continue
+        if target is not None and (held is None or target.key != held.key) and target.slot in ("weapon", "shield") and _stronger(bal, held, target):
+            if item.modify and target.slot != "weapon":
+                continue
             return key
     return None
 

@@ -105,6 +105,7 @@ class SecretBoss:
     image: str = ""                    # 연출·전투 화면에 붙일 그림 주소(움직이는 gif도 돼요)
     boss: bool = True                  # 보스처럼 회피 불가
     dodge: int = 0
+    floors: tuple = ()                 # 이 시크릿 보스가 나올 수 있는 층(비어 있으면 모든 층). 보스를 이긴 그 층의 11번째 방에 나온다.
 
 
 def describe_gear(gear: Gear) -> str:
@@ -312,6 +313,49 @@ def _weight(data: dict, key: str = "weight", default=0):
     return _decimal(data, key, WEIGHT_MAX, default)
 
 
+FLOOR_MAX = 1000               # 층 번호의 한도(무한모드의 층까지 정할 수 있다)
+FLOOR_COUNT_MAX = 500          # 한 시크릿 보스에 정할 수 있는 층 개수
+
+
+def parse_floors(text: str) -> tuple[list[int] | None, str | None]:
+    """'3,5,8-10'처럼 쓴 층 목록을 정렬된 중복 없는 층 번호 목록으로. ([층...], None) 또는 (None, 이유).
+    쉼표·공백으로 나누고, 범위는 3-5 또는 3~5, '층' 글자는 무시한다. '전체'/'모두'/'-'/'all'은 모든 층([])이다."""
+    raw = str(text).strip().lower().replace("층", "")
+    if raw in ("", "-", "전체", "모두", "all", "*"):
+        return [], None
+    floors: set[int] = set()
+    for part in raw.replace("·", ",").replace(" ", ",").split(","):
+        if not part:
+            continue
+        pieces = part.replace("~", "-").split("-")
+        if not all(p.isdigit() for p in pieces) or len(pieces) > 2:
+            return None, f"'{part}'은(는) 층 번호가 아니에요. 예: 3,5,8-10"
+        low, high = int(pieces[0]), int(pieces[-1])
+        if low > high:
+            return None, f"'{part}': 범위는 작은 수부터 써 주세요. 예: 3-5"
+        if low < 1 or high > FLOOR_MAX:
+            return None, f"층은 1~{FLOOR_MAX} 사이여야 해요."
+        floors.update(range(low, high + 1))
+        if len(floors) > FLOOR_COUNT_MAX:
+            return None, f"한 번에 정할 수 있는 층은 {FLOOR_COUNT_MAX}개까지예요."
+    return sorted(floors), None
+
+
+def floors_text(floors) -> str:
+    """층 목록을 사람이 읽는 글로(이어진 층은 묶는다): [1,2,3,5,8,9] → '1~3층, 5층, 8~9층'. 비면 '모든 층'."""
+    nums = sorted(set(floors))
+    if not nums:
+        return "모든 층"
+    groups, start, prev = [], nums[0], nums[0]
+    for n in nums[1:] + [None]:
+        if n is not None and n == prev + 1:
+            prev = n
+            continue
+        groups.append(f"{start}층" if start == prev else f"{start}~{prev}층")
+        start = prev = n
+    return ", ".join(groups)
+
+
 def _check_secret(data: dict, key: str, name: str, emoji: str, numbers):
     n, problem = numbers(("hp", 1, 1000000, 1), ("damage", 0, 100000, 0), ("drop_item_amount", 1, 99, 1))
     if problem:
@@ -332,13 +376,20 @@ def _check_secret(data: dict, key: str, name: str, emoji: str, numbers):
         chances[field_name], problem = _decimal(data, field_name, 100, 100)
         if problem:
             return None, problem
+    floors = data.get("floors", ())
+    if floors is None:
+        floors = ()
+    if (not isinstance(floors, (list, tuple)) or len(floors) > FLOOR_COUNT_MAX
+            or any(isinstance(f, bool) or not isinstance(f, int) or not 1 <= f <= FLOOR_MAX for f in floors)):
+        return None, f"나올 층은 1~{FLOOR_MAX} 사이의 정수 목록이어야 해요."
+    floors = tuple(sorted(set(floors)))
     intro, image = data.get("intro", ""), data.get("image", "")
     if not isinstance(intro, str) or len(intro) > 200:
         return None, "등장 문구는 200자까지예요."
     if not isinstance(image, str) or len(image) > 300 or (image and (not image.startswith(("http://", "https://")) or any(c.isspace() for c in image))):
         return None, "그림은 공백 없는 http:// 또는 https:// 주소(300자까지)여야 해요."
     boss = SecretBoss(key, name, emoji, n["hp"], n["damage"], weight, drops["drop_gear"], chances["drop_gear_chance"], drops["drop_item"],
-                      chances["drop_item_chance"], n["drop_item_amount"], intro.strip(), image)
+                      chances["drop_item_chance"], n["drop_item_amount"], intro.strip(), image, floors=floors)
     return boss, None
 
 

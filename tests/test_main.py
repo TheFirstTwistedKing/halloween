@@ -44,7 +44,7 @@ class SetupTests(unittest.IsolatedAsyncioTestCase):
         with self.assertLogs("halloween", level="INFO") as logs:
             await bot.setup_hook()
         self.assertEqual({c.__class__.__name__ for c in bot.cogs.values()}, {"Economy", "Admin", "Shop", "Dungeon", "DungeonAdmin", "RulesAdmin", "ContentAdmin", "Alchemy"})
-        self.assertEqual(len(bot.tree.get_commands()), 39)
+        self.assertEqual(len(bot.tree.get_commands()), 40)
         self.assertEqual(bot.tree.sync.await_count, 2)
         self.assertEqual([call.kwargs["guild"].id for call in bot.tree.sync.await_args_list], [111, 222])
         self.assertIn("서버 ID 111: 슬래시 명령어 3개 등록 완료", "\n".join(logs.output))

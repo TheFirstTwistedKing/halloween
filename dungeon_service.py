@@ -178,6 +178,35 @@ async def auto_step(store: Store, locks, rng, guild_id: int, user_id: int) -> Ou
     return await act(store, locks, rng, guild_id, user_id, run.rev, action, arg, auto=True)
 
 
+async def grant_gear(store: Store, locks, guild_id: int, user_id: int, gear_key: str) -> Outcome:
+    """관리자가 진행 중인 던전의 그 사람에게 장비를 준다. 상자에서 나온 것처럼 '정하지 않은 장비'로 올라가서, 그 사람이 장착 / 예비에 넣기 / 버리기를 고른다.
+    던전에 없거나, 싸우는 중이거나, 상자를 열기 전이거나, 이미 정하지 않은 장비가 있으면 줄 수 없다(상자에서 나온 장비를 덮어쓰지 않게).
+    화면 번호가 올라가서 그 사람의 예전 화면 버튼은 지난 화면이 되고, `/던전`을 열면 새 화면이 나온다. 빠른진행 중이면 컴퓨터가 알아서 정한다."""
+    async with locks.get(guild_id, user_id):
+        data = store.dungeon_run(guild_id, user_id)
+        if data is None:
+            return Outcome(False, "그 사람은 지금 던전에 들어가 있지 않아요. 던전 안에 있는 사람에게만 장비를 줄 수 있어요.")
+        bal = store.balance(guild_id)
+        gear = bal.gear_by_key.get(gear_key)
+        if gear is None:
+            return Outcome(False, "그런 장비가 없어요. 이름은 자동완성에서 골라 주세요.")
+        run = Run.from_json(data)
+        run.hp = min(run.hp, bal.max_hp)
+        if run.in_battle:
+            return Outcome(False, "그 사람이 지금 싸우는 중이에요. 싸움이 끝난 뒤에 다시 줘 주세요.", run=run)
+        if run.phase == "chest":
+            return Outcome(False, "그 사람 앞에 아직 열지 않은 상자가 있어요. 상자를 열어 장비를 정한 뒤에 다시 줘 주세요.", run=run)
+        if run.pending_gear:
+            return Outcome(False, "그 사람에게 아직 정하지 않은 장비가 있어요. 그 장비를 장착하거나 버린 뒤에 다시 줘 주세요.", run=run)
+        run.pending_gear = gear.key
+        run.loot.append(gear.name)
+        run.events = [f"🎁 **관리자가 장비를 줬어요!**", f"{gear.emoji} **{gear.name}** ({gear.tier}) — {gear.description}",
+                      "장착할지, 예비에 넣을지, 버릴지 정해 주세요."]
+        run.bump()
+        store.save_dungeon(guild_id, user_id, run.to_json())
+        return Outcome(True, run=run)
+
+
 async def peek(store: Store, guild_id: int, user_id: int) -> Run | None:
     """진행 중인 던전을 바꾸지 않고 읽는다(판매 화면에서 돌아올 때 쓴다). 없으면 None."""
     data = store.dungeon_run(guild_id, user_id)

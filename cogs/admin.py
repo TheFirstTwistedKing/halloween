@@ -4,6 +4,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+import content
+import dungeon_service as service
 import theme
 from owner import owner_only
 from access import require_admin
@@ -282,6 +284,37 @@ class Admin(commands.Cog):
         await interaction.response.send_message(
             embed=theme.notice(f"{target.mention}의 {row['emoji']} {row['name']}이(가) {changed:+,}개 바뀌었어요. "
                                f"(지금 ×{store.qty(gid, target.id, row['id'])})"), ephemeral=False)
+
+    @app_commands.command(name="장비지급", description="진행 중인 던전에 있는 사람에게 장비를 줘요. 상자에서 나온 것처럼 장착/예비/버리기를 고르게 해요 (관리자)")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.rename(target="대상", gear="장비")
+    @app_commands.describe(target="장비를 받을 사람(지금 던전 안에 있어야 해요)", gear="줄 장비 (자동완성에서 골라요)")
+    async def give_gear(self, interaction: discord.Interaction, target: discord.Member, gear: str):
+        if not await require_admin(interaction):
+            return
+        store, gid = self.bot.store, interaction.guild_id
+        hit = content.find(store, gid, ("gear",), gear)
+        problem = self._bad_target(target) or (None if hit else "그런 장비가 없어요. 이름은 자동완성에서 골라 주세요.")
+        if problem:
+            await interaction.response.send_message(embed=theme.notice(problem, False), ephemeral=False)
+            return
+        outcome = await service.grant_gear(store, self.bot.locks, gid, target.id, hit[1]["key"])
+        if not outcome.ok:
+            await interaction.response.send_message(embed=theme.notice(outcome.text, False), ephemeral=False)
+            return
+        LOG.info("장비 지급: 관리자 %s → 대상 %s, 장비 %s (서버 %s)", interaction.user.id, target.id, hit[1]["key"], gid)
+        await interaction.response.send_message(embed=theme.notice(
+            f"🎁 {target.mention}의 던전에 {hit[1]['emoji']} **{hit[1]['name']}**을(를) 줬어요.\n"
+            "받은 사람이 `/던전`을 열어 **장착 / 예비에 넣기 / 버리기**를 정하면 돼요. (빠른진행 중이면 컴퓨터가 알아서 정해요)"), ephemeral=False)
+
+    @give_gear.autocomplete("gear")
+    async def give_gear_autocomplete(self, interaction: discord.Interaction, current: str):
+        if interaction.guild_id is None:
+            return []
+        needle = current.strip().lower()
+        return [app_commands.Choice(name=f"{d['emoji']} {d['name']} ({d['tier']})"[:100], value=d["name"])
+                for d in content.current(self.bot.store, interaction.guild_id, "gear") if needle in d["name"].lower()][:25]
 
     @give_item.autocomplete("item")
     async def give_item_autocomplete(self, interaction: discord.Interaction, current: str):

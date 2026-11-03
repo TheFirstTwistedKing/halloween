@@ -63,6 +63,8 @@ def _upgrade_item(run: Run, bal: Balance) -> str | None:
 
 def choose(run: Run, bal: Balance) -> tuple[str, str | None]:
     """지금 상태에서 컴퓨터가 할 행동 (행동 이름, 인자). 행동 이름은 dungeon_service.ACTIONS의 것이다."""
+    if run.phase == "summit":                            # 꼭대기: 컴퓨터는 위험을 늘리지 않고 클리어하고 끝낸다(무한모드는 직접 고른다).
+        return "finish", None
     if run.pending_gear:
         gear = bal.gear_by_key.get(run.pending_gear)
         if gear is None:

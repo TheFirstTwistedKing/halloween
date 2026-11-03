@@ -1065,17 +1065,31 @@ class Store:
         with self.db:
             if self.db.execute("DELETE FROM dungeons WHERE guild=? AND user=?", (guild, user)).rowcount == 0:
                 return None
-            gained = 0
-            if candy:
-                self._ensure_wallet(guild, user)
-                old = self.db.execute("SELECT candy FROM wallets WHERE guild=? AND user=?", (guild, user)).fetchone()["candy"]
-                gained = min(self.currency(guild).max, old + candy) - old
-                self.db.execute("UPDATE wallets SET candy=? WHERE guild=? AND user=?", (old + gained, guild, user))
-            for item_id, amount in items:                         # 그 사이 지워진 물품은 건너뛴다(가방에 남지 않게).
-                if self.db.execute("SELECT 1 FROM items WHERE guild=? AND id=?", (guild, item_id)).fetchone():
-                    self.db.execute("INSERT INTO inventory VALUES(?,?,?,?) ON CONFLICT(guild,user,item) DO UPDATE SET qty=qty+excluded.qty",
-                                    (guild, user, item_id, amount))
-            if tickets:
-                self.db.execute("INSERT INTO tickets VALUES(?,?,?) ON CONFLICT(guild,user) DO UPDATE SET count=count+excluded.count",
-                                (guild, user, tickets))
+            gained = self._pay_rewards(guild, user, candy, tickets, items)
+        return gained, self.tickets(guild, user)
+
+    def _pay_rewards(self, guild: int, user: int, candy: int, tickets: int, items) -> int:
+        """재화(최대 보유량까지)·획득권·물품을 준다(거래 안에서 불러야 한다). 실제로 받은 재화를 돌려준다."""
+        gained = 0
+        if candy:
+            self._ensure_wallet(guild, user)
+            old = self.db.execute("SELECT candy FROM wallets WHERE guild=? AND user=?", (guild, user)).fetchone()["candy"]
+            gained = min(self.currency(guild).max, old + candy) - old
+            self.db.execute("UPDATE wallets SET candy=? WHERE guild=? AND user=?", (old + gained, guild, user))
+        for item_id, amount in items:                         # 그 사이 지워진 물품은 건너뛴다(가방에 남지 않게).
+            if self.db.execute("SELECT 1 FROM items WHERE guild=? AND id=?", (guild, item_id)).fetchone():
+                self.db.execute("INSERT INTO inventory VALUES(?,?,?,?) ON CONFLICT(guild,user,item) DO UPDATE SET qty=qty+excluded.qty",
+                                (guild, user, item_id, amount))
+        if tickets:
+            self.db.execute("INSERT INTO tickets VALUES(?,?,?) ON CONFLICT(guild,user) DO UPDATE SET count=count+excluded.count",
+                            (guild, user, tickets))
+        return gained
+
+    def reward_in_dungeon(self, guild: int, user: int, data: str, *, candy: int = 0, tickets: int = 0, items=()) -> tuple[int, int] | None:
+        """던전은 끝내지 않고 진행 상태를 저장하면서 보상을 한 번에 준다(무한모드의 클리어 보상·층 보너스).
+        (실제로 받은 재화, 지금 가진 획득권 수)를 돌려준다. 이미 끝난 던전이면 None이고 아무것도 주지 않는다."""
+        with self.db:
+            if self.db.execute("UPDATE dungeons SET data=? WHERE guild=? AND user=?", (data, guild, user)).rowcount == 0:
+                return None
+            gained = self._pay_rewards(guild, user, candy, tickets, items)
         return gained, self.tickets(guild, user)

@@ -60,7 +60,7 @@ class ResumeOldRunsTests(unittest.IsolatedAsyncioTestCase):
         rng = rng or random.Random(4)
         for _ in range(4000):
             act = ("attack" if run.phase == "battle" else "chest" if run.phase == "chest" else "equip" if run.pending_gear
-                   else "advance" if run.can_advance else None)
+                   else "finish" if run.phase == "summit" else "advance" if run.can_advance else None)       # 꼭대기에서는 클리어를 고른다
             self.assertIsNotNone(act, run.phase)
             out = await service.act(self.store, self.locks, rng, G, U, run.rev, act)
             self.assertTrue(out.ok, out.text)

@@ -159,7 +159,7 @@ class RoomTests(unittest.TestCase):
         self.assertEqual((run.kind, run.floor), ("secret", bal.floors))
         run.phase, run.enemy = "cleared", None
         dungeon.advance(run, Scripted(), bal)
-        self.assertEqual(run.phase, "clear")
+        self.assertEqual(run.phase, "summit")                                            # 시크릿 보스를 이긴 뒤에도 꼭대기에서 클리어할지 묻는다
 
     def test_secret_bosses_are_picked_by_weight_and_scale_with_the_floor(self):
         bal = bal_with(secret(key="a", name="가", weight=0.25), secret(key="b", name="나", weight=0.75), overrides={"일반.시크릿확률": 100})

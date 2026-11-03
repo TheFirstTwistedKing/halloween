@@ -383,11 +383,12 @@ class ContentAdmin(commands.Cog):
         return names_for(self.bot.store, interaction.guild_id, ("consumables",), current) if interaction.guild_id else []
 
     # ---------------------------------------------------------------- 장비 개조 레시피
-    mod = app_commands.Group(name="장비개조", description="특정 재료를 특정 무기에 쓰면 다른 무기로 바뀌는 레시피 (관리자)", **PERMS)
+    mod = app_commands.Group(name="장비개조", description="특정 재료를 특정 장비(무기·방패)에 쓰면 다른 장비로 바뀌는 레시피 (관리자)", **PERMS)
 
-    @mod.command(name="추가", description="레시피를 만들어요: 무기를 든 채 재료를 쓰면 결과 무기로 바뀌어요 (관리자)")
-    @app_commands.rename(weapon="무기", item="재료", result="결과")
-    @app_commands.describe(weapon="개조할 무기(이 무기를 들고 있어야 해요)", item="쓸 재료(개조 재료로 만든 소모품)", result="개조된 뒤의 무기")
+    @mod.command(name="추가", description="레시피를 만들어요: 장비(무기·방패)를 든 채 재료를 쓰면 결과 장비로 바뀌어요 (관리자)")
+    @app_commands.rename(weapon="장비", item="재료", result="결과")
+    @app_commands.describe(weapon="개조할 장비(무기나 방패. 이걸 들고 있어야 해요)", item="쓸 재료(개조 재료로 만든 소모품)",
+                           result="개조된 뒤의 장비(무기는 무기로, 방패는 방패로만 돼요)")
     async def mod_add(self, interaction: discord.Interaction, weapon: str, item: str, result: str):
         if not await require_admin(interaction):
             return
@@ -398,7 +399,7 @@ class ContentAdmin(commands.Cog):
             return
         await interaction.response.send_message(embed=theme.notice(
             f"🔧 개조 레시피를 만들었어요.\n{content.mod_text(self.bot.store, interaction.guild_id, entry)}\n"
-            "플레이어가 그 무기를 든 채 던전에서 재료를 쓰면 무기가 바뀌어요."), ephemeral=False)
+            "플레이어가 그 장비를 든 채 던전에서 재료를 쓰면 장비가 바뀌어요."), ephemeral=False)
 
     @mod.command(name="삭제", description="개조 레시피를 지워요. 번호는 목록에서 골라요 (관리자)")
     @app_commands.rename(ident="레시피")
@@ -426,15 +427,16 @@ class ContentAdmin(commands.Cog):
         await send_paged(interaction, interaction.user.id, len(pages), lambda i: theme.make_embed(
             f"🔧 장비 개조 레시피 {len(saved)}개" + (f" — {i + 1}/{len(pages)}쪽" if len(pages) > 1 else ""), pages[i], color=theme.PURPLE))
 
-    def _weapon_choices(self, guild_id: int, current: str) -> list:
+    def _gear_choices(self, guild_id: int, current: str) -> list:
+        """무기·방패 모두(자동완성에서 구분되게 종류를 붙인다)."""
         needle = current.strip().lower()
-        return [Choice(name=f"{d['emoji']} {d['name']}"[:100], value=d["name"]) for d in content.current(self.bot.store, guild_id, "gear")
-                if d["slot"] == "weapon" and needle in d["name"].lower()][:25]
+        return [Choice(name=f"{d['emoji']} {d['name']} ({'무기' if d['slot'] == 'weapon' else '방패'})"[:100], value=d["name"])
+                for d in content.current(self.bot.store, guild_id, "gear") if needle in d["name"].lower()][:25]
 
     @mod_add.autocomplete("weapon")
     @mod_add.autocomplete("result")
     async def mod_weapons(self, interaction: discord.Interaction, current: str):
-        return self._weapon_choices(interaction.guild_id, current) if interaction.guild_id else []
+        return self._gear_choices(interaction.guild_id, current) if interaction.guild_id else []
 
     @mod_add.autocomplete("item")
     async def mod_materials(self, interaction: discord.Interaction, current: str):

@@ -275,7 +275,7 @@ def item_summary(item: Consumable, bal) -> str:
     if item.material:
         recipes = [(bal.gear_by_key[w], bal.gear_by_key[r]) for w, i, r in bal.mods if i == item.key]
         text = "개조 재료" + (": " + ", ".join(f"{w.name}→{r.name}" for w, r in recipes[:3]) + (" 외" if len(recipes) > 3 else "")
-                              if recipes else "(쓸 수 있는 무기가 아직 없어요)")
+                              if recipes else "(쓸 수 있는 장비가 아직 없어요)")
     elif item.modify:
         gear = bal.gear_by_key.get(item.modify)
         text = f"무기를 {gear.emoji} {gear.name}(으)로 개조" if gear else "무기 개조(목표 무기가 사라졌어요)"
@@ -622,7 +622,7 @@ class Balance:
         object.__setattr__(self, "mod_by_pair", {(w, i): r for w, i, r in self.mods})
 
     def mod_result(self, weapon_key: str | None, item_key: str) -> str | None:
-        """이 무기(맨손이면 None)를 든 채 이 재료를 쓰면 바뀌는 무기의 key. 레시피가 없으면 None."""
+        """이 장비(무기나 방패. 안 든 칸이면 None)를 든 채 이 재료를 쓰면 바뀌는 장비의 key. 레시피가 없으면 None."""
         return self.mod_by_pair.get((weapon_key, item_key))
 
     @classmethod
@@ -675,18 +675,19 @@ MAX_MODS = 50                    # 서버마다 장비 개조 레시피 수 한�
 
 
 def clean_mods(raw, gear, items) -> tuple:
-    """저장된 개조 레시피에서 쓸 수 있는 것만 ((무기, 재료, 결과), ...)로 꺼낸다. 무기·결과는 실제 무기여야 하고 서로 달라야 하며,
-    재료는 '개조 재료' 소모품이어야 한다. 같은 (무기, 재료)가 겹치면 앞의 것만 쓴다."""
+    """저장된 개조 레시피에서 쓸 수 있는 것만 ((장비, 재료, 결과), ...)로 꺼낸다. 장비·결과는 실제 있는 장비여야 하고, 서로 달라야 하며,
+    **같은 종류**(무기는 무기로, 방패는 방패로)여야 한다. 재료는 '개조 재료' 소모품이어야 한다. 같은 (장비, 재료)가 겹치면 앞의 것만 쓴다."""
     if not isinstance(raw, (list, tuple)):
         return ()
-    weapons = {g.key for g in gear if g.slot == "weapon"}
+    slot_of = {g.key: g.slot for g in gear}
     materials = {c.key for c in items if c.material}
     out, seen = [], set()
     for entry in raw[:MAX_MODS]:
         if not isinstance(entry, dict):
             continue
         weapon, item, result = entry.get("weapon"), entry.get("item"), entry.get("result")
-        if weapon in weapons and result in weapons and weapon != result and item in materials and (weapon, item) not in seen:
+        if weapon in slot_of and result in slot_of and slot_of[weapon] == slot_of[result] and weapon != result \
+                and item in materials and (weapon, item) not in seen:
             seen.add((weapon, item))
             out.append((weapon, item, result))
     return tuple(out)

@@ -353,16 +353,26 @@ def unmet_conditions(run: Run, item: Consumable, bal: Balance | None = None) -> 
 
 
 def can_use_now(run: Run, item: Consumable, bal: Balance | None = None) -> bool:
-    """지금 이 소모품을 쓸 수 있는가: 사용 조건을 전부 만족하고, 개조 재료라면 든 무기에 맞는 레시피가 있다."""
+    """지금 이 소모품을 쓸 수 있는가: 사용 조건을 전부 만족하고, 개조 재료라면 든 장비(무기·방패)에 맞는 레시피가 있다."""
     bal = bal or DEFAULT
     if unmet_conditions(run, item, bal):
         return False
-    return not item.material or bal.mod_result(run.weapon, item.key) is not None
+    return not item.material or mod_target(run, item.key, bal)[1] is not None
+
+
+def mod_target(run: Run, item_key: str, bal: Balance) -> tuple[Gear | None, Gear | None]:
+    """개조 재료를 쓰면 (지금 들고 있는 장비, 바뀔 장비). 든 무기와 든 방패 모두 이 재료의 레시피가 있으면 **무기를 먼저** 개조한다.
+    맞는 레시피가 없으면 (None, None)."""
+    for held_key in (run.weapon, run.shield):
+        result = bal.mod_result(held_key, item_key) if held_key else None
+        if result is not None:
+            return bal.gear_by_key[held_key], bal.gear_by_key[result]
+    return None, None
 
 
 def _material_hint(item: Consumable, bal: Balance) -> str:
     recipes = [bal.gear_by_key[w].name for w, i, _ in bal.mods if i == item.key]
-    return ("이 재료로 개조할 수 있는 무기: " + ", ".join(recipes[:5]) + (" 외" if len(recipes) > 5 else "")) if recipes else "아직 이 재료로 개조할 수 있는 무기가 없어요."
+    return ("이 재료로 개조할 수 있는 장비: " + ", ".join(recipes[:5]) + (" 외" if len(recipes) > 5 else "")) if recipes else "아직 이 재료로 개조할 수 있는 장비가 없어요."
 
 
 def use_consumable(run: Run, key: str, bal: Balance | None = None) -> list[str]:
@@ -379,12 +389,13 @@ def use_consumable(run: Run, key: str, bal: Balance | None = None) -> list[str]:
         names = {c.key: c.name for c in bal.consumables}
         raise DungeonError(f"지금은 {item.name}을(를) 쓸 수 없어요. 조건: " + " & ".join(condition_text(c, names) for c in unmet))
     target = None
-    if item.material:                                   # 개조 재료: 든 무기(맨손이면 None)에 맞는 레시피가 있어야 한다.
-        result = bal.mod_result(run.weapon, key)
-        if result is None:
-            held = bal.gear_by_key.get(run.weapon)
-            raise DungeonError(f"{item.name}은(는) 지금 든 무기({held.name if held else '맨손'})에는 쓸 수 없어요. {_material_hint(item, bal)}")
-        target = bal.gear_by_key[result]
+    before = None
+    if item.material:                                   # 개조 재료: 든 무기나 방패에 맞는 레시피가 있어야 한다.
+        before, target = mod_target(run, key, bal)
+        if target is None:
+            weapon, shield = bal.gear_by_key.get(run.weapon), bal.gear_by_key.get(run.shield)
+            raise DungeonError(f"{item.name}은(는) 지금 든 장비(무기: {weapon.name if weapon else '맨손'} · 방패: {shield.name if shield else '없음'})에는 "
+                               f"쓸 수 없어요. {_material_hint(item, bal)}")
     elif item.modify:
         target = bal.gear_by_key.get(item.modify)
         if target is None or target.slot != "weapon":
@@ -396,9 +407,15 @@ def use_consumable(run: Run, key: str, bal: Balance | None = None) -> list[str]:
         del run.items[key]
     run.last = [f"item_use:{key}"]                  # 조건 판정은 끝났다: 이제 직전 행동은 이 소모품을 쓴 일이다.
     if target is not None:
-        before = _weapon(run, bal)
-        run.weapon = target.key
-        events = [f"{item.emoji} **{item.name}**을(를) 사용했어요! 🔧 {before.name if before else '맨손'}이(가) "
+        if target.slot == "weapon":
+            before = before or _weapon(run, bal)
+            run.weapon = target.key
+            nothing = "맨손"
+        else:
+            before = before or _shield(run, bal)
+            run.shield = target.key
+            nothing = "맨몸 가드"
+        events = [f"{item.emoji} **{item.name}**을(를) 사용했어요! 🔧 {before.name if before else nothing}이(가) "
                   f"{target.emoji} **{target.name}**(으)로 개조됐어요. ({target.description})"]
     elif item.full:
         gained, run.hp = max(0, bal.max_hp - run.hp), max(run.hp, bal.max_hp)

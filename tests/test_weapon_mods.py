@@ -124,8 +124,8 @@ class ContentTests(unittest.TestCase):
         self.assertIsNone(self.store.balance(G).mod_result("club", "x"))
 
     def test_bad_recipes_are_refused_with_reasons(self):
-        cases = [(("없는무기", "숫돌", "단검"), "무기 **없는무기**"), (("낡은 몽둥이", "없는재료", "단검"), "재료 **없는재료**"),
-                 (("낡은 몽둥이", "숫돌", "없는무기"), "결과 무기"), (("방패", "숫돌", "단검"), "방패"), (("낡은 몽둥이", "숫돌", "방패"), "방패"),
+        cases = [(("없는무기", "숫돌", "단검"), "장비 **없는무기**"), (("낡은 몽둥이", "없는재료", "단검"), "재료 **없는재료**"),
+                 (("낡은 몽둥이", "숫돌", "없는무기"), "결과 장비"), (("방패", "숫돌", "단검"), "방패로만"), (("낡은 몽둥이", "숫돌", "방패"), "방패로만"),
                  (("낡은 몽둥이", "미약", "단검"), "개조 재료가 아니에요"), (("낡은 몽둥이", "숫돌", "낡은 몽둥이"), "같아요")]
         for args, expect in cases:
             with self.assertRaises(content.ContentError, msg=args) as ctx:
@@ -195,7 +195,7 @@ class UseTests(unittest.TestCase):
         for weapon, held in ((None, "맨손"), ("longsword", "롱소드")):
             run = dungeon.new_run(weapon=weapon, bal=bal)
             run.items = {"m": 1}
-            with self.assertRaisesRegex(DungeonError, f"든 무기\\({held}\\)에는 쓸 수 없어요") as ctx:
+            with self.assertRaisesRegex(DungeonError, f"든 장비\\(무기: {held} · 방패: 없음\\)에는 쓸 수 없어요") as ctx:
                 dungeon.use_consumable(run, "m", bal)
             self.assertIn("낡은 몽둥이", str(ctx.exception))                                      # 쓸 수 있는 무기를 알려 준다
             self.assertEqual((run.items, run.weapon, run.last), ({"m": 1}, weapon, []))
@@ -203,7 +203,7 @@ class UseTests(unittest.TestCase):
     def test_a_material_with_no_recipe_says_so(self):
         run = dungeon.new_run(weapon="club", bal=bal_with())
         run.items = {"m": 1}
-        with self.assertRaisesRegex(DungeonError, "아직 이 재료로 개조할 수 있는 무기가 없어요"):
+        with self.assertRaisesRegex(DungeonError, "아직 이 재료로 개조할 수 있는 장비가 없어요"):
             dungeon.use_consumable(run, "m", bal_with())
 
     def test_the_materials_own_conditions_still_apply(self):
@@ -344,7 +344,9 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         i = self.w.interaction(admin=True)
         weapons = [c.value for c in await self.cog.mod_weapons(i, "")]
         self.assertIn("낡은 몽둥이", weapons)
-        self.assertNotIn("방패", weapons)                                                       # 방패는 제안하지 않는다
+        self.assertIn("방패", weapons)                                                          # 방패도 개조할 수 있어서 함께 제안한다
+        labels = {c.value: c.name for c in await self.cog.mod_weapons(i, "")}
+        self.assertTrue(labels["방패"].endswith("(방패)") and labels["단검"].endswith("(무기)"))
         self.assertEqual([c.value for c in await self.cog.mod_materials(i, "")], ["숫돌"])      # 재료만
         self.assertEqual([c.value for c in await self.cog.mod_idents(i, "")], ["1"])
 
@@ -353,3 +355,144 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(next(p for p in ContentAdmin.mod_add.parameters if p.name == name).type.name, "string")
         for command in (ContentAdmin.potion_add, ContentAdmin.potion_edit):
             self.assertEqual(next(p for p in command.parameters if p.name == "material").type.name, "boolean", command.name)
+
+
+class ShieldRecipeTests(unittest.TestCase):
+    """방패도 개조한다: 방패는 방패로만(무기는 무기로만) 바뀌고, 든 무기·방패 중 맞는 레시피가 있는 쪽이 바뀐다."""
+
+    def bal(self, *recipes):
+        return bal_with(*recipes)
+
+    def test_a_shield_recipe_is_kept_but_a_mixed_one_is_not(self):
+        gear, items = balance.GEAR, (check_entity("consumables", material())[0],)
+        raw = [{"id": 1, "weapon": "wooden_shield", "item": "m", "result": "shield"},          # 방패 → 방패
+               {"id": 2, "weapon": "club", "item": "m", "result": "dagger"},                   # 무기 → 무기
+               {"id": 3, "weapon": "shield", "item": "m", "result": "dagger"},                  # 방패 → 무기: 버린다
+               {"id": 4, "weapon": "dagger", "item": "m", "result": "wooden_shield"}]          # 무기 → 방패: 버린다
+        self.assertEqual(clean_mods(raw, gear, items), (("wooden_shield", "m", "shield"), ("club", "m", "dagger")))
+
+    def test_using_the_material_upgrades_the_held_shield_and_keeps_the_weapon(self):
+        bal = self.bal(("wooden_shield", "m", "shield"))
+        run = dungeon.new_run(weapon="club", shield="wooden_shield", bal=bal)
+        run.items, run.spare_shield = {"m": 1}, "wooden_shield"
+        events = dungeon.use_consumable(run, "m", bal)
+        self.assertEqual((run.weapon, run.shield, run.items, run.spare_shield), ("club", "shield", {}, "wooden_shield"))
+        text = "\n".join(events)
+        self.assertIn("나무 방패", text)
+        self.assertIn("방패", text)
+        self.assertEqual(dungeon.guard_percent(run, bal), bal.gear_by_key["shield"].guard)
+
+    def test_one_material_can_have_a_weapon_recipe_and_a_shield_recipe(self):
+        bal = self.bal(("club", "m", "dagger"), ("wooden_shield", "m", "shield"))
+        run = dungeon.new_run(weapon="club", shield="wooden_shield", bal=bal)
+        run.items = {"m": 2}
+        dungeon.use_consumable(run, "m", bal)                                                    # 둘 다 맞으면 무기를 먼저
+        self.assertEqual((run.weapon, run.shield), ("dagger", "wooden_shield"))
+        dungeon.use_consumable(run, "m", bal)                                                    # 무기는 더 이상 맞는 레시피가 없어서 방패
+        self.assertEqual((run.weapon, run.shield), ("dagger", "shield"))
+        self.assertEqual(run.items, {})
+
+    def test_only_the_matching_slot_changes(self):
+        bal = self.bal(("wooden_shield", "m", "shield"))
+        run = dungeon.new_run(weapon="club", shield="shield", bal=bal)                          # 다른 방패를 들고 있다
+        run.items = {"m": 1}
+        with self.assertRaisesRegex(DungeonError, "방패: 방패\\)에는 쓸 수 없어요") as ctx:
+            dungeon.use_consumable(run, "m", bal)
+        self.assertIn("나무 방패", str(ctx.exception))
+        self.assertEqual(run.items, {"m": 1})
+        bare = dungeon.new_run(bal=bal)
+        bare.items = {"m": 1}
+        with self.assertRaisesRegex(DungeonError, "무기: 맨손 · 방패: 없음"):
+            dungeon.use_consumable(bare, "m", bal)
+
+    def test_the_menu_marks_a_shield_only_material_as_usable(self):
+        bal = self.bal(("wooden_shield", "m", "shield"))
+        item = bal.item_by_key["m"]
+        run = dungeon.new_run(weapon="club", shield="wooden_shield", bal=bal)
+        run.items = {"m": 1}
+        self.assertTrue(dungeon.can_use_now(run, item, bal))
+        self.assertTrue(ItemSelect(run, bal).options[0].description.startswith("✨"))
+        self.assertIn("나무 방패→방패", ItemSelect(run, bal).options[0].description)
+        run.shield = None
+        self.assertFalse(dungeon.can_use_now(run, item, bal))
+
+    def test_quick_play_upgrades_a_shield_only_when_it_gets_stronger(self):
+        import dungeon_auto
+        bal = self.bal(("wooden_shield", "m", "shield"))
+        run = dungeon.new_run(weapon="club", shield="wooden_shield", bal=bal)
+        run.phase, run.room, run.items = "cleared", 3, {"m": 1}
+        self.assertEqual(dungeon_auto.choose(run, bal), ("item", "m"))
+        worse = self.bal(("shield", "m", "wooden_shield"))
+        run = dungeon.new_run(weapon="club", shield="shield", bal=worse)
+        run.phase, run.room, run.items = "cleared", 3, {"m": 1}
+        self.assertEqual(dungeon_auto.choose(run, worse), ("advance", None))                      # 약해지는 개조는 안 한다
+
+
+class ShieldRecipeContentTests(unittest.TestCase):
+    def setUp(self):
+        self.store = Store(":memory:")
+        content.add(self.store, G, "consumables", dict(name="숫돌", emoji="🪨", tier="희귀", weight=1, material=True))
+
+    def tearDown(self):
+        self.store.close()
+
+    def test_a_shield_recipe_can_be_added_and_shows_in_the_text(self):
+        entry = content.add_mod(self.store, G, "나무 방패", "숫돌", "방패")
+        self.assertEqual((entry["weapon"], entry["result"]), ("wooden_shield", "shield"))
+        self.assertEqual(self.store.balance(G).mod_result("wooden_shield", entry["item"]), "shield")
+        self.assertIn("나무 방패", content.mod_text(self.store, G, entry))
+
+    def test_mixing_a_weapon_and_a_shield_is_refused_with_a_reason(self):
+        for args in (("낡은 몽둥이", "숫돌", "방패"), ("방패", "숫돌", "단검")):
+            with self.assertRaises(content.ContentError) as ctx:
+                content.add_mod(self.store, G, *args)
+            self.assertIn("무기는 무기로, 방패는 방패로만", str(ctx.exception))
+            self.assertRegex(str(ctx.exception), "무기인데|방패인데")
+        self.assertEqual(content.mods(self.store, G), [])
+
+    def test_a_shield_used_by_a_recipe_cannot_be_deleted(self):
+        content.add_mod(self.store, G, "나무 방패", "숫돌", "방패")
+        for name in ("나무 방패", "방패"):
+            with self.assertRaisesRegex(content.ContentError, "개조 레시피"):
+                content.delete(self.store, G, ("gear",), name)
+
+
+class ShieldRecipeCommandTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.w = World()
+        self.store = self.w.store
+        self.cog = ContentAdmin(self.w.bot)
+        self.w.channel(400)
+
+    async def asyncTearDown(self):
+        await self.w.close()
+
+    async def run_cmd(self, command, *args, **kwargs):
+        i = self.w.interaction(admin=True)
+        await command.callback(self.cog, i, *args, **kwargs)
+        embed, _ = sent_embed(i)
+        return (embed.description or "") + "".join(f.value for f in embed.fields)
+
+    async def test_add_a_shield_recipe_and_use_it_end_to_end(self):
+        await self.run_cmd(ContentAdmin.potion_add, "방패 숫돌", "🪨", Choice("희귀"), 1, material=True)
+        text = await self.run_cmd(ContentAdmin.mod_add, "나무 방패", "방패 숫돌", "방패")
+        self.assertIn("레시피를 만들었어요", text)
+        self.assertIn("그 장비를 든 채", text)
+        text = await self.run_cmd(ContentAdmin.mod_add, "나무 방패", "방패 숫돌", "단검")
+        self.assertIn("방패로만", text)
+        self.assertIn("나무 방패", await self.run_cmd(ContentAdmin.mod_list))
+        store, locks = self.store, self.w.bot.locks
+        store.add_item(G, U, store.ensure_system_items(G)["key"], 1)
+        key = next(c.key for c in store.balance(G).consumables if c.name == "방패 숫돌")
+        out = await service.enter(store, locks, G, U)
+        data = json.loads(out.run.to_json())
+        data.update(phase="cleared", room=2, weapon="club", shield="wooden_shield", items={key: 1})
+        store.save_dungeon(G, U, json.dumps(data))
+        rev = dungeon.Run.from_json(store.dungeon_run(G, U)).rev
+        done = await service.act(store, locks, Scripted(), G, U, rev, "item", key)
+        self.assertTrue(done.ok)
+        self.assertEqual((done.run.weapon, done.run.shield, done.run.items), ("club", "shield", {}))
+        self.assertEqual(dungeon.Run.from_json(store.dungeon_run(G, U)).shield, "shield")
+
+    def test_the_option_names_say_equipment_not_weapon(self):
+        self.assertEqual([p.display_name for p in ContentAdmin.mod_add.parameters], ["장비", "재료", "결과"])

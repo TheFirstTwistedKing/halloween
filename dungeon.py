@@ -11,7 +11,8 @@ from dataclasses import asdict, dataclass, field
 
 from balance import (BASE_DAMAGE, BASE_DODGE, BOSSES, CLEAR_CANDY, CONSUMABLES, DEFAULT, FLOOR_HEAL, FLOOR_SCALE, FLOORS,  # noqa: F401  (다시 내보냄)
                      GEAR, GUARD_BASE, GUARD_CHANCE, GUARD_HEAL, MAX_HP, MONSTERS, REFLECT_BASE, ROOM_PLAN, ROOMS,
-                     TICKET_CHANCE, TIER_ORDER, Balance, Consumable, EVENT_TAG, Gear, Monster, SecretBoss, condition_text, floor_scaled, reduce_damage)
+                     TICKET_CHANCE, TIER_ORDER, Balance, Consumable, EVENT_TAG, Gear, Monster, SecretBoss, condition_text, floor_scaled, monsters_for_floor,
+                     reduce_damage)
 
 GEAR_BY_KEY = {g.key: g for g in GEAR}          # 기본값 표(이름·이모지 조회용). 실제 수치는 bal에서 읽는다.
 ITEM_BY_KEY = {c.key: c for c in CONSUMABLES}
@@ -214,7 +215,7 @@ def advance(run: Run, rng, bal: Balance | None = None) -> list[str]:
         run.kind = "empty"                               # 관리자가 몬스터를 모두 지웠다면(검사를 통과한 설정이면 없는 일) 빈 방으로 둔다.
     if run.kind in ("monster", "boss"):
         table = bal.bosses if run.kind == "boss" else bal.monsters
-        monster = pick_weighted(rng, table)               # 몬스터마다 정한 '등장' 비율대로(기본은 모두 같은 확률)
+        monster = pick_weighted(rng, monsters_for_floor(table, run.floor))      # 이 층에 나올 수 있는 것 중에서 '등장' 비율대로(기본은 모두 같은 확률)
         run.enemy, run.phase = _spawn(monster, run.floor, bal), "battle"
         text = (f"👑 미니 보스의 방! **{monster.name}**이(가) 나타났어요!" if monster.boss
                 else f"⚠️ 몬스터 조우! **{monster.name}**이(가) 나타났어요!")

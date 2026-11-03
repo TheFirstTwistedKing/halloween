@@ -129,7 +129,7 @@ class DungeonAdmin(commands.Cog):
             updated.pop(key, None)                       # 기본값으로 돌아오면 기록을 지운다.
         else:
             updated[key] = new_value
-        problem = balance.validate(updated)
+        problem = balance.validate(updated, store.settings(gid)["dungeon_content"])      # 직접 만든 몬스터·장비까지 합쳐서 검사한다(층 수를 늘렸을 때 몬스터가 빈 층 등)
         if problem:
             await self._deny(interaction, problem)
             return

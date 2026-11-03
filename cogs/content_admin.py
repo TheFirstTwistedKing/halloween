@@ -125,12 +125,50 @@ class ContentAdmin(commands.Cog):
             return content.delete(self.bot.store, interaction.guild_id, ("monsters", "bosses"), target)
         await self._run(interaction, go, "🗑️ 지웠어요.")
 
+    @monster.command(name="층", description="이 몬스터·보스가 나올 층을 정해요. 여러 층은 쉼표로(3,5,8-10). 비우면 지금 설정을 봐요 (관리자)")
+    @app_commands.rename(target="대상", floors="층")
+    @app_commands.describe(target="층을 정할 몬스터나 보스", floors="나올 층: 3,5,8-10처럼 여러 층을 쉼표로, 범위는 -로. '전체'를 쓰면 모든 층. 비우면 지금 설정만 봐요")
+    async def monster_floors(self, interaction: discord.Interaction, target: str, floors: str | None = None):
+        if not await require_admin(interaction):
+            return
+        store, gid = self.bot.store, interaction.guild_id
+        hit = content.find(store, gid, ("monsters", "bosses"), target)
+        if hit is None:
+            await self._deny(interaction, "그런 몬스터·보스가 없어요. 이름은 자동완성에서 골라 주세요.")
+            return
+        section, data = hit
+        label = "보스" if section == "bosses" else "몬스터"
+        if floors is None:
+            await interaction.response.send_message(embed=theme.notice(
+                f"{data['emoji']} **{data['name']}**({label})은(는) **{balance.floors_text(data['floors'])}**에서 나와요.\n"
+                f"`/몬스터 층 대상:{data['name']} 층:3,5,8-10`처럼 바꿔요."), ephemeral=False)
+            return
+        chosen, problem = balance.parse_floors(floors)
+        if problem:
+            await self._deny(interaction, problem)
+            return
+        try:
+            _, entity = content.edit(store, gid, ("monsters", "bosses"), data["name"], {"floors": chosen})
+        except content.ContentError as exc:
+            await self._deny(interaction, str(exc))
+            return
+        bal = store.balance(gid)
+        notes = []
+        if chosen and min(chosen) > bal.floors and not bal.infinite:
+            notes.append(f"⚠️ 지금은 {bal.floors}층까지만 있고 무한모드도 꺼져 있어서(`일반.무한모드`) 이 층들에서는 나올 수 없어요.")
+        elif chosen and max(chosen) > bal.floors:
+            notes.append(f"ℹ️ {bal.floors + 1}층부터는 무한모드를 골라야 갈 수 있어요.")
+        await interaction.response.send_message(embed=theme.notice(
+            f"{entity.emoji} **{entity.name}**({label})이(가) 나올 층: **{balance.floors_text(entity.floors)}**\n"
+            "그 층에서 이 종류의 방이 나올 때, 나올 수 있는 " + label + "들 중에서 `등장` 비율로 골라요." + "".join("\n" + n for n in notes)), ephemeral=False)
+
     @monster.command(name="대량삭제", description="몬스터·보스를 여러 개 골라 한 번에 지워요 (관리자)")
     async def monster_bulk(self, interaction: discord.Interaction):
         await self._bulk(interaction, "몬스터·보스", (("monsters", "몬스터"), ("bosses", "보스")))
 
     @monster_edit.autocomplete("target")
     @monster_delete.autocomplete("target")
+    @monster_floors.autocomplete("target")
     async def monster_names(self, interaction: discord.Interaction, current: str):
         return names_for(self.bot.store, interaction.guild_id, ("monsters", "bosses"), current) if interaction.guild_id else []
 

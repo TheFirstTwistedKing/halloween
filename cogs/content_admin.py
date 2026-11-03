@@ -9,6 +9,7 @@ import content
 import theme
 from access import require_admin
 import balance
+from bulk import BulkEntry, send_bulk
 from balance import (COND_EVENT, COND_ITEM, COND_LABELS, COND_STATE, MAX_CONDITIONS, SECTION_LABELS, SECTIONS, SELL_MAX, TIER_ORDER,
                      condition_text)
 from confirm import Confirm
@@ -65,6 +66,24 @@ class ContentAdmin(commands.Cog):
             return
         await self._done(interaction, head, section, data)
 
+    async def _bulk(self, interaction, noun: str, sections) -> None:
+        """던전 콘텐츠(몬스터·장비·소모품·시크릿 보스)를 여러 개 골라 지우는 화면. sections = ((구역, 종류 표시), ...)."""
+        if not await require_admin(interaction):
+            return
+        store, gid = self.bot.store, interaction.guild_id
+        entries = []
+        for section, kind in sections:
+            for d in content.current(store, gid, section):
+                entries.append(BulkEntry(f"{section}:{d['name']}", d["name"] + (f" ({kind})" if kind else ""), d.get("emoji"),
+                                         content.describe(section, d, store.balance(gid)).split(" — ", 1)[-1][:100]))
+        names = {section for section, _ in sections}
+
+        def delete(value: str) -> str:
+            section, name = value.split(":", 1)
+            content.delete(store, gid, (section,), name)
+            return ""
+        await send_bulk(interaction, noun, entries, delete, (content.ContentError,))
+
     def _entity_dict(self, entity) -> dict:
         from balance import entity_dict
         return entity_dict(entity)
@@ -105,6 +124,10 @@ class ContentAdmin(commands.Cog):
         def go():
             return content.delete(self.bot.store, interaction.guild_id, ("monsters", "bosses"), target)
         await self._run(interaction, go, "🗑️ 지웠어요.")
+
+    @monster.command(name="대량삭제", description="몬스터·보스를 여러 개 골라 한 번에 지워요 (관리자)")
+    async def monster_bulk(self, interaction: discord.Interaction):
+        await self._bulk(interaction, "몬스터·보스", (("monsters", "몬스터"), ("bosses", "보스")))
 
     @monster_edit.autocomplete("target")
     @monster_delete.autocomplete("target")
@@ -166,6 +189,10 @@ class ContentAdmin(commands.Cog):
     @app_commands.rename(target="대상")
     async def gear_delete(self, interaction: discord.Interaction, target: str):
         await self._run(interaction, lambda: content.delete(self.bot.store, interaction.guild_id, ("gear",), target), "🗑️ 지웠어요.")
+
+    @gear.command(name="대량삭제", description="장비를 여러 개 골라 한 번에 지워요 (관리자)")
+    async def gear_bulk(self, interaction: discord.Interaction):
+        await self._bulk(interaction, "장비", (("gear", ""),))
 
     @gear_edit.autocomplete("target")
     @gear_delete.autocomplete("target")
@@ -240,6 +267,10 @@ class ContentAdmin(commands.Cog):
     @app_commands.rename(target="대상")
     async def potion_delete(self, interaction: discord.Interaction, target: str):
         await self._run(interaction, lambda: content.delete(self.bot.store, interaction.guild_id, ("consumables",), target), "🗑️ 지웠어요.")
+
+    @potion.command(name="대량삭제", description="소모품을 여러 개 골라 한 번에 지워요 (관리자)")
+    async def potion_bulk(self, interaction: discord.Interaction):
+        await self._bulk(interaction, "소모품", (("consumables", ""),))
 
     @potion_edit.autocomplete("target")
     @potion_delete.autocomplete("target")
@@ -411,6 +442,10 @@ class ContentAdmin(commands.Cog):
     async def secret_names(self, interaction: discord.Interaction, current: str):
         return names_for(self.bot.store, interaction.guild_id, ("secrets",), current) if interaction.guild_id else []
 
+    @secret.command(name="대량삭제", description="시크릿 보스를 여러 개 골라 한 번에 지워요 (관리자)")
+    async def secret_bulk(self, interaction: discord.Interaction):
+        await self._bulk(interaction, "시크릿 보스", (("secrets", ""),))
+
     @secret_add.autocomplete("drop_gear")
     @secret_edit.autocomplete("drop_gear")
     async def secret_gear_names(self, interaction: discord.Interaction, current: str):
@@ -471,6 +506,14 @@ class ContentAdmin(commands.Cog):
         needle = current.strip().lower()
         return [Choice(name=f"{d['emoji']} {d['name']} ({'무기' if d['slot'] == 'weapon' else '방패'})"[:100], value=d["name"])
                 for d in content.current(self.bot.store, guild_id, "gear") if needle in d["name"].lower()][:25]
+
+    @mod.command(name="대량삭제", description="개조 레시피를 여러 개 골라 한 번에 지워요 (관리자)")
+    async def mod_bulk(self, interaction: discord.Interaction):
+        if not await require_admin(interaction):
+            return
+        store, gid = self.bot.store, interaction.guild_id
+        entries = [BulkEntry(str(m["id"]), f"{m['id']}. {content.mod_text(store, gid, m)}") for m in content.mods(store, gid)]
+        await send_bulk(interaction, "개조 레시피", entries, lambda ident: (content.delete_mod(store, gid, ident), "")[1], (content.ContentError,))
 
     @mod_add.autocomplete("weapon")
     @mod_add.autocomplete("result")

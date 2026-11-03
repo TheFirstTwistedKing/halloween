@@ -10,6 +10,7 @@ from discord.ext import commands
 import theme
 from access import require_admin
 from cogs.admin import item_choices
+from bulk import BulkEntry, send_bulk
 from confirm import Confirm
 from panel import refresh_panels
 from store import (MAX_CLEAR_REWARDS, MAX_PACKAGE_ENTRIES, NEW_ITEMS, PACKAGE_CANDY, REVIVE_ITEM, StoreError, default_package_table,
@@ -18,6 +19,29 @@ from store import (MAX_CLEAR_REWARDS, MAX_PACKAGE_ENTRIES, NEW_ITEMS, PACKAGE_CA
 Choice = app_commands.Choice
 KINDS = [Choice(name="꽝 (아무것도 없음)", value="none"), Choice(name="재화", value="candy"), Choice(name="물품", value="item")]
 KIND_LABEL = {"none": "꽝", "candy": "재화", "item": "물품"}
+
+
+class RuleError(Exception):
+    """사용자에게 그대로 보여줘도 되는 규칙 위반 문장."""
+
+
+def remove_package_entry(store, gid: int, ident: str) -> None:
+    """패키지 결과 하나를 지운다. 없거나, 지우면 결과가 하나도 없게 되거나 확률이 전부 0이 되면 RuleError."""
+    table = store.package_table(gid)
+    if not any(e["id"] == ident for e in table):
+        raise RuleError("그런 결과가 없어요.")
+    rest = [e for e in table if e["id"] != ident]
+    if not rest or sum(e["weight"] for e in rest) <= 0:
+        raise RuleError("결과가 하나도 없거나 확률이 전부 0이 되면 안 돼요. 다른 결과를 먼저 더해 주세요.")
+    store.update_settings(gid, package_table=rest)
+
+
+def remove_clear_reward(store, gid: int, ident: str) -> None:
+    """클리어 보상 물품 하나를 지운다. 없으면 RuleError."""
+    rewards = store.settings(gid)["clear_rewards"]
+    if not any(r["id"] == ident for r in rewards):
+        raise RuleError("그런 보상이 없어요.")
+    store.update_settings(gid, clear_rewards=[r for r in rewards if r["id"] != ident])
 RESET_TEXT = "-"          # 이모지·이름에 이 글자를 적으면 기본값(물품·재화에서 가져오기)으로 되돌린다.
 
 
@@ -256,16 +280,23 @@ class RulesAdmin(commands.Cog):
         if not await require_admin(interaction):
             return
         store, gid = self.bot.store, interaction.guild_id
-        table = store.package_table(gid)
-        if self._find_entry(gid, ident) is None:
-            await self._deny(interaction, "그런 결과가 없어요. 자동완성에서 골라 주세요.")
+        try:
+            remove_package_entry(store, gid, ident)
+        except RuleError as exc:
+            await self._deny(interaction, str(exc) + (" 자동완성에서 골라 주세요." if "그런 결과" in str(exc) else ""))
             return
-        rest = [e for e in table if e["id"] != ident]
-        if not rest or sum(e["weight"] for e in rest) <= 0:
-            await self._deny(interaction, "결과가 하나도 없거나 확률이 전부 0이 되면 안 돼요. 다른 결과를 먼저 더해 주세요.")
-            return
-        store.update_settings(gid, package_table=rest)
         await self._show(interaction, "결과를 지웠어요.")
+
+    @package.command(name="대량삭제", description="패키지 결과를 여러 개 골라 한 번에 지워요 (관리자)")
+    async def package_bulk(self, interaction: discord.Interaction):
+        if not await require_admin(interaction):
+            return
+        store, gid = self.bot.store, interaction.guild_id
+        entries = []
+        for e in store.package_table(gid):
+            emoji, title = theme.entry_icon_title(e, store, gid)
+            entries.append(BulkEntry(e["id"], f"{title} ({KIND_LABEL[e['kind']]}, 비율 {e['weight']:g})", emoji))
+        await send_bulk(interaction, "패키지 결과", entries, lambda ident: remove_package_entry(store, gid, ident), (RuleError,))
 
     @package_edit.autocomplete("ident")
     @package_delete.autocomplete("ident")
@@ -388,11 +419,23 @@ class RulesAdmin(commands.Cog):
         if not await require_admin(interaction):
             return
         store, gid = self.bot.store, interaction.guild_id
-        if self._find_clear(gid, ident) is None:
-            await self._deny(interaction, "그런 보상이 없어요. 자동완성에서 골라 주세요.")
+        try:
+            remove_clear_reward(store, gid, ident)
+        except RuleError as exc:
+            await self._deny(interaction, str(exc) + " 자동완성에서 골라 주세요.")
             return
-        store.update_settings(gid, clear_rewards=[r for r in store.settings(gid)["clear_rewards"] if r["id"] != ident])
         await self._clear_show(interaction, "클리어 보상을 지웠어요.")
+
+    @clear.command(name="대량삭제", description="클리어 보상 물품을 여러 개 골라 한 번에 지워요 (관리자)")
+    async def clear_bulk(self, interaction: discord.Interaction):
+        if not await require_admin(interaction):
+            return
+        store, gid = self.bot.store, interaction.guild_id
+        entries = []
+        for r in store.settings(gid)["clear_rewards"]:
+            row = store.item(gid, r["item"])
+            entries.append(BulkEntry(r["id"], f"{row['name'] if row else '(지워진 물품)'} ×{r['amount']:,} ({r['chance']:g}%)", row["emoji"] if row else None))
+        await send_bulk(interaction, "클리어 보상", entries, lambda ident: remove_clear_reward(store, gid, ident), (RuleError,))
 
     @clear_edit.autocomplete("ident")
     @clear_delete.autocomplete("ident")

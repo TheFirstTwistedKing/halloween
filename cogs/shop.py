@@ -5,6 +5,7 @@ from discord.ext import commands
 import theme
 from owner import owner_only
 from access import require_admin
+from bulk import BulkEntry, send_bulk
 from cogs.admin import item_choices
 from panel import display_name, post_panel, refresh_panels
 from services import role_problem
@@ -285,6 +286,34 @@ class Shop(commands.Cog):
         await interaction.response.send_message(
             embed=theme.make_embed("🗑️ 정말 지울까요?", f"{row['emoji']} **{row['name']}**\n{warning}되돌릴 수 없어요.", color=theme.RED),
             view=ConfirmDelete(self.bot, interaction.user.id, row["id"], row["name"]), ephemeral=False)
+
+    @app_commands.command(name="물품대량삭제", description="물품을 여러 개 골라 한 번에 지워요. 가방에 있던 것도 사라져요 (관리자)")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(administrator=True)
+    async def delete_items_bulk(self, interaction: discord.Interaction):
+        if not await require_admin(interaction):
+            return
+        store, gid = self.bot.store, interaction.guild_id
+        store.ensure_defaults(gid)
+        entries = []
+        for row in store.items(gid):
+            held = store.holdings(gid, row["id"])
+            hint = " · ".join(p for p in (f"가방 {held:,}개" if held else "", "상점 진열 중" if row["buyable"] or row["sellable"] else "",
+                                          "역할 상품" if row["kind"] == "role" else "") if p)
+            entries.append(BulkEntry(str(row["id"]), display_name(interaction.guild, row), row["emoji"], hint))
+
+        def delete(item_id: str) -> str:
+            lost = store.delete_item(gid, int(item_id))
+            return f"가방 {lost:,}개도 사라짐" if lost else ""
+
+        def warn(chosen: list[BulkEntry]) -> str:
+            held = sum(store.holdings(gid, int(e.value)) for e in chosen)
+            return (f"⚠️ 사람들의 가방에 있는 이 물품들 **{held:,}개**도 함께 사라져요." if held else "") + \
+                "\n다른 설정(던전 입장·패키지 결과·클리어 보상·연금술 레시피 등)이 쓰는 물품은 건너뛰고 이유를 알려 드려요."
+
+        async def after(i: discord.Interaction):
+            await refresh_panels(self.bot, interaction.guild)
+        await send_bulk(interaction, "물품", entries, delete, (StoreError,), after=after, warn=warn)
 
     @app_commands.command(name="물품목록", description="등록된 모든 물품을 봅니다 (관리자)")
     @app_commands.guild_only()

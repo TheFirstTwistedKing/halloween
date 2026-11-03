@@ -14,6 +14,7 @@ from discord.ext import commands
 import alchemy
 import theme
 from access import require_admin
+from bulk import BulkEntry, send_bulk
 from owner import owner_only
 from panel import partial_emoji, refresh_panels
 from store import StoreError
@@ -193,6 +194,22 @@ class Alchemy(commands.Cog):
             return
         await interaction.response.send_message(embed=theme.notice(
             f"🗑️ {label(row)}의 레시피를 지웠어요. 물품과 판매가(🍬 {row['sell_price']:,})는 그대로이고, 이제 판매가를 직접 바꿀 수 있어요."), ephemeral=False)
+
+    @recipe.command(name="대량삭제", description="연금술 레시피를 여러 개 골라 한 번에 지워요. 결과물 물품은 그대로예요 (관리자)")
+    async def recipe_bulk(self, interaction: discord.Interaction):
+        if not await require_admin(interaction):
+            return
+        store, gid = self.bot.store, interaction.guild_id
+        entries = []
+        for r in store.recipes(gid):
+            row = store.item(gid, r["result"])
+            entries.append(BulkEntry(str(r["result"]), recipe_line(store, gid, r), row["emoji"] if row else None))
+
+        def delete(result_id: str) -> str:
+            if not store.delete_recipe(gid, int(result_id)):
+                raise StoreError("그 레시피가 이미 없어요.")
+            return "물품과 판매가는 그대로"
+        await send_bulk(interaction, "연금술 레시피", entries, delete, (StoreError,))
 
     # ---------------------------------------------------------------- 자동완성
     def _items(self, interaction, current, keep):

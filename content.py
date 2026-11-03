@@ -265,7 +265,8 @@ def describe(section: str, data: dict, bal=None) -> str:
                 f" · 드롭(하나는 반드시): " + " / ".join(drops) + (" · 🖼️ 그림 있음" if entity.image else ""))
     if section in ("monsters", "bosses"):
         dodge = "" if section == "bosses" else f" · 회피 {entity.dodge}%"
-        return f"{head} — HP {entity.hp:,} · 공격 {entity.damage:,}{dodge} · 등장 {entity.weight:g}"
+        where = f" · 나오는 층 {balance.floors_text(entity.floors)}" if entity.floors else ""
+        return f"{head} — HP {entity.hp:,} · 공격 {entity.damage:,}{dodge} · 등장 {entity.weight:g}{where}"
     sell = f"판매 {entity.sell_price:,}" if entity.sell_price else "판매 불가"
     text = balance.item_summary(entity, bal) if bal is not None and section == "consumables" else entity.description
     return f"{head} ({entity.tier}) — {text} · 등장 {entity.weight:g} · {sell}"

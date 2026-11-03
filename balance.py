@@ -85,6 +85,7 @@ class Monster:
     dodge: int = BASE_DODGE      # 보스는 0 — 회피 불가
     boss: bool = False
     weight: float = 1            # 같은 방 종류(잡몹끼리, 보스끼리)에서 나올 가중치(소수 가능). 기본은 모두 1 = 같은 확률
+    floors: tuple = ()           # 이 몬스터가 나올 수 있는 층(비어 있으면 모든 층)
 
 
 @dataclass(frozen=True)
@@ -356,6 +357,24 @@ def floors_text(floors) -> str:
     return ", ".join(groups)
 
 
+def _check_floors(data: dict):
+    """나올 층 목록(몬스터·보스·시크릿 보스 공통). (정렬·중복 없는 튜플, None) 또는 (None, 이유). 없으면 모든 층()."""
+    floors = data.get("floors", ())
+    if floors is None:
+        floors = ()
+    if (not isinstance(floors, (list, tuple)) or len(floors) > FLOOR_COUNT_MAX
+            or any(isinstance(f, bool) or not isinstance(f, int) or not 1 <= f <= FLOOR_MAX for f in floors)):
+        return None, f"나올 층은 1~{FLOOR_MAX} 사이의 정수 목록이어야 해요."
+    return tuple(sorted(set(floors))), None
+
+
+def monsters_for_floor(table, floor: int) -> list:
+    """이 층에 나올 수 있는 몬스터·보스(층 제한이 없거나 이 층이 들어 있는 것, 등장 비율 0은 뺀다).
+    하나도 없으면(무한모드의 높은 층 등) 층 제한을 무시하고 비율이 0이 아닌 모두에서 고른다."""
+    here = [m for m in table if m.weight > 0 and (not m.floors or floor in m.floors)]
+    return here or [m for m in table if m.weight > 0] or list(table)
+
+
 def _check_secret(data: dict, key: str, name: str, emoji: str, numbers):
     n, problem = numbers(("hp", 1, 1000000, 1), ("damage", 0, 100000, 0), ("drop_item_amount", 1, 99, 1))
     if problem:
@@ -376,13 +395,9 @@ def _check_secret(data: dict, key: str, name: str, emoji: str, numbers):
         chances[field_name], problem = _decimal(data, field_name, 100, 100)
         if problem:
             return None, problem
-    floors = data.get("floors", ())
-    if floors is None:
-        floors = ()
-    if (not isinstance(floors, (list, tuple)) or len(floors) > FLOOR_COUNT_MAX
-            or any(isinstance(f, bool) or not isinstance(f, int) or not 1 <= f <= FLOOR_MAX for f in floors)):
-        return None, f"나올 층은 1~{FLOOR_MAX} 사이의 정수 목록이어야 해요."
-    floors = tuple(sorted(set(floors)))
+    floors, problem = _check_floors(data)
+    if problem:
+        return None, problem
     intro, image = data.get("intro", ""), data.get("image", "")
     if not isinstance(intro, str) or len(intro) > 200:
         return None, "등장 문구는 200자까지예요."
@@ -424,7 +439,10 @@ def check_entity(section: str, data) -> tuple[object | None, str | None]:
         weight, problem = _weight(data, default=1)             # 예전에 저장된 몬스터에는 등장 값이 없어서 기본 1(같은 확률)로 본다
         if problem:
             return None, problem
-        return Monster(key, name, emoji, n["hp"], n["damage"], 0 if boss else n["dodge"], boss, weight), None
+        floors, problem = _check_floors(data)                  # 예전에 저장된 몬스터에는 층 제한이 없어서 모든 층
+        if problem:
+            return None, problem
+        return Monster(key, name, emoji, n["hp"], n["damage"], 0 if boss else n["dodge"], boss, weight, floors), None
     tier = data.get("tier", "일반")
     if tier not in TIER_ORDER:
         return None, "등급은 일반·희귀·전설 중 하나여야 해요."
@@ -770,6 +788,11 @@ def validate(overrides: dict, content=None) -> str | None:
         if not table:
             return f"{room}번째 방의 상자·빈방·잡몹·보스 가중치가 모두 0이에요. 하나는 0보다 커야 해요."
     kinds = {kind for table in bal.room_plan for kind, _ in table}
+    for floor in range(1, bal.floors + 1):                      # 층마다 나올 몬스터(보스)가 있어야 한다(층 제한 때문에 비는 층이 없게)
+        if "monster" in kinds and bal.monsters and not any(m.weight > 0 and (not m.floors or floor in m.floors) for m in bal.monsters):
+            return f"{floor}층에 나올 수 있는 몬스터가 하나도 없어요. 그 층에 나올 몬스터(등장 비율이 0보다 크고, 층 제한이 없거나 그 층이 들어 있는 것)를 하나 이상 남겨 주세요."
+        if "boss" in kinds and bal.bosses and not any(m.weight > 0 and (not m.floors or floor in m.floors) for m in bal.bosses):
+            return f"{floor}층에 나올 수 있는 보스가 하나도 없어요. 그 층에 나올 보스(등장 비율이 0보다 크고, 층 제한이 없거나 그 층이 들어 있는 것)를 하나 이상 남겨 주세요."
     if "monster" in kinds and not bal.monsters:
         return "잡몹이 나오는 방이 있는데 잡몹이 하나도 없어요. 몬스터를 추가하거나 방 배치에서 잡몹 가중치를 0으로 해 주세요."
     if "monster" in kinds and sum(m.weight for m in bal.monsters) <= 0:

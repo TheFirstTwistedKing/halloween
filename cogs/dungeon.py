@@ -13,6 +13,7 @@ import dungeon
 import dungeon_service as service
 import theme
 from owner import owner_only
+from paging import chunks, split_pages
 from balance import DEFAULT, item_summary
 from dungeon import ROOMS, Run
 
@@ -68,7 +69,9 @@ def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=No
         held = [f"{bal.item_by_key[k].emoji} {bal.item_by_key[k].name} ×{n}" + _ready_mark(run, bal.item_by_key[k], bal)
                 for k, n in run.items.items() if k in bal.item_by_key]
         if held:                                          # 관리자가 지운 아이템만 남았다면 칸 자체를 숨긴다(빈 칸은 디스코드가 거절한다).
-            embed.add_field(name="🧪 소지품", value="\n".join(held), inline=False)
+            shown = split_pages(held, 1000)[0].split("\n")   # 칸 하나는 1024자까지라서, 넘치면 앞쪽만 보이고 나머지 수를 알려 준다.
+            more = len(held) - len(shown)
+            embed.add_field(name="🧪 소지품", value="\n".join(shown) + (f"\n… 외 {more}종 (아이템 메뉴에서 ◀ ▶로 넘겨 보세요)" if more else ""), inline=False)
         if run.regen_turns:
             embed.add_field(name="👻 회복 중", value=f"턴마다 HP +{run.regen_amount} (남은 {run.regen_turns}턴)", inline=False)
     reward = outcome.reward if outcome else None
@@ -119,7 +122,7 @@ async def play_secret_intro(interaction: discord.Interaction, enemy: dict, *, fi
 class DungeonView(discord.ui.View):
     """한 화면(rev)에 붙는 버튼들. 눌린 뒤의 화면은 새 View로 바뀐다. 봇이 꺼지면 사라지지만 /던전으로 이어서 할 수 있다."""
 
-    def __init__(self, client, user_id: int, run: Run, bal=None):
+    def __init__(self, client, user_id: int, run: Run, bal=None, item_page: int = 0):
         super().__init__(timeout=900)
         self.client, self.user_id, self.rev = client, user_id, run.rev
         bal = bal or DEFAULT
@@ -145,10 +148,30 @@ class DungeonView(discord.ui.View):
         if not run.in_battle and (run.weapon or run.shield or run.spare_weapon or run.spare_shield):
             self._button("장비", "🎒", "open_equip", discord.ButtonStyle.secondary)
         if not run.pending_gear and any(k in bal.item_by_key for k in run.items):
-            self.add_item(ItemSelect(run, bal))
+            pages = max(1, len(chunks([k for k in run.items if k in bal.item_by_key], ITEM_PAGE)))
+            self.item_page = max(0, min(item_page, pages - 1))
+            self.add_item(ItemSelect(run, bal, self.item_page))
+            if pages > 1:                                    # 아이템 종류가 25개를 넘으면 ◀ ▶로 넘겨 본다(선택 메뉴는 25개까지만 담는다).
+                self._item_pager(self.item_page, pages)
         if not run.auto:
             self._button("빠른진행", "⏩", "ask_auto", discord.ButtonStyle.secondary)
         self._button("나가기", "🏃", "ask_quit", discord.ButtonStyle.secondary)
+
+    def _item_pager(self, page: int, pages: int) -> None:
+        for step, label, emoji in ((-1, "아이템 이전", "◀️"), (+1, "아이템 다음", "▶️")):
+            button = discord.ui.Button(label=f"{label} ({page + 1}/{pages})" if step > 0 else label, emoji=emoji, style=discord.ButtonStyle.secondary,
+                                       disabled=(page + step < 0 or page + step >= pages), row=2)
+
+            async def callback(interaction: discord.Interaction, step=step):
+                run = await service.peek(self.client.store, interaction.guild_id, interaction.user.id)
+                if run is None or run.rev != self.rev:
+                    await interaction.response.send_message(embed=theme.notice("지난 화면이에요. `/던전`으로 다시 열어 주세요.", False), ephemeral=True)
+                    return
+                bal = self.client.store.balance(interaction.guild_id)
+                await interaction.response.edit_message(embed=run_embed(run, None, bal, self.client.store.currency(interaction.guild_id)),
+                                                        view=DungeonView(self.client, interaction.user.id, run, bal, self.item_page + step))
+            button.callback = callback
+            self.add_item(button)
 
     def _button(self, label, emoji, action, style):
         button = discord.ui.Button(label=label, emoji=emoji, style=style)
@@ -182,13 +205,19 @@ class DungeonView(discord.ui.View):
         await respond(interaction, self.client, self.rev, action, arg)
 
 
+ITEM_PAGE = 25                 # 선택 메뉴 하나에 담을 수 있는 항목 수(디스코드 한도)
+
+
 class ItemSelect(discord.ui.Select):
-    def __init__(self, run: Run, bal):
+    def __init__(self, run: Run, bal, page: int = 0):
         items = bal.item_by_key
         options = [discord.SelectOption(label=f"{items[k].name} ×{n}", value=k, emoji=items[k].emoji,
                                         description=(_ready_mark(run, items[k], bal).strip() + " " + item_summary(items[k], bal)).strip()[:100])
                    for k, n in run.items.items() if k in items]
-        super().__init__(placeholder="🧪 아이템 사용 (전투 중엔 한 턴을 써요)", options=options[:25], row=1)
+        pages = chunks(options, ITEM_PAGE) or [[]]
+        page = max(0, min(page, len(pages) - 1))
+        holder = "🧪 아이템 사용 (전투 중엔 한 턴을 써요)" + (f" · {page + 1}/{len(pages)}쪽" if len(pages) > 1 else "")
+        super().__init__(placeholder=holder, options=pages[page], row=1)
 
     async def callback(self, interaction: discord.Interaction):
         await self.view.handle(interaction, "item", self.values[0])
@@ -391,9 +420,15 @@ async def run_auto(interaction: discord.Interaction, client, user_id: int, view)
             client.autos.pop(key, None)
 
 
-def sell_embed(run: Run, bal, cur, wallet: int, result: bool = False) -> discord.Embed:
-    """판매 화면. result=True면 방금 판 내용(run.events)을 맨 위에 보여 준다."""
-    entries = dungeon.sellable(run, bal)
+SELL_PAGE = 25                 # 판매 선택 메뉴 한 쪽에 담을 수 있는 항목 수(디스코드 한도)
+
+
+def sell_embed(run: Run, bal, cur, wallet: int, result: bool = False, page: int = 0) -> discord.Embed:
+    """판매 화면. result=True면 방금 판 내용(run.events)을 맨 위에 보여 준다. 항목이 25개를 넘으면 쪽으로 나눠 그 쪽만 보여 준다."""
+    all_entries = dungeon.sellable(run, bal)
+    pages = chunks(all_entries, SELL_PAGE) or [[]]
+    page = max(0, min(page, len(pages) - 1))
+    entries = pages[page]
     intro = ("팔 것을 고른 뒤 아래 버튼을 눌러요. 여러 개를 한꺼번에 고를 수 있어요.\n"
              "던전을 나가거나 쓰러지면 장비·소지품은 사라지니, 팔 수 있을 때 팔아 두세요.")
     embed = theme.make_embed("💰 던전 판매", "\n".join(run.events) if result and run.events else intro, color=theme.ORANGE)
@@ -403,10 +438,10 @@ def sell_embed(run: Run, bal, cur, wallet: int, result: bool = False) -> discord
             lines.append(f"{e['emoji']} **{e['name']}** ×{e['qty']:,} — 개당 {theme.money(e['price'], cur)} · 전부 {theme.money(e['price'] * e['qty'], cur)}")
         else:
             lines.append(f"{e['emoji']} **{e['name']}** ({e['tag']}) — {theme.money(e['price'], cur)}")
-    if lines:
-        embed.add_field(name="🧾 팔 수 있는 것", value="\n".join(lines)[:1000], inline=False)
-    if len(entries) > 25:
-        embed.add_field(name="ℹ️", value="목록이 길어서 앞의 25개만 고를 수 있어요. 판 뒤에 다시 열면 나머지가 보여요.", inline=False)
+    for number, part in enumerate(split_pages(lines, 1000), start=1):        # 칸 하나는 1024자까지라서 나눠 담는다.
+        embed.add_field(name="🧾 팔 수 있는 것" + (f" ({page + 1}/{len(pages)}쪽)" if len(pages) > 1 and number == 1 else ""), value=part, inline=False)
+    if len(pages) > 1:
+        embed.add_field(name="ℹ️", value=f"목록이 길어서 {len(pages)}쪽으로 나눴어요. 아래 ◀ ▶로 넘겨요. 다른 쪽에서 고른 것도 함께 팔려요.", inline=False)
     embed.add_field(name="내 재화", value=theme.money(wallet, cur), inline=False)
     return embed
 
@@ -414,18 +449,25 @@ def sell_embed(run: Run, bal, cur, wallet: int, result: bool = False) -> discord
 class SellView(discord.ui.View):
     """판매 화면: 여러 개를 골라 한꺼번에 팔 수 있다. 던전 화면과 같은 메시지에서 바뀌어 나온다."""
 
-    def __init__(self, client, user_id: int, run: Run, bal, cur):
+    def __init__(self, client, user_id: int, run: Run, bal, cur, page: int = 0, picks=()):
         super().__init__(timeout=900)
-        self.client, self.user_id, self.rev, self.picks = client, user_id, run.rev, []
-        entries = dungeon.sellable(run, bal)
+        self.client, self.user_id, self.rev = client, user_id, run.rev
+        all_entries = dungeon.sellable(run, bal)
+        pages = chunks(all_entries, SELL_PAGE) or [[]]
+        self.page, self.pages = max(0, min(page, len(pages) - 1)), len(pages)
+        entries = pages[self.page]
+        self.page_ids = [e["id"] for e in entries]
+        known = {e["id"] for e in all_entries}
+        self.picks = [p for p in picks if p in known]               # 다른 쪽에서 고른 것도 기억한다.
         options = []
-        for e in entries[:25]:
+        for e in entries:
             if e["kind"] == "item":
                 label, hint = f"{e['name']} ×{e['qty']:,}", f"개당 {theme.plain_money(e['price'], cur)} · 전부 {theme.plain_money(e['price'] * e['qty'], cur)}"
             else:
                 label, hint = f"{e['name']} ({e['tag']})", theme.plain_money(e["price"], cur)
-            options.append(discord.SelectOption(label=label[:100], value=e["id"], emoji=e["emoji"], description=hint[:100]))
-        select = discord.ui.Select(placeholder="💰 팔 것을 골라요 (여러 개 가능)", min_values=1, max_values=len(options), options=options, row=0)
+            options.append(discord.SelectOption(label=label[:100], value=e["id"], emoji=e["emoji"], description=hint[:100], default=e["id"] in self.picks))
+        holder = "💰 팔 것을 골라요 (여러 개 가능)" + (f" · {self.page + 1}/{self.pages}쪽" if self.pages > 1 else "")
+        select = discord.ui.Select(placeholder=holder, min_values=0, max_values=max(1, len(options)), options=options, row=0)
         select.callback = self.on_select
         self.add_item(select)
         self._button("선택한 것 판매", "💰", self.sell_picked, discord.ButtonStyle.success)
@@ -434,17 +476,33 @@ class SellView(discord.ui.View):
         if any(e["kind"] == "item" for e in entries):
             self._button("소모품 전부", "🧺", self.sell_items, discord.ButtonStyle.primary)
         self._button("돌아가기", "↩️", self.back, discord.ButtonStyle.secondary)
+        if self.pages > 1:                                          # 25개를 넘으면 ◀ ▶로 쪽을 넘긴다.
+            self._button(f"이전 쪽", "◀️", self.turn(-1), discord.ButtonStyle.secondary, row=2, disabled=self.page <= 0)
+            self._button(f"다음 쪽 ({self.page + 1}/{self.pages})", "▶️", self.turn(+1), discord.ButtonStyle.secondary, row=2,
+                         disabled=self.page >= self.pages - 1)
 
-    def _button(self, label, emoji, callback, style):
-        button = discord.ui.Button(label=label, emoji=emoji, style=style, row=1)
+    def _button(self, label, emoji, callback, style, row=1, disabled=False):
+        button = discord.ui.Button(label=label, emoji=emoji, style=style, row=row, disabled=disabled)
         button.callback = callback
         self.add_item(button)
+
+    def turn(self, step: int):
+        async def callback(interaction: discord.Interaction):
+            run = await service.peek(self.client.store, interaction.guild_id, interaction.user.id)
+            if run is None or run.rev != self.rev:
+                await interaction.response.send_message(embed=theme.notice("지난 화면이에요. `/던전`으로 다시 열어 주세요.", False), ephemeral=True)
+                return
+            bal, cur = self.client.store.balance(interaction.guild_id), self.client.store.currency(interaction.guild_id)
+            await interaction.response.edit_message(
+                embed=sell_embed(run, bal, cur, self.client.store.wallet(interaction.guild_id, interaction.user.id), page=self.page + step),
+                view=SellView(self.client, self.user_id, run, bal, cur, self.page + step, self.picks))
+        return callback
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return await owner_only(interaction, self.user_id)
 
     async def on_select(self, interaction: discord.Interaction):
-        self.picks = list(interaction.data.get("values", []))
+        self.picks = [p for p in self.picks if p not in self.page_ids] + list(interaction.data.get("values", []))   # 이 쪽에서 고른 것만 바꾼다.
         await interaction.response.defer()
 
     async def _sell(self, interaction: discord.Interaction, mode: str):

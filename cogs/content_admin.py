@@ -12,6 +12,7 @@ import balance
 from balance import (COND_EVENT, COND_ITEM, COND_LABELS, COND_STATE, MAX_CONDITIONS, SECTION_LABELS, SECTIONS, SELL_MAX, TIER_ORDER,
                      condition_text)
 from confirm import Confirm
+from paging import send_paged, split_pages
 
 Choice = app_commands.Choice
 TIERS = [Choice(name=t, value=t) for t in TIER_ORDER]
@@ -421,8 +422,9 @@ class ContentAdmin(commands.Cog):
         usable = {(w, i) for w, i, _ in store.balance(gid).mods}
         lines = [f"`{m['id']}` {content.mod_text(store, gid, m)}" + ("" if (m["weapon"], m["item"]) in usable else " ⚠️ 쓸 수 없음(지워지거나 바뀐 항목이 있어요)")
                  for m in saved]
-        text = "\n".join(lines) if lines else "개조 레시피가 없어요. `/소모품 추가 재료:True`로 재료를 만들고 `/장비개조 추가`로 레시피를 만들어 보세요."
-        await interaction.response.send_message(embed=theme.make_embed(f"🔧 장비 개조 레시피 {len(saved)}개", text[:3500], color=theme.PURPLE), ephemeral=False)
+        pages = split_pages(lines, 3500) or ["개조 레시피가 없어요. `/소모품 추가 재료:True`로 재료를 만들고 `/장비개조 추가`로 레시피를 만들어 보세요."]
+        await send_paged(interaction, interaction.user.id, len(pages), lambda i: theme.make_embed(
+            f"🔧 장비 개조 레시피 {len(saved)}개" + (f" — {i + 1}/{len(pages)}쪽" if len(pages) > 1 else ""), pages[i], color=theme.PURPLE))
 
     def _weapon_choices(self, guild_id: int, current: str) -> list:
         needle = current.strip().lower()
@@ -536,8 +538,9 @@ class ContentAdmin(commands.Cog):
             effect = (f" — 🔧 {target_gear.emoji} {target_gear.name}(으)로 개조" if target_gear else " — 🔧 개조(목표 무기가 사라졌어요)") if d.get("modify") else ""
             conds = "\n".join(f"　{i}. {condition_text(c, names)}" for i, c in enumerate(d["conditions"], start=1)) or "　조건 없음(언제나 사용 가능)"
             lines.append(f"{d['emoji']} **{d['name']}**{effect}\n{conds}")
-        text = "\n".join(lines) if lines else "조건이 붙은 소모품이 없어요. `/소모품조건 추가`로 붙여 보세요."
-        await interaction.response.send_message(embed=theme.make_embed("🔒 소모품 사용 조건", text[:3500], color=theme.PURPLE), ephemeral=False)
+        pages = split_pages(lines, 3500) or ["조건이 붙은 소모품이 없어요. `/소모품조건 추가`로 붙여 보세요."]
+        await send_paged(interaction, interaction.user.id, len(pages), lambda i: theme.make_embed(
+            "🔒 소모품 사용 조건" + (f" — {i + 1}/{len(pages)}쪽" if len(pages) > 1 else ""), pages[i], color=theme.PURPLE))
 
     def _consumable(self, name: str, guild_id: int) -> dict:
         hit = content.find(self.bot.store, guild_id, ("consumables",), name)
@@ -590,12 +593,38 @@ class ContentAdmin(commands.Cog):
             return
         store, gid = self.bot.store, interaction.guild_id
         custom = store.settings(gid)["dungeon_content"]
-        embed = theme.make_embed("🏚️ 던전 목록", "바꾸려면 `/몬스터` `/장비` `/소모품`. ✏️ = 직접 편집한 분류", color=theme.PURPLE)
+        intro = "바꾸려면 `/몬스터` `/장비` `/소모품` `/시크릿보스`. ✏️ = 직접 편집한 분류"
+        blocks = []                                        # (칸 이름, 내용): 한 칸은 1000자 안에서 줄 단위로 나눈다.
         for sec in ([section.value] if section else SECTIONS):
             lines = [content.describe(sec, d, store.balance(gid)) for d in content.current(store, gid, sec)]
             mark = " ✏️" if sec in custom else ""
-            embed.add_field(name=f"{SECTION_LABELS[sec]} {len(lines)}개{mark}", value="\n".join(lines)[:1000] or "없음", inline=False)
-        await interaction.response.send_message(embed=embed, ephemeral=False)
+            parts = split_pages(lines, 1000) or ["없음"]
+            for number, part in enumerate(parts, start=1):
+                tail = f" ({number}/{len(parts)})" if len(parts) > 1 else ""
+                blocks.append((f"{SECTION_LABELS[sec]} {len(lines)}개{mark}{tail}", part))
+        pages = self._pack_fields(blocks)
+
+        def build(index: int) -> discord.Embed:
+            embed = theme.make_embed("🏚️ 던전 목록" + (f" — {index + 1}/{len(pages)}쪽" if len(pages) > 1 else ""), intro, color=theme.PURPLE)
+            for name, value in pages[index]:
+                embed.add_field(name=name, value=value, inline=False)
+            return embed
+        await send_paged(interaction, interaction.user.id, len(pages), build)
+
+    @staticmethod
+    def _pack_fields(blocks, max_fields: int = 5, max_chars: int = 4200) -> list[list[tuple[str, str]]]:
+        """칸들을 한 임베드에 5칸·4200자까지 차례로 담는다(디스코드는 임베드 전체를 6000자까지만 받는다). 넘치면 다음 페이지."""
+        pages, current, size = [], [], 0
+        for name, value in blocks:
+            cost = len(name) + len(value)
+            if current and (len(current) >= max_fields or size + cost > max_chars):
+                pages.append(current)
+                current, size = [], 0
+            current.append((name, value))
+            size += cost
+        if current:
+            pages.append(current)
+        return pages or [[("없음", "없음")]]
 
     @app_commands.command(name="던전콘텐츠초기화", description="몬스터·장비·소모품을 기본 목록으로 되돌려요. 분류를 비우면 전부 (관리자)")
     @app_commands.guild_only()

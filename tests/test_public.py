@@ -42,7 +42,7 @@ class PublicByDefaultTests(unittest.TestCase):
 
     def test_only_the_dungeons_in_screen_buttons_and_the_shop_flows_and_packages_stay_private(self):
         """남아 있는 비공개 응답은 버튼·선택창을 눌렀을 때의 개인 안내(던전·연금술 화면 안), 공용 상점 패널 쪽, 패키지뿐이다."""
-        allowed = {"cogs/dungeon.py", "cogs/alchemy.py", "packages.py", "panel.py", "views.py", "owner.py"}
+        allowed = {"cogs/dungeon.py", "cogs/alchemy.py", "packages.py", "panel.py", "views.py", "owner.py", "bulk.py"}
         found = set()
         for path in list(ROOT.glob("*.py")) + list((ROOT / "cogs").glob("*.py")):
             if "ephemeral=True" in path.read_text(encoding="utf-8"):
@@ -53,7 +53,7 @@ class PublicByDefaultTests(unittest.TestCase):
     def test_every_screen_a_command_opens_is_locked_to_who_opened_it(self):
         open_to_all = {ShopPanelView, PackageView}                                   # 공용 패널과 패키지: 누구나 누른다(각자 자기 몫).
         views = []
-        for module in ("confirm", "views", "panel", "packages", "cogs.admin", "cogs.dungeon", "cogs.dungeon_admin", "cogs.shop"):
+        for module in ("confirm", "views", "panel", "packages", "paging", "bulk", "cogs.admin", "cogs.dungeon", "cogs.dungeon_admin", "cogs.shop"):
             mod = importlib.import_module(module)
             views += [cls for _, cls in inspect.getmembers(mod, inspect.isclass)
                       if issubclass(cls, discord.ui.View) and cls.__module__ == mod.__name__]

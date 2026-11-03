@@ -55,6 +55,8 @@ class Run:
     pending_gear: str | None = None                 # 상자에서 나와 아직 장착/버림을 정하지 않은 장비
     auto: bool = False                              # 빠른진행 중(컴퓨터가 알아서 진행). 켜 둔 채 봇이 꺼지면 다음에 /던전을 열 때 꺼진다.
     auto_paid: bool = False                         # 이 던전에서 빠른진행 비용(입장 물품 한 번 더)을 이미 냈다: 껐다 켜도 다시 내지 않는다.
+    infinite: bool = False                          # 무한모드 중: 마지막 층을 깬 뒤 클리어하지 않고 계속 올라가고 있다.
+    bonus: int = 0                                  # 방금 올라간 무한 층의 보너스 재화(서비스가 지급하고 0으로 되돌린다)
     last: list = field(default_factory=list)        # 바로 직전 행동에서 일어난 일(소모품 사용 조건에 쓴다): guard_success·guard_fail·attack_hit·attack_miss·item_gain:키·item_use:키
 
     def bump(self) -> None:
@@ -188,11 +190,18 @@ def advance(run: Run, rng, bal: Balance | None = None) -> list[str]:
         run.events = [f"🌌 **시크릿 방**이 열렸어요! **{boss.name}**이(가) 나타났어요!"]
         return run.events
     if run.room >= ROOMS:
-        if run.floor >= bal.floors:
+        if run.floor >= bal.floors and not run.infinite:
+            if bal.infinite:                              # 꼭대기: 클리어하고 끝낼지, 무한모드로 계속할지 묻는다(고를 때까지 이 방에서 안 움직인다).
+                run.phase, run.enemy, run.kind = "summit", None, "summit"
+                run.events = [f"🏆 **{bal.floors}층 꼭대기**에 도착했어요!", "**클리어하고 끝낼지**, **♾️ 무한모드**로 계속 올라갈지 정해 주세요.",
+                              "무한모드를 고르면 클리어 보상을 지금 받고, 쓰러져도 잃지 않아요. 층마다 보너스 재화가 나오지만 몬스터는 계속 강해져요."]
+                return run.events
             run.phase, run.enemy, run.kind = "clear", None, ""
             run.events = [f"🏆 {bal.floors}층 꼭대기에 도착했어요! 던전을 모두 돌파했어요!"]
             return run.events
         run.floor += 1
+        if run.infinite and run.floor > bal.floors:       # 무한 층에 오를 때마다 보너스(층이 높을수록 커진다)
+            run.bonus = bal.infinite_bonus + bal.infinite_step * (run.floor - bal.floors - 1)
         run.room = 0
         healed = (bal.max_hp - run.hp) * bal.floor_heal // 100
         run.hp = min(bal.max_hp, run.hp + max(0, healed))
@@ -214,6 +223,24 @@ def advance(run: Run, rng, bal: Balance | None = None) -> list[str]:
         run.phase, text = "empty", "🚪 텅 빈 방이에요. 앞으로 나아갈 수 있어요."
     run.events = [*climb, text]
     return run.events
+
+
+def take_clear(run: Run) -> list[str]:
+    """꼭대기에서 [클리어하고 끝내기]: 던전을 클리어로 끝낸다(보상은 서비스가 준다)."""
+    if run.phase != "summit":
+        raise DungeonError("지금은 고를 수 없어요. 꼭대기에 도착했을 때만 고를 수 있어요.")
+    run.phase, run.enemy, run.kind = "clear", None, ""
+    run.events = [f"🏆 던전을 모두 돌파했어요!"]
+    return run.events
+
+
+def go_infinite(run: Run, rng, bal: Balance | None = None) -> list[str]:
+    """꼭대기에서 [무한모드 계속]: 무한모드를 켜고 다음 층으로 올라간다(클리어 보상과 층 보너스는 서비스가 준다)."""
+    if run.phase != "summit":
+        raise DungeonError("지금은 고를 수 없어요. 꼭대기에 도착했을 때만 고를 수 있어요.")
+    run.infinite = True
+    events = advance(run, rng, bal)
+    return ["♾️ **무한모드**를 시작해요!", *events]
 
 
 def _enemy_attack(run: Run, reduction: int) -> list[str]:

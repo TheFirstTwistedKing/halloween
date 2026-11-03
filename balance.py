@@ -14,6 +14,9 @@ BASE_DAMAGE = 20                 # 맨손 공격력
 ROOMS = 10                       # 한 층의 방은 10개(고정). 10번째 방은 미니 보스
 FLOORS = 10                      # 올라가야 하는 층 수. 마지막 층의 보스를 이기면 클리어
 FLOOR_SCALE = 4                  # 층이 하나 오를 때마다 몬스터·보스의 체력과 공격이 1층의 몇 %씩 늘어나는지
+INFINITE = 1                      # 마지막 층을 깨면 무한모드를 할지 묻는다(1) / 묻지 않고 바로 클리어한다(0)
+INFINITE_BONUS = 30               # 무한모드에서 11층(마지막 층 다음)에 오를 때 받는 재화
+INFINITE_STEP = 10                # 그 뒤로 한 층 오를 때마다 늘어나는 보너스
 SECRET_CHANCE = 10.0               # 보스를 이기고 올라갈 때 11번째 방(시크릿 보스)이 생길 확률(%)
 REVIVE_HEAL = 50                 # 부활권으로 되살아날 때 최대 HP의 몇 %로 일어나는지
 FLOOR_HEAL = 50                  # 위 층으로 올라갈 때 잃은 HP의 몇 %를 회복하는지
@@ -501,6 +504,9 @@ def _build_params() -> dict[str, Param]:
     add("일반.층수", "일반", FLOORS, 1, 100, note="올라가야 하는 층 수(한 층은 방 10개). 마지막 층의 보스를 이기면 클리어")
     add("일반.층당강화", "일반", FLOOR_SCALE, 0, 200, note="층이 하나 오를 때마다 몬스터·보스의 체력과 공격이 1층의 몇 %씩 늘어날지(0이면 그대로)")
     add("일반.층이동회복", "일반", FLOOR_HEAL, 0, 100, note="위 층으로 올라갈 때 잃은 HP의 몇 %를 회복할지")
+    add("일반.무한모드", "일반", INFINITE, 0, 1, note="1이면 마지막 층 보스를 이기고 앞으로 갈 때 '클리어하고 끝낼지, 무한모드로 계속할지' 물어요. 0이면 묻지 않고 바로 클리어해요")
+    add("무한.층보너스", "일반", INFINITE_BONUS, 0, 99999, note="무한모드에서 마지막 층 다음 첫 층에 오를 때 받는 재화")
+    add("무한.보너스증가", "일반", INFINITE_STEP, 0, 99999, note="무한모드에서 한 층 더 오를 때마다 보너스가 늘어나는 양")
     add("일반.시크릿확률", "일반", SECRET_CHANCE, 0, 100, integer=False, note="보스를 이기고 올라갈 때 11번째 방(시크릿 보스)이 생길 확률(%). 소수 가능, 0이면 안 생겨요")
     add("일반.부활체력", "일반", REVIVE_HEAL, 1, 100, note="부활권으로 되살아날 때 최대 HP의 몇 %로 일어날지")
     add("보상.최소", "일반", CLEAR_CANDY[0], 0, 99999, note="클리어 보상 재화 최소")
@@ -597,6 +603,9 @@ class Balance:
     revive_heal: int = REVIVE_HEAL
     secrets: tuple = SECRET_BOSSES   # 시크릿 보스들
     secret_chance: float = SECRET_CHANCE
+    infinite: int = INFINITE
+    infinite_bonus: int = INFINITE_BONUS
+    infinite_step: int = INFINITE_STEP
     base_damage: int = BASE_DAMAGE
     guard_chance: int = GUARD_CHANCE
     guard_base: int = GUARD_BASE
@@ -663,7 +672,8 @@ class Balance:
                        for b in BOSSES)
         final_gear, final_items = custom.get("gear", tuple(gear)), custom.get("consumables", tuple(items))
         return cls(
-            max_hp=get("일반.최대체력"), floors=get("일반.층수"), floor_scale=get("일반.층당강화"), floor_heal=get("일반.층이동회복"), revive_heal=get("일반.부활체력"), secret_chance=get("일반.시크릿확률"), secrets=custom.get("secrets", SECRET_BOSSES),
+            max_hp=get("일반.최대체력"), floors=get("일반.층수"), floor_scale=get("일반.층당강화"), floor_heal=get("일반.층이동회복"), revive_heal=get("일반.부활체력"), secret_chance=get("일반.시크릿확률"), infinite=get("일반.무한모드"),
+            infinite_bonus=get("무한.층보너스"), infinite_step=get("무한.보너스증가"), secrets=custom.get("secrets", SECRET_BOSSES),
             base_damage=get("일반.맨손공격력"), guard_chance=get("방어.성공확률"),
             guard_base=get("방어.기본피해감소"), guard_heal=get("방어.회복률"), reflect_base=get("방어.기본반사"),
             clear_candy=(get("보상.최소"), get("보상.최대")), ticket_chance=get("보상.획득권확률"), room_plan=plan,

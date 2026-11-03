@@ -248,7 +248,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(json.loads(self.store.dungeon_run(G, U))["hp"], 400)
 
     async def test_a_changed_clear_reward_is_what_gets_paid(self):
-        self.store.update_settings(G, dungeon={"보상.최소": 777, "보상.최대": 777, "보상.획득권확률": 0})
+        self.store.update_settings(G, dungeon={"보상.최소": 777, "보상.최대": 777, "보상.획득권확률": 0, "일반.무한모드": 0})   # 묻지 않고 바로 클리어
         run = (await service.enter(self.store, self.locks, G, U)).run
         data = json.loads(run.to_json())
         data.update(floor=dungeon.FLOORS, room=dungeon.ROOMS, phase="cleared")          # 마지막 층의 보스를 막 이긴 상태

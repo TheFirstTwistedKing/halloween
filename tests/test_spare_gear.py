@@ -405,7 +405,7 @@ class FullRunTests(unittest.IsolatedAsyncioTestCase):
                         await next(c for c in equip_view.children if c.label == "돌아가기").callback(back)
                         view = back.response.edit_message.await_args.kwargs["view"]
                         continue
-                    pick = btn("앞으로") or btn("출발")
+                    pick = btn("앞으로") or btn("출발") or btn("클리어하고 끝내기")
                 inter = w.interaction()
                 await pick.callback(inter)
                 shown = inter.edit_original_response.await_args or inter.response.edit_message.await_args       # 시크릿 방 연출 뒤에는 마지막으로 고친 화면이 현재 화면이다

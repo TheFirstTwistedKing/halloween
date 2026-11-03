@@ -13,7 +13,7 @@ from dungeon import DungeonError, Run
 from store import Store, StoreError
 
 AUTO_REFUSE = "⏩ 빠른진행 중이에요. ⏹ 멈추기를 누르면 직접 진행할 수 있어요."
-ACTIONS = ("advance", "attack", "defend", "item", "chest", "equip", "stash", "swap_weapon", "swap_shield", "discard", "quit")
+ACTIONS = ("advance", "attack", "defend", "item", "chest", "equip", "stash", "swap_weapon", "swap_shield", "discard", "quit", "finish", "infinite")
 
 
 @dataclass
@@ -96,9 +96,48 @@ async def act(store: Store, locks, rng, guild_id: int, user_id: int, rev: int, a
         if run.phase == "dead" and _revive(store, guild_id, user_id, run, bal):
             return Outcome(True, run=run, notes=["revived"])
         if not run.finished and run.phase != "dead":
+            if action == "infinite" or run.bonus:
+                return _save_with_rewards(store, rng, guild_id, user_id, run, bal, clear_reward=action == "infinite")
             store.save_dungeon(guild_id, user_id, run.to_json())
             return Outcome(True, run=run)
         return _finish(store, rng, guild_id, user_id, run, bal)
+
+
+def _roll_clear(store: Store, rng, guild_id: int, bal):
+    """클리어 보상을 굴린다: (재화, 획득권이 나왔는지, [(물품 행, 개수)]). 추가 물품은 항목마다 따로 확률을 굴린다(보상이 없으면 난수를 더 뽑지 않는다)."""
+    candy, ticket = dungeon.roll_clear_reward(rng, bal)
+    given = []
+    for entry in store.settings(guild_id)["clear_rewards"]:
+        item = store.item(guild_id, entry["item"])
+        if item is not None and rng.random() * 100 < entry["chance"]:
+            given.append((item, entry["amount"]))
+    return candy, ticket, given
+
+
+def _save_with_rewards(store: Store, rng, guild_id: int, user_id: int, run: Run, bal, *, clear_reward: bool) -> Outcome:
+    """무한모드: 던전은 끝내지 않고 저장하면서 보상을 한 번에 준다 — 꼭대기에서 무한모드를 고른 순간의 클리어 보상(clear_reward)과,
+    무한 층에 오를 때의 층 보너스(run.bonus). 화면(run.events)에도 받은 내용을 적는다."""
+    cur = store.currency(guild_id)
+    room = max(0, cur.max - store.wallet(guild_id, user_id))          # 재화 최대 보유량 안에서 받을 수 있는 만큼(같은 계산을 저장소도 한다)
+    candy_total, ticket, given, lines = 0, False, [], []
+    if clear_reward:
+        candy, ticket, given = _roll_clear(store, rng, guild_id, bal)
+        got = min(candy, room)
+        room -= got
+        candy_total += candy
+        lines.append(f"🏆 **클리어 보상**을 받았어요! {cur.money(got)}" + (" · 🎟️ 히든 칭호 획득권 +1" if ticket else "")
+                     + "".join(f" · {item['emoji']} {item['name']} ×{amount:,}" for item, amount in given))
+    bonus, run.bonus = run.bonus, 0
+    if bonus:
+        got = min(bonus, room)
+        candy_total += bonus
+        lines.append(f"♾️ 무한 **{run.floor}층** 보너스! {cur.money(got)}")
+    run.events = [*run.events, *lines]
+    done = store.reward_in_dungeon(guild_id, user_id, run.to_json(), candy=candy_total, tickets=1 if ticket else 0,
+                                   items=[(item["id"], amount) for item, amount in given])
+    if done is None:
+        return Outcome(False, "이미 끝난 던전이에요.", stale=True)
+    return Outcome(True, run=run)
 
 
 async def sell(store: Store, locks, guild_id: int, user_id: int, rev: int, picks, mode: str = "all") -> Outcome:
@@ -249,6 +288,10 @@ def _apply(run: Run, rng, action: str, arg: str | None, guard_ok: bool | None, b
         dungeon.swap_spare(run, action.split("_", 1)[1], bal)
     elif action == "discard":
         dungeon.discard_pending(run, bal)
+    elif action == "finish":
+        dungeon.take_clear(run)
+    elif action == "infinite":
+        dungeon.go_infinite(run, rng, bal)
     elif action == "advance":
         if not run.can_advance:
             return ("먼저 상자에서 나온 장비를 장착하거나 버려 주세요." if run.pending_gear
@@ -278,13 +321,7 @@ def _revive(store: Store, guild_id: int, user_id: int, run: Run, bal) -> bool:
 def _finish(store: Store, rng, guild_id: int, user_id: int, run: Run, bal) -> Outcome:
     """던전이 끝났다. 클리어면 보상을 주고, 어느 쪽이든 진행 기록을 지운다."""
     ended = {"clear": "clear", "quit": "quit"}.get(run.phase, "dead")
-    candy, ticket = dungeon.roll_clear_reward(rng, bal) if ended == "clear" else (0, False)
-    given = []                                        # 추가 보상 물품: 항목마다 따로 확률을 굴린다(보상이 없으면 난수를 더 뽑지 않는다).
-    if ended == "clear":
-        for entry in store.settings(guild_id)["clear_rewards"]:
-            item = store.item(guild_id, entry["item"])
-            if item is not None and rng.random() * 100 < entry["chance"]:
-                given.append((item, entry["amount"]))
+    candy, ticket, given = _roll_clear(store, rng, guild_id, bal) if ended == "clear" else (0, False, [])
     done = store.end_dungeon(guild_id, user_id, candy=candy, tickets=1 if ticket else 0,
                              items=[(item["id"], amount) for item, amount in given])
     if done is None:                                  # 이미 끝난 던전(겹친 요청): 보상은 이미 나갔다.

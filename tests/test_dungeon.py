@@ -4,6 +4,7 @@ import json
 import unittest
 
 import dungeon
+from balance import Balance
 import dungeon_service as service
 from dungeon import DungeonError, Run
 from store import CANDY_MAX, Store
@@ -82,9 +83,10 @@ class RuleTests(unittest.TestCase):
         self.assertEqual((run.hp, run.items), (700, {}))
 
     def test_last_room_ends_the_dungeon(self):
-        run = dungeon.new_run()
+        bal = Balance.build({"일반.무한모드": 0})                                  # 무한모드를 묻지 않는 설정에서는 바로 클리어
+        run = dungeon.new_run(bal=bal)
         run.floor, run.room = dungeon.FLOORS, dungeon.ROOMS                     # 마지막 층의 마지막 방(보스)을 마친 상태
-        dungeon.advance(run, Scripted())
+        dungeon.advance(run, Scripted(), bal)
         self.assertEqual(run.phase, "clear")
         self.assertTrue(run.finished)
         self.assertIn("🏆", run.events[0])
@@ -301,8 +303,10 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.store.save_dungeon(G, U, json.dumps(data))
         run = dungeon.Run.from_json(json.dumps(data))
         low, _ = dungeon.CLEAR_CANDY
-        final = Scripted(randoms=[0.99, 0.0], ints=[low])               # 시크릿 방은 안 열리고(0.99), 획득권은 나오는 추첨(0.0)
-        results = await asyncio.gather(self.go(final, "advance", run.rev), self.go(Scripted(randoms=[0.99]), "advance", run.rev))
+        top = await self.go(Scripted(randoms=[0.99]), "advance", run.rev)       # 꼭대기에 도착(시크릿 방은 안 열림): 클리어할지 묻는다
+        self.assertEqual(top.run.phase, "summit")
+        final = Scripted(randoms=[0.0], ints=[low])                             # 획득권도 나오는 추첨(0.0)
+        results = await asyncio.gather(self.go(final, "finish", top.run.rev), self.go(Scripted(), "finish", top.run.rev))
         self.assertEqual(sorted(r.ok for r in results), [False, True])  # 겹친 요청 중 하나만 성공
         done = next(r for r in results if r.ok)
         self.assertEqual((done.ended, done.reward.candy, done.reward.ticket, done.reward.tickets_total), ("clear", low, True, 1))

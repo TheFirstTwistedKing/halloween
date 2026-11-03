@@ -46,8 +46,12 @@ def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=No
         color, title = theme.RED, "💀 쓰러졌어요…"
     elif ended == "quit":
         color, title = theme.PURPLE, "🚪 던전에서 나왔어요"
+    elif run.phase == "summit":
+        color, title = theme.GOLD, f"🏔️ {max(run.floor, 1)}층 꼭대기에 도착했어요!"
     elif run.kind == "secret":
         color, title = theme.GOLD, f"🌌 시크릿 방 — {max(run.floor, 1)}/{bal.floors}층"
+    elif run.infinite:
+        color, title = theme.PURPLE, f"♾️ 무한모드 — {max(run.floor, 1)}층 · 방 {max(run.room, 1)}/{ROOMS}"
     else:
         color, title = theme.ORANGE, f"🏚️ 던전 — {max(run.floor, 1)}/{bal.floors}층 · 방 {max(run.room, 1)}/{ROOMS}"
     embed = theme.make_embed(title, "\n".join(run.events) or None, color=color)
@@ -83,6 +87,8 @@ def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=No
         embed.add_field(name="🎁 보상", value="\n".join(lines), inline=False)
     elif ended in ("dead", "quit"):
         embed.add_field(name="입장 물품", value="입장에 쓴 물품은 돌아오지 않아요. 새로 도전하려면 입장 물품이 다시 필요해요.", inline=False)
+        if run.infinite:                                  # 클리어 보상과 층 보너스는 이미 받았다.
+            embed.add_field(name="♾️ 무한모드 기록", value=f"**{run.floor}층**까지 올랐어요! (클리어 보상과 층 보너스는 이미 받았어요)", inline=False)
     if run.loot and ended:
         embed.add_field(name="🧾 이번에 얻은 것", value=", ".join(run.loot[-10:]), inline=False)
     return embed
@@ -141,6 +147,9 @@ class DungeonView(discord.ui.View):
             pending = next((e for e in for_sale if e["id"] == "pending"), None)
             if pending:                                   # 새 장비를 바로 파는 지름길
                 self._button(f"판매 +{pending['price']:,}", "💰", "sell_pending", discord.ButtonStyle.primary)
+        elif run.phase == "summit":                       # 꼭대기: 클리어하고 끝낼지, 무한모드로 계속할지 고른다.
+            self._button("클리어하고 끝내기", "🏆", "finish", discord.ButtonStyle.success)
+            self._button("무한모드 계속", "♾️", "infinite", discord.ButtonStyle.primary)
         elif run.can_advance:
             self._button("앞으로" if run.room else "출발", "🚪", "advance", discord.ButtonStyle.success)
         if not run.in_battle and any(e["id"] != "pending" for e in for_sale):

@@ -64,6 +64,13 @@ class AscendTests(unittest.TestCase):
             self.assertEqual((run.phase == "clear", run.floor), (False, floor + 1), floor)
         run = at_boss_cleared(dungeon.FLOORS)
         dungeon.advance(run, Scripted(randoms=[0.99]))
+        self.assertEqual(run.phase, "summit")                              # 꼭대기: 바로 클리어하지 않고 먼저 묻는다
+        self.assertIn("10층", run.events[0])
+        dungeon.take_clear(run)
+        self.assertEqual(run.phase, "clear")
+        direct = Balance.build({"일반.무한모드": 0})                          # 묻지 않는 설정이면 예전처럼 바로 클리어
+        run = at_boss_cleared(dungeon.FLOORS)
+        dungeon.advance(run, Scripted(randoms=[0.99]), direct)
         self.assertEqual(run.phase, "clear")
         self.assertIn("10층", run.events[0])
 
@@ -74,9 +81,9 @@ class AscendTests(unittest.TestCase):
         self.assertEqual(run.floor, 3)
         run = at_boss_cleared(3)
         dungeon.advance(run, Scripted(randoms=[0.99]), bal)
-        self.assertEqual(run.phase, "clear")
+        self.assertEqual(run.phase, "summit")
         self.assertIn("3층", run.events[0])
-        lowered = Balance.build({"일반.층수": 2})                    # 진행 중에 층수를 줄이면 이미 넘은 층이어도 이번 보스로 클리어
+        lowered = Balance.build({"일반.층수": 2, "일반.무한모드": 0})   # 진행 중에 층수를 줄이면 이미 넘은 층이어도 이번 보스로 클리어
         run = at_boss_cleared(5)
         dungeon.advance(run, Scripted(randoms=[0.99]), lowered)
         self.assertEqual(run.phase, "clear")
@@ -199,7 +206,10 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         data.update(floor=10, room=dungeon.ROOMS, phase="cleared", kind="boss")
         self.store.save_dungeon(G, U, json.dumps(data))
         low, _ = dungeon.CLEAR_CANDY
-        done = await service.act(self.store, self.locks, Scripted(randoms=[0.99, 0.99], ints=[low]), G, U, out.run.rev, "advance")
+        top = await service.act(self.store, self.locks, Scripted(randoms=[0.99]), G, U, out.run.rev, "advance")
+        self.assertEqual((top.ok, top.ended, top.run.phase), (True, None, "summit"))       # 꼭대기에서 묻는다
+        self.assertEqual(self.store.wallet(G, U), 0)                                       # 고르기 전에는 보상이 없다
+        done = await service.act(self.store, self.locks, Scripted(randoms=[0.99], ints=[low]), G, U, top.run.rev, "finish")
         self.assertEqual((done.ended, done.reward.candy), ("clear", low))
         self.assertIsNone(self.store.dungeon_run(G, U))
 

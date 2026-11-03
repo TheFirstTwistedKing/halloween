@@ -36,6 +36,8 @@ def play(rng, policy: str, bal: Balance) -> tuple[bool, int]:
     run = dungeon.new_run(bal=bal)
     dungeon.advance(run, rng, bal)
     for _ in range(5000 * bal.floors):                      # 무한 루프 안전장치(층이 많을수록 판이 길다)
+        if run.phase == "summit":                           # 꼭대기: 시뮬레이션은 클리어로 센다(무한모드는 보지 않는다).
+            dungeon.take_clear(run)
         if run.phase == "dead":
             return False, run.stage
         if run.phase == "clear":

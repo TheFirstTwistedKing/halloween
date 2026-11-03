@@ -283,7 +283,8 @@ class ClearRewardTests(RulesFixture):
         data = json.loads(run.to_json())
         data.update(floor=dungeon.FLOORS, room=dungeon.ROOMS, phase="cleared")
         self.store.save_dungeon(G, U, json.dumps(data))
-        return await service.act(self.store, self.w.bot.locks, rng, G, U, run.rev, "advance")
+        top = await service.act(self.store, self.w.bot.locks, Scripted(randoms=[0.99]), G, U, run.rev, "advance")   # 꼭대기: 시크릿 방 추첨(0.99=안 열림) 뒤 클리어를 고른다
+        return await service.act(self.store, self.w.bot.locks, rng, G, U, top.run.rev, "finish")
 
     def setup_key(self):
         self.store.ensure_defaults(G)

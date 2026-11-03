@@ -367,8 +367,47 @@ class ContentAdmin(commands.Cog):
     async def secret_delete(self, interaction: discord.Interaction, target: str):
         await self._run(interaction, lambda: content.delete(self.bot.store, interaction.guild_id, ("secrets",), target), "🗑️ 지웠어요.")
 
+    @secret.command(name="층", description="이 시크릿 보스가 나올 층을 정해요. 여러 층은 쉼표로(3,5,8-10). 비우면 지금 설정을 봐요 (관리자)")
+    @app_commands.rename(target="대상", floors="층")
+    @app_commands.describe(target="층을 정할 시크릿 보스", floors="나올 층: 3,5,8-10처럼 여러 층을 쉼표로, 범위는 -로. '전체'를 쓰면 모든 층. 비우면 지금 설정만 봐요")
+    async def secret_floors(self, interaction: discord.Interaction, target: str, floors: str | None = None):
+        if not await require_admin(interaction):
+            return
+        store, gid = self.bot.store, interaction.guild_id
+        hit = content.find(store, gid, ("secrets",), target)
+        if hit is None:
+            await self._deny(interaction, "그런 시크릿 보스가 없어요. 이름은 자동완성에서 골라 주세요.")
+            return
+        data = hit[1]
+        if floors is None:
+            await interaction.response.send_message(embed=theme.notice(
+                f"🌌 **{data['name']}**은(는) **{balance.floors_text(data['floors'])}**에서 나와요.\n`/시크릿보스 층 대상:{data['name']} 층:3,5,8-10`처럼 바꿔요."), ephemeral=False)
+            return
+        chosen, problem = balance.parse_floors(floors)
+        if problem:
+            await self._deny(interaction, problem)
+            return
+        try:
+            section, entity = content.edit(store, gid, ("secrets",), data["name"], {"floors": chosen})
+        except content.ContentError as exc:
+            await self._deny(interaction, str(exc))
+            return
+        bal = store.balance(gid)
+        notes = []
+        if chosen and min(chosen) > bal.floors and not bal.infinite:
+            notes.append(f"⚠️ 지금은 {bal.floors}층까지만 있고 무한모드도 꺼져 있어서(`일반.무한모드`) 이 층들에서는 나올 수 없어요.")
+        elif chosen and max(chosen) > bal.floors:
+            notes.append(f"ℹ️ {bal.floors + 1}층부터는 무한모드를 골라야 갈 수 있어요.")
+        if bal.secret_chance == 0:
+            notes.append("⚠️ 시크릿 방 확률이 0%라 어디서도 나오지 않아요(`/시크릿보스 확률`).")
+        await interaction.response.send_message(embed=theme.notice(
+            f"🌌 **{entity.name}**이(가) 나올 층: **{balance.floors_text(entity.floors)}**\n"
+            "그 층의 보스를 이기고 올라갈 때, 시크릿 방이 열리면(확률은 `/시크릿보스 확률`) 이 보스가 나와요."
+            + ("".join("\n" + n for n in notes))), ephemeral=False)
+
     @secret_edit.autocomplete("target")
     @secret_delete.autocomplete("target")
+    @secret_floors.autocomplete("target")
     async def secret_names(self, interaction: discord.Interaction, current: str):
         return names_for(self.bot.store, interaction.guild_id, ("secrets",), current) if interaction.guild_id else []
 

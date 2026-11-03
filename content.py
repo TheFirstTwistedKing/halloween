@@ -261,8 +261,8 @@ def describe(section: str, data: dict, bal=None) -> str:
         if entity.drop_item:
             drops.append((f"{item.emoji} {item.name}" if item else (f"{entity.drop_item}" if bal is None else "(없어진 아이템)"))
                           + (f" ×{entity.drop_item_amount}" if entity.drop_item_amount > 1 else "") + f" {entity.drop_item_chance:g}%")
-        return (f"{head} — HP {entity.hp:,} · 공격 {entity.damage:,} · 등장 {entity.weight:g} · 드롭(하나는 반드시): " + " / ".join(drops)
-                + (" · 🖼️ 그림 있음" if entity.image else ""))
+        return (f"{head} — HP {entity.hp:,} · 공격 {entity.damage:,} · 등장 {entity.weight:g} · 나오는 층 {balance.floors_text(entity.floors)}"
+                f" · 드롭(하나는 반드시): " + " / ".join(drops) + (" · 🖼️ 그림 있음" if entity.image else ""))
     if section in ("monsters", "bosses"):
         dodge = "" if section == "bosses" else f" · 회피 {entity.dodge}%"
         return f"{head} — HP {entity.hp:,} · 공격 {entity.damage:,}{dodge} · 등장 {entity.weight:g}"

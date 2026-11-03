@@ -181,9 +181,10 @@ def advance(run: Run, rng, bal: Balance | None = None) -> list[str]:
     마지막 층이라면 던전이 끝난다."""
     bal = bal or DEFAULT
     climb: list[str] = []
-    if run.room == ROOMS and run.kind == "boss" and bal.secret_chance > 0 and sum(s.weight for s in bal.secrets) > 0 \
+    eligible = [s for s in bal.secrets if s.weight > 0 and (not s.floors or run.floor in s.floors)]    # 이 층에 나올 수 있는 시크릿 보스
+    if run.room == ROOMS and run.kind == "boss" and bal.secret_chance > 0 and eligible \
             and rng.random() * 100 < bal.secret_chance:
-        boss = pick_weighted(rng, bal.secrets)            # 보스를 이기고 올라가려는 순간 10%(기본) 확률로 11번째 방이 열린다.
+        boss = pick_weighted(rng, eligible)            # 보스를 이기고 올라가려는 순간 10%(기본) 확률로 11번째 방이 열린다.
         run.room, run.kind = ROOMS + 1, "secret"
         run.enemy, run.phase = _spawn(boss, run.floor, bal), "battle"
         run.last.append("secret_intro")                   # 화면이 특별한 등장 연출을 보여 주라는 표시

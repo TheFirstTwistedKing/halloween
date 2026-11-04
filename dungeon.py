@@ -285,7 +285,7 @@ def shop_due(run: Run, bal: Balance) -> bool:
 
 def open_shop(run: Run, rng, bal: Balance) -> list[str]:
     """상점을 연다: 이 층에 나올 수 있는 장비·소모품(등장 비율 0보다 큰 것) 중에서 서로 다른 상품 SHOP_SLOTS개를 고른다.
-    상품마다 장비/소모품은 반반, 그 안에서는 모두 같은 확률이다(등장 비율은 상자 전용). 팔 것이 하나도 없으면 상점은 열리지 않는다(빈 목록)."""
+    상품마다 장비/소모품은 반반, 그 안에서는 상자와 같은 '등장' 비율대로 고른다(소수 가능). 팔 것이 하나도 없으면 상점은 열리지 않는다(빈 목록)."""
     run.shop_floor = run.floor
     pools = {"gear": [g for g in candidates_for_floor(bal.gear, run.floor) if g.weight > 0],
              "item": [c for c in candidates_for_floor(bal.consumables, run.floor) if c.weight > 0]}
@@ -296,7 +296,8 @@ def open_shop(run: Run, rng, bal: Balance) -> list[str]:
             break
         kind = kinds[0] if len(kinds) == 1 else ("gear" if rng.random() < 0.5 else "item")
         pool = pools[kind]
-        pick = pool.pop(min(int(rng.random() * len(pool)), len(pool) - 1))
+        pick = pick_weighted(rng, pool)                  # 상자와 같은 '등장' 비율대로(이미 놓인 상품은 빼고)
+        pool.remove(pick)
         offers.append({"kind": kind, "key": pick.key, "price": shop_price(pick, bal.shop_markup), "sold": False})
     if not offers:                                      # 팔 것이 없다: 상점 없이 그냥 올라간다.
         return []

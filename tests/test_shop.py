@@ -95,19 +95,35 @@ class OpenTests(unittest.TestCase):
             self.assertIn("5층 상점", events[0])
             self.assertFalse(run.can_advance)
 
-    def test_kinds_are_half_and_half_and_each_pick_is_uniform_within_its_kind(self):
+    def test_kinds_are_half_and_half_and_picks_follow_the_drop_weights(self):
         bal = Balance.build({})
         gear = item = 0
-        seen = set()
-        for seed in range(400):
+        count = {}
+        for seed in range(600):
             run = cleared_boss(bal)
             dungeon.open_shop(run, random.Random(seed), bal)
             for offer in run.shop:
                 gear += offer["kind"] == "gear"
                 item += offer["kind"] == "item"
-                seen.add(offer["key"])
+                count[offer["key"]] = count.get(offer["key"], 0) + 1
         self.assertAlmostEqual(gear / (gear + item), 0.5, delta=0.06)
-        self.assertEqual(seen, {g.key for g in bal.gear} | {c.key for c in bal.consumables})        # 전설·희귀도 팔린다
+        self.assertGreater(count["club"], count["pumpkin_blade"] * 3)                    # 등장 25 대 3: 흔한 것이 훨씬 자주 나온다
+        self.assertGreater(count["candy"], count["golden_soup"] * 3)                     # 38 대 3
+        self.assertTrue(count.get("gun") and count.get("golden_soup"))                   # 그래도 전설도 가끔 팔린다
+
+    def test_fractional_weights_work_and_a_tiny_one_is_almost_never_sold(self):
+        raw = {"gear": [entity_dict(check_entity("gear", dict(key=k, name=k, emoji="⚔️", slot="weapon", tier="일반", weight=w, attack=5))[0])
+                        for k, w in (("common", 1), ("rare", 0.0001))]}
+        bal = Balance.build({}, raw)
+        rare = 0
+        for seed in range(300):
+            run = cleared_boss(bal)
+            dungeon.open_shop(run, Scripted(randoms=[0.0, random.Random(seed).random(), 0.0, 0.0, 0.0, 0.0]), bal)
+            rare += run.shop[0]["key"] == "rare"
+        self.assertLessEqual(rare, 1)
+        run = cleared_boss(bal)
+        dungeon.open_shop(run, Scripted(randoms=[0.0, 0.99995, 0.0, 0.0, 0.0, 0.0]), bal)           # 0.9999 이후 구간이면 희귀가 나온다
+        self.assertEqual(run.shop[0]["key"], "rare")
 
     def test_scripted_picks(self):
         bal = Balance.build({})

@@ -96,7 +96,7 @@ async def act(store: Store, locks, rng, guild_id: int, user_id: int, rev: int, a
         if run.phase == "dead" and _revive(store, guild_id, user_id, run, bal):
             return Outcome(True, run=run, notes=["revived"])
         if not run.finished and run.phase != "dead":
-            if action == "infinite" or run.bonus:
+            if action == "infinite" or run.bonus or run.room_candy:
                 return _save_with_rewards(store, rng, guild_id, user_id, run, bal, clear_reward=action == "infinite")
             store.save_dungeon(guild_id, user_id, run.to_json())
             return Outcome(True, run=run)
@@ -130,8 +130,14 @@ def _save_with_rewards(store: Store, rng, guild_id: int, user_id: int, run: Run,
     bonus, run.bonus = run.bonus, 0
     if bonus:
         got = min(bonus, room)
+        room -= got
         candy_total += bonus
         lines.append(f"♾️ 무한 **{run.floor}층** 보너스! {cur.money(got)}")
+    gift, run.room_candy = run.room_candy, 0
+    if gift:
+        got = min(gift, room)
+        candy_total += gift
+        lines.append(f"🎁 방에서 얻은 재화! {cur.money(got)}")
     run.events = [*run.events, *lines]
     done = store.reward_in_dungeon(guild_id, user_id, run.to_json(), candy=candy_total, tickets=1 if ticket else 0,
                                    items=[(item["id"], amount) for item, amount in given])

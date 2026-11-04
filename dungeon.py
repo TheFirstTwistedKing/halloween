@@ -67,6 +67,7 @@ class Run:
     auto_paid: bool = False                         # 이 던전에서 빠른진행 비용(입장 물품 한 번 더)을 이미 냈다: 껐다 켜도 다시 내지 않는다.
     infinite: bool = False                          # 무한모드 중: 마지막 층을 깬 뒤 클리어하지 않고 계속 올라가고 있다.
     bonus: int = 0                                  # 방금 올라간 무한 층의 보너스 재화(서비스가 지급하고 0으로 되돌린다)
+    room_candy: int = 0                             # 방금 들어선 커스텀 방이 준 재화(서비스가 지급하고 0으로 되돌린다)
     last: list = field(default_factory=list)        # 바로 직전 행동에서 일어난 일(소모품 사용 조건에 쓴다): guard_success·guard_fail·attack_hit·attack_miss·item_gain:키·item_use:키
 
     def bump(self) -> None:
@@ -169,10 +170,21 @@ def hit_chance(run: Run, bal: Balance | None = None) -> int:
     return 100 - enemy_dodge(run, bal)
 
 
-def roll_room(rng, room: int, bal: Balance | None = None) -> str:
-    """room번째 방의 종류. 방 배치에서 칸이 하나뿐이면 그대로, 여러 칸이면 가중치대로 고른다."""
+def custom_rooms_for(bal: Balance, room: int, floor: int) -> list:
+    """이 방 번호·층에 나올 수 있는 커스텀 방들(가중치가 0보다 큰 것). 보스 방(마지막 방)에는 나오지 않는다."""
+    if room >= ROOMS:
+        return []
+    return [c for c in bal.rooms if c.weight > 0 and (not c.rooms or room in c.rooms) and (not c.floors or floor in c.floors)]
+
+
+def roll_room(rng, room: int, bal: Balance | None = None, floor: int = 1) -> str:
+    """room번째 방의 종류. 방 배치의 칸에 이 방·층에 나올 수 있는 커스텀 방(종류는 'custom:키')을 더해서,
+    칸이 하나뿐이면 그대로, 여러 칸이면 가중치대로 고른다."""
     bal = bal or DEFAULT
     table = bal.room_plan[min(max(room, 1), len(bal.room_plan)) - 1]
+    extra = [(f"custom:{c.key}", c.weight) for c in custom_rooms_for(bal, room, floor)]
+    if extra:
+        table = (*table, *extra)
     if len(table) == 1:
         return table[0][0]
     total = sum(weight for _, weight in table)
@@ -230,7 +242,11 @@ def advance(run: Run, rng, bal: Balance | None = None) -> list[str]:
         climb = [f"⬆️ **{run.floor}층**으로 올라왔어요!" + (f" 숨을 돌려 HP +{healed}" if healed > 0 else "")
                  + (f" 몬스터는 1층의 {floor_scaled(100, run.floor, bal.floor_scale)}% 수준이에요." if bal.floor_scale else "")]
     run.room += 1
-    run.kind, run.enemy = roll_room(rng, run.room, bal), None
+    run.kind, run.enemy = roll_room(rng, run.room, bal, run.floor), None
+    custom = None
+    if run.kind.startswith("custom:"):                   # 커스텀 방: 종류는 'custom'으로 두고 방 정보는 여기서 꺼낸다(관리자가 지운 방이면 빈 방).
+        custom = next((c for c in bal.rooms if c.key == run.kind[7:]), None)
+        run.kind = "custom" if custom else "empty"
     if run.kind in ("monster", "boss") and not (bal.bosses if run.kind == "boss" else bal.monsters):
         run.kind = "empty"                               # 관리자가 몬스터를 모두 지웠다면(검사를 통과한 설정이면 없는 일) 빈 방으로 둔다.
     if run.kind in ("monster", "boss"):
@@ -241,10 +257,70 @@ def advance(run: Run, rng, bal: Balance | None = None) -> list[str]:
                 else f"⚠️ 몬스터 조우! **{monster.name}**이(가) 나타났어요!")
     elif run.kind == "chest":
         run.phase, text = "chest", "🎁 보물 상자가 놓여 있는 방이에요."
+    elif run.kind == "trap":
+        text = _trap(run, bal)
+        run.phase = "dead" if run.hp <= 0 else "empty"          # 함정에 쓰러졌다면 던전은 끝난다(부활권은 서비스가 쓴다).
+    elif run.kind == "custom":
+        text = _custom_room(run, custom, bal)
+        run.phase = "dead" if run.hp <= 0 else "empty"
     else:
         run.phase, text = "empty", "🚪 텅 빈 방이에요. 앞으로 나아갈 수 있어요."
-    run.events = [*climb, text]
+    run.events = [*climb, *([text] if isinstance(text, str) else text)]
     return run.events
+
+
+TRAP_TEXTS = ("바닥이 푹 꺼졌어요!", "벽에서 화살이 쏟아져요!", "천장에서 돌덩이가 떨어져요!", "독가스가 뿜어져 나와요!")
+
+
+def _hurt(run: Run, raw: int, bal: Balance) -> tuple[int, str]:
+    """방이 주는 피해를 적용한다(가드는 못 쓰지만 갑옷·소모품 피해 감소·무적은 적용). (실제 피해, 덧붙일 설명)."""
+    damage = incoming_damage(run, raw, 0, bal)
+    run.hp = max(0, run.hp - damage)
+    if run.hp <= 0:
+        run.phase = "dead"
+    if raw and run.invuln_turns > 0:
+        return damage, " ✨ 무적이라 피해를 받지 않았어요."
+    armor = armor_percent(run, bal)
+    notes = ([f"갑옷 {armor}%"] if armor else []) + ([f"피해 감소 {run.reduce_percent}%"] if run.reduce_turns > 0 and run.reduce_percent else [])
+    return damage, f" ({' · '.join(notes)}로 줄였어요)" if notes and raw else ""
+
+
+def _trap(run: Run, bal: Balance) -> list[str]:
+    """함정 방: 들어서자마자 피해를 입는다(막을 수 없다). 피해는 몬스터처럼 층마다 늘어난다."""
+    raw = floor_scaled(bal.trap_damage, run.floor, bal.floor_scale)
+    flavor = TRAP_TEXTS[(run.floor + run.room) % len(TRAP_TEXTS)]
+    if raw <= 0:
+        return [f"🪤 함정 방이에요. {flavor} 다행히 아무 일도 없었어요."]
+    damage, note = _hurt(run, raw, bal)
+    events = [f"🪤 **함정 방!** {flavor} **{damage}** 피해를 입었어요.{note}"]
+    if run.phase == "dead":
+        events.append("💀 쓰러졌어요…")
+    return events
+
+
+def _custom_room(run: Run, room, bal: Balance) -> list[str]:
+    """커스텀 방: 문구를 보여 주고 피해 → 회복 → 재화 → 소모품 순으로 효과를 준다."""
+    events = [f"{room.emoji} **{room.name}**" + (f"\n{room.text}" if room.text else "")]
+    if room.damage:
+        damage, note = _hurt(run, room.damage, bal)
+        events.append(f"💢 **{damage}** 피해를 입었어요.{note}")
+        if run.phase == "dead":
+            events.append("💀 쓰러졌어요…")
+            return events
+    if room.heal:
+        gained = max(0, min(bal.max_hp, run.hp + room.heal) - run.hp)
+        run.hp += gained
+        events.append(f"💚 HP +{gained}")
+    if room.candy:
+        run.room_candy += room.candy
+        events.append("🪙 재화를 얻었어요! (아래에서 지급돼요)")
+    item = bal.item_by_key.get(room.item) if room.item else None
+    if item is not None:
+        run.items[item.key] = run.items.get(item.key, 0) + room.item_amount
+        run.last.append(f"item_gain:{item.key}")
+        run.loot.append(item.name)
+        events.append(f"{item.emoji} **{item.name}** ×{room.item_amount}을(를) 소지품에 넣었어요.")
+    return events
 
 
 def take_clear(run: Run) -> list[str]:

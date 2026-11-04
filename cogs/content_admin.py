@@ -21,6 +21,8 @@ SLOTS = [Choice(name="무기", value="weapon"), Choice(name="방패", value="shi
 LIST_CHOICES = [Choice(name=SECTION_LABELS[s], value=s) for s in SECTIONS]
 REDUCTION_HELP = f"갑옷: 받는 모든 피해를 줄이는 비율(%, 1~{balance.ARMOR_MAX}). 갑옷에는 필수예요. 가드·소모품 효과와 겹쳐 적용돼요"
 GUARD_CHANCE_HELP = "방패: 이 방패로 방어할 때 가드에 성공할 확률(%). 비우면 서버 기본(/던전설정 방어.성공확률)을 써요."
+ROOM_WEIGHT_HELP = "방 배치에서 다른 방(상자·빈방·잡몹…)과 겨루는 가중치. 소수도 돼요. 예: 빈 방 40·잡몹 60인 방에 10을 주면 약 9%로 나와요"
+ROOM_PLACES_HELP = "나올 방 번호(1~9번째. 10번째는 보스 방): 3,5,8-9처럼. 비우거나 '전체'면 1~9번째 모두"
 FLOORS_HELP = "나올 층: 3,5,8-10처럼 여러 층을 쉼표로, 범위는 -로. '전체'를 쓰면 모든 층. 비우면 지금 설정만 봐요"
 WEIGHT_HELP = "상자에서 나올 비율. 소수도 돼요(예: 0.5, 0.05). 다른 것들과의 비율로 계산하고 높을수록 자주 나와요"
 SELL_HELP = "던전 안에서 팔 때 받는 재화(개당). 0이면 팔 수 없어요. 비우면 그대로(추가할 땐 등급별 기본값)"
@@ -546,6 +548,143 @@ class ContentAdmin(commands.Cog):
     async def secret_item_names(self, interaction: discord.Interaction, current: str):
         return names_for(self.bot.store, interaction.guild_id, ("consumables",), current) if interaction.guild_id else []
 
+    # ---------------------------------------------------------------- 커스텀 방 · 함정
+    room = app_commands.Group(name="방", description="커스텀 방을 만들고, 함정 방의 확률·피해를 정해요 (관리자)", **PERMS)
+
+    @staticmethod
+    def _numbers(text: str | None, what: str):
+        """'3,5,8-9'처럼 쓴 방 번호·층 목록 → 정렬된 목록. 전체/비움은 []. 잘못되면 ContentError."""
+        listed, problem = balance.parse_floors(text if text is not None else "전체")
+        if problem:
+            raise content.ContentError(problem.replace("층", what) if what != "층" else problem)
+        return listed
+
+    def _room_item_key(self, name: str, guild_id: int) -> str:
+        return self._consumable(name, guild_id)["key"]
+
+    @room.command(name="추가", description="커스텀 방을 만들어요. 방 배치에서 다른 방과 가중치로 겨뤄 나오고, 들어서면 효과가 일어나요 (관리자)")
+    @app_commands.rename(name="이름", emoji="이모지", text="문구", weight="가중치", damage="피해", heal="회복", candy="재화", item="소모품",
+                         amount="소모품개수", places="방번호", floors="층")
+    @app_commands.describe(text="방에 들어서면 보이는 문구(300자까지)", weight=ROOM_WEIGHT_HELP, damage="들어서면 입는 피해(갑옷·피해 감소·무적은 적용, 가드는 못 써요)",
+                           heal="들어서면 회복하는 HP", candy="들어서면 얻는 재화", item="들어서면 얻는 소모품(자동완성)", amount="소모품 개수(기본 1)",
+                           places=ROOM_PLACES_HELP, floors=FLOORS_HELP)
+    async def room_add(self, interaction: discord.Interaction, name: str, emoji: str, text: str | None = None,
+                       weight: app_commands.Range[float, 0, 1000] = 10, damage: app_commands.Range[int, 0, 100000] = 0,
+                       heal: app_commands.Range[int, 0, 100000] = 0, candy: app_commands.Range[int, 0, 1000000] = 0, item: str | None = None,
+                       amount: app_commands.Range[int, 1, 99] = 1, places: str | None = None, floors: str | None = None):
+        def go():
+            data = dict(name=name, emoji=emoji.strip(), text=text or "", weight=weight, damage=damage, heal=heal, candy=candy,
+                        item_amount=amount, rooms=self._numbers(places, "방"), floors=self._numbers(floors, "층"))
+            if item:
+                data["item"] = self._room_item_key(item, interaction.guild_id)
+            entity = content.add(self.bot.store, interaction.guild_id, "rooms", data)
+            return "rooms", self._entity_dict(entity)
+        await self._run(interaction, go, "➕ 커스텀 방을 만들었어요. 방 배치에 섞여서 나와요.")
+
+    @room.command(name="수정", description="커스텀 방을 고쳐요. 바꿀 것만 적으세요. 문구·소모품은 -를 적으면 지워요 (관리자)")
+    @app_commands.rename(target="대상", new_name="새이름", emoji="이모지", text="문구", weight="가중치", damage="피해", heal="회복", candy="재화",
+                         item="소모품", amount="소모품개수", places="방번호", floors="층")
+    @app_commands.describe(text="방 문구. -는 지움", weight=ROOM_WEIGHT_HELP, item="들어서면 얻는 소모품(자동완성). -는 지움",
+                           damage="입는 피해(0이면 없앰)", heal="회복(0이면 없앰)", candy="재화(0이면 없앰)", places=ROOM_PLACES_HELP, floors=FLOORS_HELP)
+    async def room_edit(self, interaction: discord.Interaction, target: str, new_name: str | None = None, emoji: str | None = None,
+                        text: str | None = None, weight: app_commands.Range[float, 0, 1000] | None = None,
+                        damage: app_commands.Range[int, 0, 100000] | None = None, heal: app_commands.Range[int, 0, 100000] | None = None,
+                        candy: app_commands.Range[int, 0, 1000000] | None = None, item: str | None = None,
+                        amount: app_commands.Range[int, 1, 99] | None = None, places: str | None = None, floors: str | None = None):
+        def go():
+            changes = dict(name=new_name, emoji=emoji and emoji.strip(), weight=weight, damage=damage, heal=heal, candy=candy, item_amount=amount)
+            changes = {k: v for k, v in changes.items() if v is not None}
+            if text is not None:
+                changes["text"] = "" if text.strip() == "-" else text
+            if item is not None:
+                changes["item"] = None if item.strip() == "-" else self._room_item_key(item, interaction.guild_id)
+            if places is not None:
+                changes["rooms"] = self._numbers(places, "방")
+            if floors is not None:
+                changes["floors"] = self._numbers(floors, "층")
+            section, entity = content.edit(self.bot.store, interaction.guild_id, ("rooms",), target, changes)
+            return section, self._entity_dict(entity)
+        await self._run(interaction, go, "✏️ 고쳤어요.")
+
+    @room.command(name="삭제", description="커스텀 방을 지워요 (관리자)")
+    @app_commands.rename(target="대상")
+    async def room_delete(self, interaction: discord.Interaction, target: str):
+        await self._run(interaction, lambda: content.delete(self.bot.store, interaction.guild_id, ("rooms",), target), "🗑️ 지웠어요.")
+
+    @room.command(name="대량삭제", description="커스텀 방을 여러 개 골라 한 번에 지워요 (관리자)")
+    async def room_bulk(self, interaction: discord.Interaction):
+        await self._bulk(interaction, "커스텀 방", (("rooms", ""),))
+
+    @room_edit.autocomplete("target")
+    @room_delete.autocomplete("target")
+    async def room_names(self, interaction: discord.Interaction, current: str):
+        return names_for(self.bot.store, interaction.guild_id, ("rooms",), current) if interaction.guild_id else []
+
+    @room_add.autocomplete("item")
+    @room_edit.autocomplete("item")
+    async def room_item_names(self, interaction: discord.Interaction, current: str):
+        return names_for(self.bot.store, interaction.guild_id, ("consumables",), current) if interaction.guild_id else []
+
+    TRAP_ROOMS = (2, 4, 6, 8)                  # 기본 방 배치에서 빈 방·잡몹이 섞여 나오는 방(함정이 섞일 수 있는 방)
+
+    def _trap_percent(self, bal, room: int) -> float:
+        table = dict(bal.room_plan[room - 1])
+        total = sum(table.values())
+        return 100 * table.get("trap", 0) / total if total else 0.0
+
+    @room.command(name="함정확률", description="함정 방이 나올 확률(%)을 정해요. 비우면 지금 확률을 봐요 (관리자)")
+    @app_commands.rename(percent="퍼센트")
+    @app_commands.describe(percent="2·4·6·8번째 방에서 함정 방이 나올 확률(%). 0이면 함정이 안 나와요. 방마다 따로 정하려면 /던전설정 방N.함정")
+    async def trap_chance(self, interaction: discord.Interaction, percent: app_commands.Range[float, 0, 90] | None = None):
+        if not await require_admin(interaction):
+            return
+        store, gid = self.bot.store, interaction.guild_id
+        bal = store.balance(gid)
+        if percent is None:
+            shown = ", ".join(f"{r}번째 {self._trap_percent(bal, r):.1f}%" for r in self.TRAP_ROOMS)
+            await interaction.response.send_message(embed=theme.notice(
+                f"🪤 지금 함정 방 확률: {shown}\n피해는 `/방 함정피해`(지금 {bal.trap_damage:,}, 1층 기준)예요. `/방 함정확률 퍼센트:10`처럼 바꿔요."), ephemeral=False)
+            return
+        overrides = dict(store.settings(gid)["dungeon"])
+        for r in self.TRAP_ROOMS:
+            others = sum(w for kind, w in bal.room_plan[r - 1] if kind != "trap")
+            key = f"방{r}.함정"
+            weight = round(others * percent / (100 - percent), 4) if others > 0 and percent > 0 else 0
+            if weight <= 0 or weight == balance.PARAMS[key].default:
+                overrides.pop(key, None)
+            else:
+                overrides[key] = min(weight, balance.PARAMS[key].high)
+        problem = balance.validate(overrides, store.settings(gid)["dungeon_content"])
+        if problem:
+            await self._deny(interaction, problem)
+            return
+        store.update_settings(gid, dungeon=overrides)
+        shown = ", ".join(f"{r}번째 {self._trap_percent(store.balance(gid), r):.1f}%" for r in self.TRAP_ROOMS)
+        await interaction.response.send_message(embed=theme.notice(
+            f"🪤 함정 방 확률을 바꿨어요: {shown}\n(빈 방·잡몹 등 다른 방과의 비율로 계산해요.) 지금 진행 중인 던전에도 바로 적용돼요."), ephemeral=False)
+
+    @room.command(name="함정피해", description="함정 방에서 입는 피해를 정해요(1층 기준, 층마다 늘어나요). 비우면 지금 값을 봐요 (관리자)")
+    @app_commands.rename(damage="피해")
+    async def trap_damage(self, interaction: discord.Interaction, damage: app_commands.Range[int, 0, 100000] | None = None):
+        if not await require_admin(interaction):
+            return
+        store, gid = self.bot.store, interaction.guild_id
+        key, param = "함정.피해", balance.PARAMS["함정.피해"]
+        overrides = dict(store.settings(gid)["dungeon"])
+        old = overrides.get(key, param.default)
+        if damage is None:
+            await interaction.response.send_message(embed=theme.notice(
+                f"🪤 함정 피해: **{old:,}** (기본 {param.default:,}, 1층 기준. 층마다 몬스터처럼 늘어나요)\n"
+                "`/방 함정피해 피해:150`으로 바꿔요. 갑옷·피해 감소·무적은 적용되고 가드는 못 써요."), ephemeral=False)
+            return
+        if damage == param.default:
+            overrides.pop(key, None)
+        else:
+            overrides[key] = damage
+        store.update_settings(gid, dungeon=overrides)
+        await interaction.response.send_message(embed=theme.notice(
+            f"🪤 함정 피해: {old:,} → **{damage:,}** (기본 {param.default:,}). 함정 방이 나오게 하려면 `/방 함정확률`을 정하세요."), ephemeral=False)
+
     # ---------------------------------------------------------------- 장비 개조 레시피
     mod = app_commands.Group(name="장비개조", description="특정 재료를 특정 장비(무기·방패)에 쓰면 다른 장비로 바뀌는 레시피 (관리자)", **PERMS)
 
@@ -771,6 +910,8 @@ class ContentAdmin(commands.Cog):
         blocks = []                                        # (칸 이름, 내용): 한 칸은 1000자 안에서 줄 단위로 나눈다.
         for sec in ([section.value] if section else SECTIONS):
             lines = [content.describe(sec, d, store.balance(gid)) for d in content.current(store, gid, sec)]
+            if sec == "rooms" and not lines and not section:      # 커스텀 방은 만든 게 있을 때만 전체 목록에 보여 준다
+                continue
             mark = " ✏️" if sec in custom else ""
             parts = split_pages(lines, 1000) or ["없음"]
             for number, part in enumerate(parts, start=1):

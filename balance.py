@@ -75,6 +75,14 @@ class Consumable:
     conditions: tuple = ()       # 사용 조건 ((종류, 값), ...). 전부 만족해야 쓸 수 있다. 비면 언제나 쓸 수 있다(아래 COND_* 참고).
     material: bool = False       # 개조 재료: 효과가 없고, /장비개조 레시피에 있는 무기를 들고 쓰면 그 무기가 개조된다.
     floors: tuple = ()           # 이 소모품이 상자에서 나올 수 있는 층(비어 있으면 모든 층)
+    damage: int = 0              # 쓰면 싸우는 몬스터에게 바로 주는 피해(싸우는 중에만 쓸 수 있다)
+    dot: int = 0                 # 몬스터에게 턴마다 주는 피해(독·화상처럼)
+    dot_turns: int = 0
+    self_damage: int = 0         # 쓰면 내 HP가 줄어든다(1 밑으로는 안 줄어서 이것만으로 죽지는 않는다)
+    self_turns: int = 0          # 2 이상이면 그 턴 수만큼 턴마다 줄어든다(첫 번째는 바로). 0·1이면 한 번만
+    invuln_turns: int = 0        # 이 턴 수 동안 몬스터의 공격 피해를 받지 않는다
+    reduce: int = 0              # 받는 피해를 이 %만큼 줄인다
+    reduce_turns: int = 0        # 피해 감소가 이어지는 턴 수
 
 
 @dataclass(frozen=True)
@@ -133,11 +141,24 @@ def describe_item(item: Consumable) -> str:
         return "특정 무기를 개조하는 재료예요"
     if item.modify:
         return "들고 있는 무기를 다른 무기로 개조해요"
+    parts = []
     if item.full:
-        return "HP를 전부 회복"
-    if item.regen:
-        return f"{item.regen_turns}턴 동안 턴이 지날 때마다 HP +{item.regen}"
-    return f"HP +{item.heal}"
+        parts.append("HP를 전부 회복")
+    elif item.regen:
+        parts.append(f"{item.regen_turns}턴 동안 턴이 지날 때마다 HP +{item.regen}")
+    elif item.heal:
+        parts.append(f"HP +{item.heal}")
+    if item.damage:
+        parts.append(f"몬스터에게 {item.damage} 피해")
+    if item.dot:
+        parts.append(f"몬스터에게 {item.dot_turns}턴 동안 턴마다 {item.dot} 피해")
+    if item.self_damage:
+        parts.append(f"내 HP -{item.self_damage}" + (f" ({item.self_turns}턴 동안 턴마다)" if item.self_turns > 1 else ""))
+    if item.invuln_turns:
+        parts.append(f"{item.invuln_turns}턴 동안 피해를 받지 않음")
+    if item.reduce:
+        parts.append(f"{item.reduce_turns}턴 동안 받는 피해 {item.reduce}% 감소")
+    return ", ".join(parts)
 
 
 def _gear(*args, **kwargs) -> Gear:
@@ -481,7 +502,9 @@ def check_entity(section: str, data) -> tuple[object | None, str | None]:
                     guard_chance=extra["guard_chance"], floors=floors)
         return replace(gear, description=describe_gear(gear)), None
     n, problem = numbers(("heal", 0, 100000, 0), ("regen", 0, 100000, 0), ("regen_turns", 0, 1000, 0),
-                         ("sell_price", 0, SELL_MAX, SELL_DEFAULT[tier]))
+                         ("sell_price", 0, SELL_MAX, SELL_DEFAULT[tier]), ("damage", 0, 1000000, 0), ("dot", 0, 1000000, 0),
+                         ("dot_turns", 0, 1000, 0), ("self_damage", 0, 100000, 0), ("self_turns", 0, 1000, 0),
+                         ("invuln_turns", 0, 1000, 0), ("reduce", 0, 100, 0), ("reduce_turns", 0, 1000, 0))
     if problem:
         return None, problem
     n["weight"], problem = _weight(data)
@@ -504,21 +527,36 @@ def check_entity(section: str, data) -> tuple[object | None, str | None]:
     conditions, problem = check_conditions(data.get("conditions"))
     if problem:
         return None, problem
-    if modify or material:                              # 개조 소모품·개조 재료: 회복 효과는 없다.
+    extras = ("damage", "dot", "dot_turns", "self_damage", "self_turns", "invuln_turns", "reduce", "reduce_turns")
+    if modify or material:                              # 개조 소모품·개조 재료: 다른 효과는 없다.
         full = False
         n["heal"] = n["regen"] = n["regen_turns"] = 0
-    elif full:
-        n["heal"] = n["regen"] = n["regen_turns"] = 0
-    elif n["regen"] > 0:
-        n["heal"] = 0
-        if n["regen_turns"] < 1:
-            return None, "지속 회복에는 지속 턴(1 이상)이 필요해요."
-    elif n["heal"] <= 0:
-        return None, "회복량·전체 회복·지속 회복 중 하나는 있어야 해요."
+        for name_ in extras:
+            n[name_] = 0
     else:
-        n["regen_turns"] = 0
+        if full:
+            n["heal"] = n["regen"] = n["regen_turns"] = 0
+        elif n["regen"] > 0:
+            n["heal"] = 0
+            if n["regen_turns"] < 1:
+                return None, "지속 회복에는 지속 턴(1 이상)이 필요해요."
+        else:
+            n["regen_turns"] = 0
+        if n["dot"] > 0 and n["dot_turns"] < 1:
+            return None, "지속 피해에는 지속 턴(1 이상)이 필요해요."
+        if n["dot"] == 0:
+            n["dot_turns"] = 0
+        n["self_turns"] = max(1, n["self_turns"]) if n["self_damage"] > 0 else 0
+        if n["reduce"] > 0 and n["reduce_turns"] < 1:
+            return None, "피해 감소에는 지속 턴(1 이상)이 필요해요."
+        if n["reduce"] == 0:
+            n["reduce_turns"] = 0
+        if not (full or n["heal"] or n["regen"] or n["damage"] or n["dot"] or n["self_damage"] or n["invuln_turns"] or n["reduce"]):
+            return None, ("효과가 하나는 있어야 해요: 회복량·전체 회복·지속 회복·몬스터 피해·지속 피해·자해·무적·피해 감소 중에서 골라 주세요.")
     item = Consumable(key, name, emoji, tier, n["weight"], heal=n["heal"], full=full, regen=n["regen"], regen_turns=n["regen_turns"],
-                      sell_price=n["sell_price"], modify=modify or None, conditions=conditions, material=material, floors=floors)
+                      sell_price=n["sell_price"], modify=modify or None, conditions=conditions, material=material, floors=floors,
+                      damage=n["damage"], dot=n["dot"], dot_turns=n["dot_turns"], self_damage=n["self_damage"], self_turns=n["self_turns"],
+                      invuln_turns=n["invuln_turns"], reduce=n["reduce"], reduce_turns=n["reduce_turns"])
     return replace(item, description=describe_item(item)), None
 
 

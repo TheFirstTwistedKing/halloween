@@ -23,7 +23,8 @@ def _dps(bal: Balance, weapon, dodge: int, boss: bool = False) -> float:
 
 def _plain(item) -> bool:
     """시뮬레이션 플레이어는 조건부·개조 소모품을 쓰지 않는다(언제 쓸지 계획할 수 없는 소모품)."""
-    return not item.modify and not item.conditions and not item.material
+    return (not item.modify and not item.conditions and not item.material and (item.full or item.heal or item.regen)
+            and not item.damage and not item.dot and not item.self_damage)
 
 
 def _best_heal(run, bal):

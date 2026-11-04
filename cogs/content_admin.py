@@ -28,6 +28,16 @@ COND_CHOICES = [Choice(name=COND_LABELS[k].format(v="N"), value=k) for k in COND
 CHANCE_HELP = "그 드롭이 나올 확률(%). 소수도 돼요(기본 100). 둘 다 안 나오면 확률이 더 높은 쪽이 반드시 나와요"
 IMAGE_HELP = "등장 연출과 전투 화면에 붙일 그림 주소(http/https). 움직이는 gif 주소도 돼요."
 MATERIAL_HELP = "개조 재료로 만들까요? 재료는 효과가 없고, /장비개조 레시피에 있는 무기를 들고 쓰면 그 무기가 개조돼요"
+DAMAGE_HELP = "쓰면 싸우는 몬스터에게 바로 주는 피해. 싸우는 중에만 쓸 수 있어요"
+DOT_HELP = "몬스터에게 턴마다 주는 피해(독·화상). 지속피해턴과 함께 정해요"
+DOT_TURNS_HELP = "지속 피해가 이어지는 턴 수"
+SELF_HELP = "쓰면 내 HP가 줄어요(1 밑으로는 안 줄어서 이것만으로 죽지는 않아요). 강한 효과의 대가로 붙여 보세요"
+SELF_TURNS_HELP = "자해가 이어지는 턴 수. 2 이상이면 첫 번째는 바로, 나머지는 턴마다 줄어요. 비우면 한 번만"
+INVULN_HELP = "이 턴 수 동안 몬스터의 공격 피해를 받지 않아요. 턴은 싸우는 중에만 지나가요"
+REDUCE_HELP = "받는 피해를 줄이는 %(1~100). 피해감소턴과 함께 정해요. 가드와 겹치면 둘 다 적용돼요"
+REDUCE_TURNS_HELP = "피해 감소가 이어지는 턴 수"
+EFFECT_NAMES = dict(damage="몬스터피해", dot="지속피해", dot_turns="지속피해턴", self_damage="자해", self_turns="자해턴",
+                    invuln_turns="무적턴", reduce="피해감소", reduce_turns="피해감소턴")
 MODIFY_HELP = "무기 개조: 쓰면 들고 있는 무기가 이 무기로 바뀌어요(무기 이름). 회복 효과와는 함께 못 써요"
 PERMS = dict(guild_only=True, default_permissions=discord.Permissions(administrator=True))
 
@@ -255,23 +265,30 @@ class ContentAdmin(commands.Cog):
 
     @potion.command(name="추가", description="소모품을 새로 만들어요. 회복량·전체회복·지속회복·무기 개조 중 하나를 정해요 (관리자)")
     @app_commands.rename(name="이름", emoji="이모지", tier="등급", weight="등장", heal="회복량", full="전체회복", regen="지속회복량", turns="지속턴",
-                         sell_price="판매가", modify="개조무기", material="재료")
+                         sell_price="판매가", modify="개조무기", material="재료", **EFFECT_NAMES)
     @app_commands.describe(weight=WEIGHT_HELP, heal="한 번에 회복하는 HP", full="HP를 전부 회복", regen="턴마다 회복하는 HP", turns="지속 회복이 이어지는 턴 수",
-                           sell_price=SELL_HELP, modify=MODIFY_HELP, material=MATERIAL_HELP)
+                           sell_price=SELL_HELP, modify=MODIFY_HELP, material=MATERIAL_HELP, damage=DAMAGE_HELP, dot=DOT_HELP, dot_turns=DOT_TURNS_HELP,
+                           self_damage=SELF_HELP, self_turns=SELF_TURNS_HELP, invuln_turns=INVULN_HELP, reduce=REDUCE_HELP, reduce_turns=REDUCE_TURNS_HELP)
     @app_commands.choices(tier=TIERS)
     async def potion_add(self, interaction: discord.Interaction, name: str, emoji: str, tier: Choice[str],
                          weight: app_commands.Range[float, 0, 1000], heal: app_commands.Range[int, 0, 100000] = 0, full: bool = False,
                          regen: app_commands.Range[int, 0, 100000] = 0, turns: app_commands.Range[int, 0, 1000] = 0,
-                         sell_price: app_commands.Range[int, 0, SELL_MAX] | None = None, modify: str | None = None, material: bool = False):
+                         sell_price: app_commands.Range[int, 0, SELL_MAX] | None = None, modify: str | None = None, material: bool = False,
+                         damage: app_commands.Range[int, 0, 1000000] = 0, dot: app_commands.Range[int, 0, 1000000] = 0,
+                         dot_turns: app_commands.Range[int, 0, 1000] = 0, self_damage: app_commands.Range[int, 0, 100000] = 0,
+                         self_turns: app_commands.Range[int, 0, 1000] = 0, invuln_turns: app_commands.Range[int, 0, 1000] = 0,
+                         reduce: app_commands.Range[int, 0, 100] = 0, reduce_turns: app_commands.Range[int, 0, 1000] = 0):
         def go():
-            data = dict(name=name, emoji=emoji.strip(), tier=tier.value, weight=weight, heal=heal, full=full, regen=regen, regen_turns=turns)
+            effects = dict(damage=damage, dot=dot, dot_turns=dot_turns, self_damage=self_damage, self_turns=self_turns,
+                           invuln_turns=invuln_turns, reduce=reduce, reduce_turns=reduce_turns)
+            data = dict(name=name, emoji=emoji.strip(), tier=tier.value, weight=weight, heal=heal, full=full, regen=regen, regen_turns=turns, **effects)
             if material:
-                if heal or full or regen or turns or modify:
-                    raise content.ContentError("개조 재료는 효과가 없어요. 회복·개조무기 옵션과 함께 쓸 수 없어요.")
+                if heal or full or regen or turns or modify or any(effects.values()):
+                    raise content.ContentError("개조 재료는 효과가 없어요. 회복·피해·개조무기 같은 옵션과 함께 쓸 수 없어요.")
                 data["material"] = True
             if modify:
-                if heal or full or regen or turns:
-                    raise content.ContentError("개조 소모품은 회복 효과와 함께 쓸 수 없어요. 개조무기만 적어 주세요.")
+                if heal or full or regen or turns or any(effects.values()):
+                    raise content.ContentError("개조 소모품은 다른 효과와 함께 쓸 수 없어요. 개조무기만 적어 주세요.")
                 data["modify"] = self._weapon_key(modify, interaction.guild_id)
             if sell_price is not None:                  # 비우면 등급별 기본 판매가
                 data["sell_price"] = sell_price
@@ -281,25 +298,37 @@ class ContentAdmin(commands.Cog):
 
     @potion.command(name="수정", description="소모품의 값을 고쳐요. 효과를 바꾸면 이전 효과는 사라져요 (관리자)")
     @app_commands.rename(target="대상", new_name="새이름", emoji="이모지", tier="등급", weight="등장", heal="회복량", full="전체회복",
-                         regen="지속회복량", turns="지속턴", sell_price="판매가", modify="개조무기", material="재료")
-    @app_commands.describe(weight=WEIGHT_HELP, sell_price=SELL_HELP, modify=MODIFY_HELP, material=MATERIAL_HELP)
+                         regen="지속회복량", turns="지속턴", sell_price="판매가", modify="개조무기", material="재료", **EFFECT_NAMES)
+    @app_commands.describe(weight=WEIGHT_HELP, sell_price=SELL_HELP, modify=MODIFY_HELP, material=MATERIAL_HELP, damage=DAMAGE_HELP + " (0이면 없애요)",
+                           dot=DOT_HELP + " (0이면 없애요)", dot_turns=DOT_TURNS_HELP, self_damage=SELF_HELP + " (0이면 없애요)", self_turns=SELF_TURNS_HELP,
+                           invuln_turns=INVULN_HELP + " (0이면 없애요)", reduce=REDUCE_HELP + " (0이면 없애요)", reduce_turns=REDUCE_TURNS_HELP)
     @app_commands.choices(tier=TIERS)
     async def potion_edit(self, interaction: discord.Interaction, target: str, new_name: str | None = None, emoji: str | None = None,
                           tier: Choice[str] | None = None, weight: app_commands.Range[float, 0, 1000] | None = None,
                           heal: app_commands.Range[int, 1, 100000] | None = None, full: bool | None = None,
                           regen: app_commands.Range[int, 1, 100000] | None = None, turns: app_commands.Range[int, 1, 1000] | None = None,
-                          sell_price: app_commands.Range[int, 0, SELL_MAX] | None = None, modify: str | None = None, material: bool | None = None):
+                          sell_price: app_commands.Range[int, 0, SELL_MAX] | None = None, modify: str | None = None, material: bool | None = None,
+                          damage: app_commands.Range[int, 0, 1000000] | None = None, dot: app_commands.Range[int, 0, 1000000] | None = None,
+                          dot_turns: app_commands.Range[int, 0, 1000] | None = None, self_damage: app_commands.Range[int, 0, 100000] | None = None,
+                          self_turns: app_commands.Range[int, 0, 1000] | None = None, invuln_turns: app_commands.Range[int, 0, 1000] | None = None,
+                          reduce: app_commands.Range[int, 0, 100] | None = None, reduce_turns: app_commands.Range[int, 0, 1000] | None = None):
         def go():
+            effects = {k: v for k, v in dict(damage=damage, dot=dot, dot_turns=dot_turns, self_damage=self_damage, self_turns=self_turns,
+                                              invuln_turns=invuln_turns, reduce=reduce, reduce_turns=reduce_turns).items() if v is not None}
+            cleared = {k: 0 for k in EFFECT_NAMES}      # 개조 소모품·재료는 다른 효과가 없다
             changes = dict(name=new_name, emoji=emoji and emoji.strip(), tier=tier and tier.value, weight=weight, sell_price=sell_price)
             changes = {k: v for k, v in changes.items() if v is not None}
+            changes.update(effects)
+            if any(effects.values()) and not material and not modify:     # 새 효과를 정하면 개조 소모품·재료였던 것도 일반 소모품이 된다
+                changes.update(modify=None, material=False)
             if material:                                # 개조 재료로 바꾼다: 효과는 모두 지운다.
-                if heal is not None or full or regen is not None or turns is not None or modify:
-                    raise content.ContentError("개조 재료는 효과가 없어요. 회복·개조무기 옵션과 함께 쓸 수 없어요.")
-                changes.update(material=True, modify=None, full=False, heal=0, regen=0, regen_turns=0)
-            elif modify:                                # 개조 소모품으로 바꾼다: 회복 효과는 지운다.
-                if heal is not None or full or regen is not None or turns is not None:
-                    raise content.ContentError("개조 소모품은 회복 효과와 함께 쓸 수 없어요. 개조무기만 적어 주세요.")
-                changes.update(modify=self._weapon_key(modify, interaction.guild_id), material=False, full=False, heal=0, regen=0, regen_turns=0)
+                if heal is not None or full or regen is not None or turns is not None or modify or any(effects.values()):
+                    raise content.ContentError("개조 재료는 효과가 없어요. 회복·피해·개조무기 같은 옵션과 함께 쓸 수 없어요.")
+                changes.update(material=True, modify=None, full=False, heal=0, regen=0, regen_turns=0, **cleared)
+            elif modify:                                # 개조 소모품으로 바꾼다: 다른 효과는 지운다.
+                if heal is not None or full or regen is not None or turns is not None or any(effects.values()):
+                    raise content.ContentError("개조 소모품은 다른 효과와 함께 쓸 수 없어요. 개조무기만 적어 주세요.")
+                changes.update(modify=self._weapon_key(modify, interaction.guild_id), material=False, full=False, heal=0, regen=0, regen_turns=0, **cleared)
             elif full:                                  # 효과는 하나만: 새 효과를 정하면 이전 효과를 지운다.
                 changes.update(full=True, heal=0, regen=0, regen_turns=0, modify=None, material=False)
             elif regen is not None:

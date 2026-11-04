@@ -31,7 +31,7 @@ def bar(value: int, maximum: int, full: str, width: int = BAR) -> str:
 
 def _ready_mark(run: Run, item, bal) -> str:
     """조건부 소모품 표시: 조건을 만족해 지금 쓸 수 있으면 ✨, 아직이면 🔒. 조건이 없으면 빈 문자열."""
-    if not item.conditions and not item.material:
+    if not item.conditions and not item.material and not item.damage and not item.dot:         # 몬스터에게 쓰는 소모품은 싸울 때만 쓸 수 있어서 표시한다.
         return ""
     return " ✨" if dungeon.can_use_now(run, item, bal) else " 🔒"
 
@@ -78,6 +78,17 @@ def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=No
             embed.add_field(name="🧪 소지품", value="\n".join(shown) + (f"\n… 외 {more}종 (아이템 메뉴에서 ◀ ▶로 넘겨 보세요)" if more else ""), inline=False)
         if run.regen_turns:
             embed.add_field(name="👻 회복 중", value=f"턴마다 HP +{run.regen_amount} (남은 {run.regen_turns}턴)", inline=False)
+        status = []
+        if run.invuln_turns:
+            status.append(f"✨ 무적 (남은 {run.invuln_turns}턴)")
+        if run.reduce_turns and run.reduce_percent:
+            status.append(f"🛡️ 받는 피해 {run.reduce_percent}% 감소 (남은 {run.reduce_turns}턴)")
+        if run.drain_turns:
+            status.append(f"🩸 턴마다 HP -{run.drain_amount} (남은 {run.drain_turns}턴)")
+        if run.enemy and run.enemy.get("dot_turns"):
+            status.append(f"☠️ 몬스터가 턴마다 {run.enemy['dot']} 피해 (남은 {run.enemy['dot_turns']}턴)")
+        if status:
+            embed.add_field(name="🌀 효과", value="\n".join(status), inline=False)
     reward = outcome.reward if outcome else None
     if ended == "clear" and reward:
         lines = [f"{theme.money(reward.candy, cur)} 을(를) 받았어요."]

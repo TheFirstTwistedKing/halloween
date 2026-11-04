@@ -32,6 +32,18 @@ def _best_heal(run, bal):
     return max(heals, key=lambda k: (bal.item_by_key[k].full, bal.item_by_key[k].heal)) if heals else None
 
 
+def _wants(run, bal) -> bool:
+    """상자에서 나온 장비를 장착할까: 무기는 기대 공격력, 갑옷은 피해 감소, 방패는 가드 감소가 더 높을 때."""
+    gear = bal.gear_by_key[run.pending_gear]
+    if gear.slot == "weapon":
+        return _dps(bal, gear, 10) > _dps(bal, bal.gear_by_key.get(run.weapon), 10)
+    if gear.slot == "armor":
+        held = bal.gear_by_key.get(run.armor)
+        return gear.reduction > (held.reduction if held else 0)
+    held = bal.gear_by_key.get(run.shield)
+    return held is None or (gear.guard or 0) > (held.guard or 0)
+
+
 def play(rng, policy: str, bal: Balance) -> tuple[bool, int]:
     """던전 한 판. (클리어했는지, 마지막으로 도달한 방: 처음부터 세어 몇 번째 방인지)."""
     run = dungeon.new_run(bal=bal)
@@ -44,14 +56,7 @@ def play(rng, policy: str, bal: Balance) -> tuple[bool, int]:
         if run.phase == "clear":
             return True, run.stage
         if run.pending_gear:
-            gear = bal.gear_by_key[run.pending_gear]
-            if gear.slot == "weapon":
-                held = bal.gear_by_key.get(run.weapon)
-                better = _dps(bal, gear, 10) > _dps(bal, held, 10)
-            else:
-                held = bal.gear_by_key.get(run.shield)
-                better = held is None or (gear.guard or 0) > (held.guard or 0)
-            (dungeon.equip_pending if better else dungeon.discard_pending)(run, bal)
+            (dungeon.equip_pending if _wants(run, bal) else dungeon.discard_pending)(run, bal)
         elif run.phase == "chest":
             dungeon.open_chest(run, rng, bal)
         elif run.in_battle:

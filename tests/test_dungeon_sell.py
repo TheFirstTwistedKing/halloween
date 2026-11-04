@@ -195,7 +195,7 @@ class ContentTests(unittest.TestCase):
 
     def test_bulk_price_by_tier_and_section(self):
         changed = content.set_sell_price(self.store, G, ("gear", "consumables"), 99, "전설")
-        self.assertEqual(changed, {"gear": 2, "consumables": 1})
+        self.assertEqual(changed, {"gear": 3, "consumables": 1})                  # 전설: 총·호박 대검·호박 판금갑옷 / 황금 호박죽
         self.assertEqual((self.price("gear", "총"), self.price("gear", "호박 대검"), self.price("consumables", "황금 호박죽")), (99, 99, 99))
         self.assertEqual((self.price("gear", "롱소드"), self.price("consumables", "사탕")), (15, 5))      # 다른 등급은 그대로
         content.set_sell_price(self.store, G, ("gear",), 0)
@@ -279,7 +279,7 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_bulk_command_reports_what_changed_and_checks_for_admin(self):
         i = await self.run_cmd(ContentAdmin.sell_price_bulk, self.ask(), 20, Choice("gear"), Choice("일반"))
-        self.assertIn("일반 등급 장비 3개", self.text(i))
+        self.assertIn("일반 등급 장비 4개", self.text(i))                              # 몽둥이·나무 방패·단검·천 갑옷
         self.assertIn("20", self.text(i))
         self.assertEqual((self.price("gear", "단검"), self.price("gear", "롱소드"), self.price("consumables", "사탕")), (20, 15, 5))
         i = await self.run_cmd(ContentAdmin.sell_price_bulk, self.ask(), 0)

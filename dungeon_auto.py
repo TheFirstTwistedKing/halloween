@@ -39,6 +39,8 @@ def _stronger(bal: Balance, held: Gear | None, target: Gear) -> bool:
     """target이 held보다 강한가: 무기는 기대 공격력, 방패는 가드 점수로 비교한다."""
     if target.slot == "weapon":
         return _dps(bal, target) > _dps(bal, held)
+    if target.slot == "armor":
+        return target.reduction > (held.reduction if held else 0)
     return _shield_score(bal, target) > _shield_score(bal, held)
 
 
@@ -54,7 +56,7 @@ def _upgrade_item(run: Run, bal: Balance) -> str | None:
             held, target = bal.gear_by_key.get(run.weapon), bal.gear_by_key.get(item.modify)
         else:
             continue
-        if target is not None and (held is None or target.key != held.key) and target.slot in ("weapon", "shield") and _stronger(bal, held, target):
+        if target is not None and (held is None or target.key != held.key) and target.slot in ("weapon", "shield", "armor") and _stronger(bal, held, target):
             if item.modify and target.slot != "weapon":
                 continue
             return key
@@ -71,6 +73,8 @@ def choose(run: Run, bal: Balance) -> tuple[str, str | None]:
             return "discard", None
         if gear.slot == "weapon":
             better = _dps(bal, gear) > _dps(bal, bal.gear_by_key.get(run.weapon))
+        elif gear.slot == "armor":
+            better = _stronger(bal, bal.gear_by_key.get(run.armor), gear)
         else:
             better = _shield_score(bal, gear) > _shield_score(bal, bal.gear_by_key.get(run.shield))
         return ("equip" if better else "discard"), None

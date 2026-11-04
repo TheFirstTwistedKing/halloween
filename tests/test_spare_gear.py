@@ -266,7 +266,7 @@ class ScreenTests(unittest.IsolatedAsyncioTestCase):
         names = lambda run: [f.name for f in run_embed(run, None, bal).fields]
         self.assertNotIn("📦 예비", names(run_with(weapon="club")))
         embed = run_embed(run_with(weapon="club", spare_weapon="dagger"), None, bal)
-        self.assertEqual({f.name: f.value for f in embed.fields}["📦 예비"], "🗡️ 단검 · 🛡️ —")
+        self.assertEqual({f.name: f.value for f in embed.fields}["📦 예비"], "🗡️ 단검 · 🛡️ — · 🧥 —")
 
     async def test_the_equipment_screen_lists_equipped_and_spare_gear(self):
         run = run_with(weapon="club", spare_weapon="longsword", shield="wooden_shield")
@@ -276,7 +276,7 @@ class ScreenTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("**예비**: ⚔️ **롱소드**", fields["⚔️ 무기"])
         self.assertIn("**장착**: 🪵 **나무 방패**", fields["🛡️ 방패"])
         self.assertIn("**예비**: 비어 있어요", fields["🛡️ 방패"])
-        self.assertIn("무기 1개·방패 1개", embed.description)
+        self.assertIn("무기·방패·갑옷을 1개씩", embed.description)
         bare = {f.name: f.value for f in equip_embed(run_with(), self.store.balance(G)).fields}
         self.assertIn("**장착**: 👊 맨손", bare["⚔️ 무기"])
 
@@ -287,7 +287,7 @@ class ScreenTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(label(weapon="club"), "무기 예비에 넣기")
         self.assertEqual(label(spare_weapon="dagger"), "무기 꺼내 장착")
         view = EquipView(self.bot, U, run_with(weapon="club"), bal)
-        self.assertEqual([c.disabled for c in view.children], [False, True, False])        # 방패는 바꿀 게 없다.
+        self.assertEqual([c.disabled for c in view.children], [False, True, True, False])        # 방패·갑옷은 바꿀 게 없다.
 
     async def test_open_the_screen_swap_through_it_and_come_back(self):
         run = self.start(weapon="club", spare_weapon="longsword")

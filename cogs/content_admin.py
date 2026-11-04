@@ -17,8 +17,9 @@ from paging import send_paged, split_pages
 
 Choice = app_commands.Choice
 TIERS = [Choice(name=t, value=t) for t in TIER_ORDER]
-SLOTS = [Choice(name="무기", value="weapon"), Choice(name="방패", value="shield")]
+SLOTS = [Choice(name="무기", value="weapon"), Choice(name="방패", value="shield"), Choice(name="갑옷", value="armor")]
 LIST_CHOICES = [Choice(name=SECTION_LABELS[s], value=s) for s in SECTIONS]
+REDUCTION_HELP = f"갑옷: 받는 모든 피해를 줄이는 비율(%, 1~{balance.ARMOR_MAX}). 갑옷에는 필수예요. 가드·소모품 효과와 겹쳐 적용돼요"
 GUARD_CHANCE_HELP = "방패: 이 방패로 방어할 때 가드에 성공할 확률(%). 비우면 서버 기본(/던전설정 방어.성공확률)을 써요."
 FLOORS_HELP = "나올 층: 3,5,8-10처럼 여러 층을 쉼표로, 범위는 -로. '전체'를 쓰면 모든 층. 비우면 지금 설정만 봐요"
 WEIGHT_HELP = "상자에서 나올 비율. 소수도 돼요(예: 0.5, 0.05). 다른 것들과의 비율로 계산하고 높을수록 자주 나와요"
@@ -189,12 +190,12 @@ class ContentAdmin(commands.Cog):
         return names_for(self.bot.store, interaction.guild_id, ("monsters", "bosses"), current) if interaction.guild_id else []
 
     # ---------------------------------------------------------------- 장비
-    gear = app_commands.Group(name="장비", description="던전 장비(무기·방패)를 더하고 빼고 바꿔요 (관리자)", **PERMS)
+    gear = app_commands.Group(name="장비", description="던전 장비(무기·방패·갑옷)를 더하고 빼고 바꿔요 (관리자)", **PERMS)
 
     @gear.command(name="추가", description="장비를 새로 만들어요 (관리자)")
     @app_commands.rename(name="이름", emoji="이모지", slot="종류", tier="등급", weight="등장", attack="공격력", crit="크리티컬",
-                         dodge="회피변환", guard="가드", reflect="반사", guard_chance="가드성공률", sell_price="판매가")
-    @app_commands.describe(slot="무기 / 방패", weight=WEIGHT_HELP, attack="무기: 공격 피해 추가", crit="무기: 크리티컬(2배) 확률(%)",
+                         dodge="회피변환", guard="가드", reflect="반사", guard_chance="가드성공률", sell_price="판매가", reduction="피해감소")
+    @app_commands.describe(slot="무기 / 방패 / 갑옷", weight=WEIGHT_HELP, reduction=REDUCTION_HELP, attack="무기: 공격 피해 추가", crit="무기: 크리티컬(2배) 확률(%)",
                            dodge="무기: 잡몹의 회피 확률을 이 값으로 바꿔요(%)", guard="방패: 가드 성공 시 피해 감소(%)(필수)",
                            reflect="방패: 가드 성공 시 반사 피해(%)", guard_chance=GUARD_CHANCE_HELP, sell_price=SELL_HELP)
     @app_commands.choices(slot=SLOTS, tier=TIERS)
@@ -203,10 +204,11 @@ class ContentAdmin(commands.Cog):
                        crit: app_commands.Range[int, 0, 100] = 0, dodge: app_commands.Range[int, 0, 95] | None = None,
                        guard: app_commands.Range[int, 0, 100] | None = None, reflect: app_commands.Range[int, 0, 500] | None = None,
                        sell_price: app_commands.Range[int, 0, SELL_MAX] | None = None,
-                       guard_chance: app_commands.Range[int, 0, 100] | None = None):
+                       guard_chance: app_commands.Range[int, 0, 100] | None = None,
+                       reduction: app_commands.Range[int, 0, balance.ARMOR_MAX] = 0):
         def go():
             data = dict(name=name, emoji=emoji.strip(), slot=slot.value, tier=tier.value, weight=weight, attack=attack, crit=crit,
-                        dodge=dodge, guard=guard, reflect=reflect, guard_chance=guard_chance)
+                        dodge=dodge, guard=guard, reflect=reflect, guard_chance=guard_chance, reduction=reduction)
             if sell_price is not None:                  # 비우면 등급별 기본 판매가
                 data["sell_price"] = sell_price
             entity = content.add(self.bot.store, interaction.guild_id, "gear", data)
@@ -215,8 +217,8 @@ class ContentAdmin(commands.Cog):
 
     @gear.command(name="수정", description="장비의 값을 고쳐요. 바꿀 것만 적으세요 (-1은 해제) (관리자)")
     @app_commands.rename(target="대상", new_name="새이름", emoji="이모지", tier="등급", weight="등장", attack="공격력", crit="크리티컬",
-                         dodge="회피변환", guard="가드", reflect="반사", guard_chance="가드성공률", sell_price="판매가")
-    @app_commands.describe(weight=WEIGHT_HELP, guard_chance=GUARD_CHANCE_HELP + " -1은 해제(서버 기본으로)", sell_price=SELL_HELP)
+                         dodge="회피변환", guard="가드", reflect="반사", guard_chance="가드성공률", sell_price="판매가", reduction="피해감소")
+    @app_commands.describe(weight=WEIGHT_HELP, guard_chance=GUARD_CHANCE_HELP + " -1은 해제(서버 기본으로)", sell_price=SELL_HELP, reduction=REDUCTION_HELP)
     @app_commands.choices(tier=TIERS)
     async def gear_edit(self, interaction: discord.Interaction, target: str, new_name: str | None = None, emoji: str | None = None,
                         tier: Choice[str] | None = None, weight: app_commands.Range[float, 0, 1000] | None = None,
@@ -224,10 +226,11 @@ class ContentAdmin(commands.Cog):
                         dodge: app_commands.Range[int, -1, 95] | None = None, guard: app_commands.Range[int, 0, 100] | None = None,
                         reflect: app_commands.Range[int, -1, 500] | None = None,
                         sell_price: app_commands.Range[int, 0, SELL_MAX] | None = None,
-                        guard_chance: app_commands.Range[int, -1, 100] | None = None):
+                        guard_chance: app_commands.Range[int, -1, 100] | None = None,
+                        reduction: app_commands.Range[int, 1, balance.ARMOR_MAX] | None = None):
         def go():
             changes = dict(name=new_name, emoji=emoji and emoji.strip(), tier=tier and tier.value, weight=weight, attack=attack,
-                           crit=crit, guard=guard, sell_price=sell_price)
+                           crit=crit, guard=guard, sell_price=sell_price, reduction=reduction)
             changes = {k: v for k, v in changes.items() if v is not None}
             if dodge is not None:                       # -1은 '해제'(None)
                 changes["dodge"] = None if dodge < 0 else dodge
@@ -591,7 +594,7 @@ class ContentAdmin(commands.Cog):
     def _gear_choices(self, guild_id: int, current: str) -> list:
         """무기·방패 모두(자동완성에서 구분되게 종류를 붙인다)."""
         needle = current.strip().lower()
-        return [Choice(name=f"{d['emoji']} {d['name']} ({'무기' if d['slot'] == 'weapon' else '방패'})"[:100], value=d["name"])
+        return [Choice(name=f"{d['emoji']} {d['name']} ({balance.SLOT_NAMES.get(d['slot'], '장비')})"[:100], value=d["name"])
                 for d in content.current(self.bot.store, guild_id, "gear") if needle in d["name"].lower()][:25]
 
     @mod.command(name="대량삭제", description="개조 레시피를 여러 개 골라 한 번에 지워요 (관리자)")

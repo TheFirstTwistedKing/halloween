@@ -55,6 +55,7 @@ class Gear:
     description: str = ""
     sell_price: int = 0          # 던전 안에서 팔 때 받는 재화(개당). 0이면 팔 수 없다.
     guard_chance: int | None = None  # 방패: 이 방패로 방어할 때 가드에 성공할 확률(%). 없으면 서버 기본(방어.성공확률)
+    floors: tuple = ()           # 이 장비가 상자에서 나올 수 있는 층(비어 있으면 모든 층)
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,7 @@ class Consumable:
     modify: str | None = None    # 무기 개조: 쓰면 지금 든 무기가 이 무기(key)로 바뀐다. 개조 소모품은 회복 효과가 없다.
     conditions: tuple = ()       # 사용 조건 ((종류, 값), ...). 전부 만족해야 쓸 수 있다. 비면 언제나 쓸 수 있다(아래 COND_* 참고).
     material: bool = False       # 개조 재료: 효과가 없고, /장비개조 레시피에 있는 무기를 들고 쓰면 그 무기가 개조된다.
+    floors: tuple = ()           # 이 소모품이 상자에서 나올 수 있는 층(비어 있으면 모든 층)
 
 
 @dataclass(frozen=True)
@@ -368,11 +370,14 @@ def _check_floors(data: dict):
     return tuple(sorted(set(floors))), None
 
 
-def monsters_for_floor(table, floor: int) -> list:
-    """이 층에 나올 수 있는 몬스터·보스(층 제한이 없거나 이 층이 들어 있는 것, 등장 비율 0은 뺀다).
+def candidates_for_floor(table, floor: int) -> list:
+    """이 층에 나올 수 있는 것들(몬스터·보스·상자의 장비·소모품): 층 제한이 없거나 이 층이 들어 있는 것, 등장 비율 0은 뺀다.
     하나도 없으면(무한모드의 높은 층 등) 층 제한을 무시하고 비율이 0이 아닌 모두에서 고른다."""
     here = [m for m in table if m.weight > 0 and (not m.floors or floor in m.floors)]
     return here or [m for m in table if m.weight > 0] or list(table)
+
+
+monsters_for_floor = candidates_for_floor            # 예전 이름(몬스터 전용으로 만들었을 때)
 
 
 def _check_secret(data: dict, key: str, name: str, emoji: str, numbers):
@@ -456,6 +461,9 @@ def check_entity(section: str, data) -> tuple[object | None, str | None]:
         n["weight"], problem = _weight(data)
         if problem:
             return None, problem
+        floors, problem = _check_floors(data)                  # 예전에 저장된 장비에는 층 제한이 없어서 모든 층
+        if problem:
+            return None, problem
         extra = {}
         for field_name, high in (("dodge", 95), ("guard", 100), ("reflect", 500), ("guard_chance", 100)):
             extra[field_name], problem = _num(data, field_name, 0, high, None, none_ok=True)
@@ -470,13 +478,16 @@ def check_entity(section: str, data) -> tuple[object | None, str | None]:
                 return None, "방패에는 가드(피해 감소 %)가 필요해요."
         gear = Gear(key, name, emoji, slot, tier, n["weight"], attack=n["attack"], crit=n["crit"], dodge=extra["dodge"],
                     guard=extra["guard"], reflect=extra["reflect"], sell_price=n["sell_price"],
-                    guard_chance=extra["guard_chance"])
+                    guard_chance=extra["guard_chance"], floors=floors)
         return replace(gear, description=describe_gear(gear)), None
     n, problem = numbers(("heal", 0, 100000, 0), ("regen", 0, 100000, 0), ("regen_turns", 0, 1000, 0),
                          ("sell_price", 0, SELL_MAX, SELL_DEFAULT[tier]))
     if problem:
         return None, problem
     n["weight"], problem = _weight(data)
+    if problem:
+        return None, problem
+    floors, problem = _check_floors(data)                      # 예전에 저장된 소모품에는 층 제한이 없어서 모든 층
     if problem:
         return None, problem
     full = data.get("full", False)
@@ -507,7 +518,7 @@ def check_entity(section: str, data) -> tuple[object | None, str | None]:
     else:
         n["regen_turns"] = 0
     item = Consumable(key, name, emoji, tier, n["weight"], heal=n["heal"], full=full, regen=n["regen"], regen_turns=n["regen_turns"],
-                      sell_price=n["sell_price"], modify=modify or None, conditions=conditions, material=material)
+                      sell_price=n["sell_price"], modify=modify or None, conditions=conditions, material=material, floors=floors)
     return replace(item, description=describe_item(item)), None
 
 
@@ -805,6 +816,12 @@ def validate(overrides: dict, content=None) -> str | None:
         return "상자에서 나오는 장비의 '등장' 가중치가 전부 0이에요. 하나는 0보다 커야 해요."
     if sum(c.weight for c in bal.consumables) <= 0:
         return "상자에서 나오는 아이템의 '등장' 가중치가 전부 0이에요. 하나는 0보다 커야 해요."
+    if "chest" in kinds:                                         # 층마다 상자에서 나올 장비·소모품이 하나는 남아야 한다
+        for floor in range(1, bal.floors + 1):
+            for label, subject, table in (("장비", "장비가", bal.gear), ("소모품", "소모품이", bal.consumables)):
+                if not any(x.weight > 0 and (not x.floors or floor in x.floors) for x in table):
+                    return (f"{floor}층 상자에서 나올 수 있는 {subject} 하나도 없어요. 그 층에 나올 {label}"
+                            f"(등장 비율이 0보다 크고, 층 제한이 없거나 그 층이 들어 있는 것)을 하나 이상 남겨 주세요.")
     return None
 
 

@@ -11,8 +11,8 @@ from dataclasses import asdict, dataclass, field
 
 from balance import (BASE_DAMAGE, BASE_DODGE, BOSSES, CLEAR_CANDY, CONSUMABLES, DEFAULT, FLOOR_HEAL, FLOOR_SCALE, FLOORS,  # noqa: F401  (다시 내보냄)
                      GEAR, GUARD_BASE, GUARD_CHANCE, GUARD_HEAL, MAX_HP, MONSTERS, REFLECT_BASE, ROOM_PLAN, ROOMS,
-                     TICKET_CHANCE, TIER_ORDER, Balance, Consumable, EVENT_TAG, Gear, Monster, SecretBoss, condition_text, floor_scaled, monsters_for_floor,
-                     reduce_damage)
+                     TICKET_CHANCE, TIER_ORDER, Balance, Consumable, EVENT_TAG, Gear, Monster, SecretBoss, condition_text, candidates_for_floor, floor_scaled,
+                     monsters_for_floor, reduce_damage)
 
 GEAR_BY_KEY = {g.key: g for g in GEAR}          # 기본값 표(이름·이모지 조회용). 실제 수치는 bal에서 읽는다.
 ITEM_BY_KEY = {c.key: c for c in CONSUMABLES}
@@ -466,7 +466,8 @@ def use_consumable(run: Run, key: str, bal: Balance | None = None) -> list[str]:
 def open_chest(run: Run, rng, bal: Balance | None = None) -> tuple[Gear, Consumable, list[str]]:
     """보물 상자: 장비 한 개와 아이템 한 개. 좋은 것일수록 확률이 낮다."""
     bal = bal or DEFAULT
-    gear, item = pick_weighted(rng, bal.gear), pick_weighted(rng, bal.consumables)
+    gear = pick_weighted(rng, candidates_for_floor(bal.gear, run.floor))         # 이 층 상자에서 나올 수 있는 것 중에서 '등장' 비율대로
+    item = pick_weighted(rng, candidates_for_floor(bal.consumables, run.floor))
     run.phase = "chest_done"
     run.pending_gear = gear.key                      # 장착할지 버릴지 정할 때까지 앞으로 갈 수 없다.
     run.items[item.key] = run.items.get(item.key, 0) + 1

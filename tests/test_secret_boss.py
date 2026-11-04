@@ -153,7 +153,7 @@ class RoomTests(unittest.TestCase):
         self.assertEqual((run.floor, run.room, run.kind == "secret"), (2, 1, False))
 
     def test_on_the_last_floor_the_secret_room_comes_before_the_clear(self):
-        bal = Balance.build({})
+        bal = Balance.build({"상점.간격": 0})
         run = boss_cleared(bal, floor=bal.floors)
         dungeon.advance(run, Scripted(randoms=[0.0, 0.0]), bal)
         self.assertEqual((run.kind, run.floor), ("secret", bal.floors))

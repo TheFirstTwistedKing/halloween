@@ -13,7 +13,7 @@ from dungeon import DungeonError, Run
 from store import Store, StoreError
 
 AUTO_REFUSE = "⏩ 빠른진행 중이에요. ⏹ 멈추기를 누르면 직접 진행할 수 있어요."
-ACTIONS = ("advance", "attack", "defend", "item", "chest", "equip", "stash", "swap_weapon", "swap_shield", "swap_armor", "discard", "quit", "finish", "infinite")
+ACTIONS = ("advance", "attack", "defend", "item", "chest", "equip", "stash", "swap_weapon", "swap_shield", "swap_armor", "discard", "quit", "finish", "infinite", "buy")
 
 
 @dataclass
@@ -86,13 +86,24 @@ async def act(store: Store, locks, rng, guild_id: int, user_id: int, rev: int, a
             return Outcome(False, "빠른진행이 멈췄어요.", run=run, stale=True)
         if run.auto and not auto and action != "quit":
             return Outcome(False, AUTO_REFUSE, run=run)
+        spend = 0
         try:
-            problem = _apply(run, rng, action, arg, guard_ok, bal)
+            if action == "buy":                           # 상점: 재화는 저장할 때 같이 뺀다(모자라면 아무것도 바뀌지 않는다).
+                spend = dungeon.buy_offer(run, arg, bal)
+                problem = None
+            else:
+                problem = _apply(run, rng, action, arg, guard_ok, bal)
         except DungeonError as exc:
             problem = str(exc)
         if problem:
             return Outcome(False, problem, run=run)
         run.bump()
+        if action == "buy":
+            try:
+                store.spend_in_dungeon(guild_id, user_id, run.to_json(), spend)
+            except StoreError as exc:
+                return Outcome(False, str(exc))
+            return Outcome(True, run=run)
         if run.phase == "dead" and _revive(store, guild_id, user_id, run, bal):
             return Outcome(True, run=run, notes=["revived"])
         if not run.finished and run.phase != "dead":
@@ -299,7 +310,7 @@ def _apply(run: Run, rng, action: str, arg: str | None, guard_ok: bool | None, b
     elif action == "infinite":
         dungeon.go_infinite(run, rng, bal)
     elif action == "advance":
-        if not run.can_advance:
+        if not (run.can_advance or run.phase == "shop"):          # 상점에서는 [상점 나가기]로 위 층에 올라간다
             return ("먼저 상자에서 나온 장비를 장착하거나 버려 주세요." if run.pending_gear
                     else "지금은 앞으로 갈 수 없어요.")
         dungeon.advance(run, rng, bal)

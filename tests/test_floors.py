@@ -58,12 +58,13 @@ class AscendTests(unittest.TestCase):
             self.assertEqual(run.hp, expected, rate)
 
     def test_the_last_boss_clears_the_dungeon_and_no_other_boss_does(self):
+        no_shop = Balance.build({"상점.간격": 0})                         # 상점은 test_shop.py에서 따로 시험한다
         for floor in range(1, dungeon.FLOORS):
             run = at_boss_cleared(floor)
-            dungeon.advance(run, Scripted(randoms=[0.99]))   # 맨 앞 난수는 시크릿 방 추첨(1% 미만이어야 열린다)
+            dungeon.advance(run, Scripted(randoms=[0.99]), no_shop)   # 맨 앞 난수는 시크릿 방 추첨(1% 미만이어야 열린다)
             self.assertEqual((run.phase == "clear", run.floor), (False, floor + 1), floor)
         run = at_boss_cleared(dungeon.FLOORS)
-        dungeon.advance(run, Scripted(randoms=[0.99]))
+        dungeon.advance(run, Scripted(randoms=[0.99]), no_shop)
         self.assertEqual(run.phase, "summit")                              # 꼭대기: 바로 클리어하지 않고 먼저 묻는다
         self.assertIn("10층", run.events[0])
         dungeon.take_clear(run)
@@ -178,6 +179,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         from services import Locks
         self.store, self.locks = Store(":memory:"), Locks()
         self.store.add_item(G, U, self.store.ensure_system_items(G)["key"], 1)
+        self.store.update_settings(G, dungeon={"상점.간격": 0})                # 상점은 test_shop.py에서 따로 시험한다
 
     def tearDown(self):
         self.store.close()

@@ -55,7 +55,7 @@ class ResumeOldRunsTests(unittest.IsolatedAsyncioTestCase):
 
     async def finish(self, run, rng=None):
         """끝날 때까지 이어서 한다(전투는 강한 플레이어로). 끝난 결과를 돌려준다."""
-        self.store.update_settings(G, dungeon={"일반.맨손공격력": 800})
+        self.store.update_settings(G, dungeon={"일반.맨손공격력": 800, "상점.간격": 0})       # 상점은 test_shop.py에서 따로 시험한다
         import random
         rng = rng or random.Random(4)
         for _ in range(4000):

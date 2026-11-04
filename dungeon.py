@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass, field
 from balance import (BASE_DAMAGE, BASE_DODGE, BOSSES, CLEAR_CANDY, CONSUMABLES, DEFAULT, FLOOR_HEAL, FLOOR_SCALE, FLOORS,  # noqa: F401  (다시 내보냄)
                      GEAR, GUARD_BASE, GUARD_CHANCE, GUARD_HEAL, MAX_HP, MONSTERS, REFLECT_BASE, ROOM_PLAN, ROOMS,
                      TICKET_CHANCE, TIER_ORDER, Balance, Consumable, EVENT_TAG, Gear, Monster, SecretBoss, condition_text, candidates_for_floor, floor_scaled,
-                     monsters_for_floor, reduce_damage, GEAR_SLOTS, SLOT_NAMES)
+                     monsters_for_floor, reduce_damage, shop_price, GEAR_SLOTS, SLOT_NAMES, SHOP_SLOTS)
 from josa import eul_reul, i_ga
 
 BARE = {"weapon": "맨손", "shield": "맨몸 가드", "armor": "맨몸"}       # 그 칸이 비었을 때 부르는 말
@@ -67,6 +67,8 @@ class Run:
     auto_paid: bool = False                         # 이 던전에서 빠른진행 비용(입장 물품 한 번 더)을 이미 냈다: 껐다 켜도 다시 내지 않는다.
     infinite: bool = False                          # 무한모드 중: 마지막 층을 깬 뒤 클리어하지 않고 계속 올라가고 있다.
     bonus: int = 0                                  # 방금 올라간 무한 층의 보너스 재화(서비스가 지급하고 0으로 되돌린다)
+    shop: list = field(default_factory=list)        # 지금 상점의 상품 [{kind: gear|item, key, price, sold}]
+    shop_floor: int = 0                             # 마지막으로 상점이 열린 층(같은 층에서 또 열리지 않게)
     room_candy: int = 0                             # 방금 들어선 커스텀 방이 준 재화(서비스가 지급하고 0으로 되돌린다)
     last: list = field(default_factory=list)        # 바로 직전 행동에서 일어난 일(소모품 사용 조건에 쓴다): guard_success·guard_fail·attack_hit·attack_miss·item_gain:키·item_use:키
 
@@ -224,6 +226,10 @@ def advance(run: Run, rng, bal: Balance | None = None) -> list[str]:
         run.events = [f"🌌 **시크릿 방**이 열렸어요! **{boss.name}**이(가) 나타났어요!"]
         return run.events
     if run.room >= ROOMS:
+        if shop_due(run, bal):                            # 보스(시크릿 보스 포함)를 이기고 올라가기 직전에 상점이 열린다.
+            opened = open_shop(run, rng, bal)
+            if opened:
+                return opened
         if run.floor >= bal.floors and not run.infinite:
             if bal.infinite:                              # 꼭대기: 클리어하고 끝낼지, 무한모드로 계속할지 묻는다(고를 때까지 이 방에서 안 움직인다).
                 run.phase, run.enemy, run.kind = "summit", None, "summit"
@@ -267,6 +273,73 @@ def advance(run: Run, rng, bal: Balance | None = None) -> list[str]:
         run.phase, text = "empty", "🚪 텅 빈 방이에요. 앞으로 나아갈 수 있어요."
     run.events = [*climb, *([text] if isinstance(text, str) else text)]
     return run.events
+
+
+def shop_due(run: Run, bal: Balance) -> bool:
+    """이 층을 마치고 올라가기 전에 상점이 열려야 하나: 간격(층)의 배수이고, 이 층에서 아직 열리지 않았고,
+    클리어로 끝나는 마지막 층이 아닐 때(무한모드가 켜져 있으면 마지막 층에서도 열린다)."""
+    if bal.shop_interval <= 0 or run.floor % bal.shop_interval != 0 or run.shop_floor == run.floor:
+        return False
+    return run.floor < bal.floors or run.infinite or bool(bal.infinite)
+
+
+def open_shop(run: Run, rng, bal: Balance) -> list[str]:
+    """상점을 연다: 이 층에 나올 수 있는 장비·소모품(등장 비율 0보다 큰 것) 중에서 서로 다른 상품 SHOP_SLOTS개를 고른다.
+    상품마다 장비/소모품은 반반, 그 안에서는 모두 같은 확률이다(등장 비율은 상자 전용). 팔 것이 하나도 없으면 상점은 열리지 않는다(빈 목록)."""
+    run.shop_floor = run.floor
+    pools = {"gear": [g for g in candidates_for_floor(bal.gear, run.floor) if g.weight > 0],
+             "item": [c for c in candidates_for_floor(bal.consumables, run.floor) if c.weight > 0]}
+    offers = []
+    for _ in range(SHOP_SLOTS):
+        kinds = [k for k, pool in pools.items() if pool]
+        if not kinds:
+            break
+        kind = kinds[0] if len(kinds) == 1 else ("gear" if rng.random() < 0.5 else "item")
+        pool = pools[kind]
+        pick = pool.pop(min(int(rng.random() * len(pool)), len(pool) - 1))
+        offers.append({"kind": kind, "key": pick.key, "price": shop_price(pick, bal.shop_markup), "sold": False})
+    if not offers:                                      # 팔 것이 없다: 상점 없이 그냥 올라간다.
+        return []
+    run.shop = offers
+    run.phase, run.kind, run.enemy = "shop", "shop", None
+    run.events = [f"🛒 **{run.floor}층 상점**이 열렸어요! 보스를 이긴 보상으로 재화를 써서 장비·소모품을 살 수 있어요.",
+                  "다 봤으면 [상점 나가기]로 위 층에 올라가요. 이 상점은 한 번만 열려요."]
+    return run.events
+
+
+def buy_offer(run: Run, arg, bal: Balance) -> int:
+    """상점 상품 하나를 산다(arg: 0부터 센 번호). run에 반영하고 낼 재화를 돌려준다 — 재화를 빼는 건 부르는 쪽(저장소)이다.
+    산 장비는 상자에서 나온 것처럼 '정하지 않은 장비'가 되고, 소모품은 소지품에 들어간다."""
+    if run.phase != "shop":
+        raise DungeonError("지금은 상점이 아니에요.")
+    try:
+        number = int(arg)
+    except (TypeError, ValueError):
+        raise DungeonError("알 수 없는 상품이에요.")
+    if not 0 <= number < len(run.shop):
+        raise DungeonError("알 수 없는 상품이에요.")
+    offer = run.shop[number]
+    if offer.get("sold"):
+        raise DungeonError("이미 산 상품이에요.")
+    if offer["kind"] == "gear":
+        gear = bal.gear_by_key.get(offer["key"])
+        if gear is None:
+            raise DungeonError("그 상품은 사라졌어요.")
+        if run.pending_gear:
+            raise DungeonError("먼저 상자나 상점에서 받은 장비를 장착하거나 예비에 넣거나 버려 주세요.")
+        run.pending_gear = gear.key
+        run.loot.append(gear.name)
+        run.events = [f"🛒 {gear.emoji} **{gear.name}** ({gear.tier})을(를) 샀어요! — {gear.description}", "장착할지, 예비에 넣을지, 버릴지 정해 주세요."]
+    else:
+        item = bal.item_by_key.get(offer["key"])
+        if item is None:
+            raise DungeonError("그 상품은 사라졌어요.")
+        run.items[item.key] = run.items.get(item.key, 0) + 1
+        run.last.append(f"item_gain:{item.key}")
+        run.loot.append(item.name)
+        run.events = [f"🛒 {item.emoji} **{item.name}** ({item.tier})을(를) 샀어요! 소지품에 넣었어요. — {item.description}"]
+    offer["sold"] = True
+    return offer["price"]
 
 
 TRAP_TEXTS = ("바닥이 푹 꺼졌어요!", "벽에서 화살이 쏟아져요!", "천장에서 돌덩이가 떨어져요!", "독가스가 뿜어져 나와요!")

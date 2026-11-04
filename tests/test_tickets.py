@@ -163,7 +163,7 @@ class FullStoryTests(unittest.IsolatedAsyncioTestCase):
         try:
             store, locks = w.store, Locks()
             store.ensure_defaults(G)
-            store.update_settings(G, dungeon={"보상.획득권확률": 100})                 # 반드시 나오게
+            store.update_settings(G, dungeon={"보상.획득권확률": 100, "상점.간격": 0})  # 반드시 나오게(상점은 test_shop.py에서 따로 시험한다)
             store.add_item(G, U, store.ensure_system_items(G)["key"], 1)
             out = await service.enter(store, locks, G, U)
             data = json.loads(out.run.to_json())

@@ -279,6 +279,7 @@ class ClearRewardTests(RulesFixture):
         """방 10을 넘긴 던전을 끝낸다."""
         import json
         import dungeon
+        self.store.update_settings(G, dungeon={**self.store.settings(G)["dungeon"], "상점.간격": 0})       # 상점은 test_shop.py에서 따로 시험한다
         run = (await service.enter(self.store, self.w.bot.locks, G, U)).run
         data = json.loads(run.to_json())
         data.update(floor=dungeon.FLOORS, room=dungeon.ROOMS, phase="cleared")

@@ -31,7 +31,8 @@ TIER_ORDER = {"일반": 0, "희귀": 1, "전설": 2}
 SELL_DEFAULT = {"일반": 5, "희귀": 15, "전설": 50}     # 던전 장비·소모품의 기본 판매가(등급별). 0이면 팔 수 없다.
 SELL_MAX = 1_000_000_000
 
-ROOM_KINDS = (("chest", "상자"), ("empty", "빈방"), ("monster", "잡몹"), ("boss", "보스"))
+TRAP_DAMAGE = 100                # 함정 방에서 입는 피해(1층 기준. 몬스터처럼 층마다 늘어난다)
+ROOM_KINDS = (("chest", "상자"), ("empty", "빈방"), ("trap", "함정"), ("monster", "잡몹"), ("boss", "보스"))
 # 방 배치: 1~10번째 방 각각의 추첨표((종류, 가중치)). 홀수 방은 상자, 짝수 방은 빈 방 또는 잡몹, 마지막 방은 미니 보스.
 # 가중치는 합이 100일 필요가 없다(비율로 쓴다). 가중치가 0인 칸은 나오지 않고, 칸이 하나뿐인 방은 난수를 뽑지 않는다.
 _CHEST = (("chest", 100),)
@@ -123,6 +124,23 @@ class SecretBoss:
     boss: bool = True                  # 보스처럼 회피 불가
     dodge: int = 0
     floors: tuple = ()                 # 이 시크릿 보스가 나올 수 있는 층(비어 있으면 모든 층). 보스를 이긴 그 층의 11번째 방에 나온다.
+
+
+@dataclass(frozen=True)
+class CustomRoom:
+    """관리자가 만든 방. 방 배치의 다른 방 종류와 가중치로 겨뤄서 나오고, 들어서면 효과가 바로 일어나요(피해·회복·재화·소모품)."""
+    key: str
+    name: str
+    emoji: str
+    text: str = ""                     # 들어서면 보이는 문구
+    weight: float = 10                 # 방 배치의 다른 방 종류(상자·빈방·잡몹…)와 겨루는 가중치(같은 단위, 소수 가능)
+    rooms: tuple = ()                  # 나올 수 있는 방 번호(1~9. 10번째는 보스 방). 비어 있으면 1~9번째 모두
+    floors: tuple = ()                 # 나올 수 있는 층(비어 있으면 모든 층)
+    damage: int = 0                    # 들어서면 입는 피해(함정처럼 막을 수 없지만 갑옷·피해 감소·무적은 적용돼요)
+    heal: int = 0                      # 들어서면 회복하는 HP
+    candy: int = 0                     # 들어서면 얻는 재화
+    item: str | None = None            # 들어서면 얻는 소모품(key)
+    item_amount: int = 1
 
 
 def describe_gear(gear: Gear) -> str:
@@ -221,9 +239,9 @@ BOSSES = (                                                      # 보스는 회�
 
 
 # ---------------------------------------------------------------- 던전 콘텐츠(몬스터·보스·장비·소모품을 관리자가 더하고 빼고 바꾼다)
-SECTIONS = ("monsters", "bosses", "gear", "consumables", "secrets")
-SECTION_LABELS = {"monsters": "몬스터", "bosses": "보스", "gear": "장비", "consumables": "소모품", "secrets": "시크릿 보스"}
-SECTION_LIMITS = {"monsters": 25, "bosses": 25, "gear": 50, "consumables": 50, "secrets": 10}
+SECTIONS = ("monsters", "bosses", "gear", "consumables", "secrets", "rooms")
+SECTION_LABELS = {"monsters": "몬스터", "bosses": "보스", "gear": "장비", "consumables": "소모품", "secrets": "시크릿 보스", "rooms": "커스텀 방"}
+SECTION_LIMITS = {"monsters": 25, "bosses": 25, "gear": 50, "consumables": 50, "secrets": 10, "rooms": 30}
 NAME_MAX = 30
 
 
@@ -445,6 +463,40 @@ def _check_secret(data: dict, key: str, name: str, emoji: str, numbers):
     return boss, None
 
 
+ROOM_TEXT_MAX = 300
+
+
+def _check_room(data: dict, key: str, name: str, emoji: str, numbers):
+    n, problem = numbers(("damage", 0, 100000, 0), ("heal", 0, 100000, 0), ("candy", 0, 1000000, 0), ("item_amount", 1, 99, 1))
+    if problem:
+        return None, problem
+    weight, problem = _weight(data, default=10)
+    if problem:
+        return None, problem
+    floors, problem = _check_floors(data)
+    if problem:
+        return None, problem
+    places = data.get("rooms", ())
+    if places is None:
+        places = ()
+    if (not isinstance(places, (list, tuple)) or len(places) > ROOMS
+            or any(isinstance(r, bool) or not isinstance(r, int) or not 1 <= r < ROOMS for r in places)):
+        return None, f"나올 방 번호는 1~{ROOMS - 1} 사이의 정수 목록이어야 해요. ({ROOMS}번째 방은 보스 방이에요)"
+    text = data.get("text", "")
+    if not isinstance(text, str) or len(text) > ROOM_TEXT_MAX:
+        return None, f"방 문구는 {ROOM_TEXT_MAX}자까지예요."
+    item = data.get("item")
+    if item in (None, ""):
+        item = None
+    elif not isinstance(item, str) or not 1 <= len(item) <= 40:
+        return None, "얻을 소모품이 올바르지 않아요."
+    if not (text.strip() or n["damage"] or n["heal"] or n["candy"] or item):
+        return None, "커스텀 방에는 문구나 효과(피해·회복·재화·소모품) 중 하나는 있어야 해요."
+    room = CustomRoom(key, name, emoji, text.strip(), weight, tuple(sorted(set(places))), floors, n["damage"], n["heal"], n["candy"],
+                      item, n["item_amount"] if item else 1)
+    return room, None
+
+
 def check_entity(section: str, data) -> tuple[object | None, str | None]:
     """사전 하나를 몬스터·장비·소모품으로 바꾸고 검사한다. (개체, None) 또는 (None, 이유). 이모지 형식은 명령어 쪽에서 따로 본다."""
     if section not in SECTIONS or not isinstance(data, dict):
@@ -468,6 +520,8 @@ def check_entity(section: str, data) -> tuple[object | None, str | None]:
 
     if section == "secrets":
         return _check_secret(data, key, name, emoji, numbers)
+    if section == "rooms":
+        return _check_room(data, key, name, emoji, numbers)
     if section in ("monsters", "bosses"):
         boss = section == "bosses"
         n, problem = numbers(("hp", 1, 100000, 1), ("damage", 0, 100000, 0), ("dodge", 0, 95, BASE_DODGE))
@@ -645,6 +699,7 @@ def _build_params() -> dict[str, Param]:
     add("무한.보너스증가", "일반", INFINITE_STEP, 0, 99999, note="무한모드에서 한 층 더 오를 때마다 보너스가 늘어나는 양")
     add("일반.시크릿확률", "일반", SECRET_CHANCE, 0, 100, integer=False, note="보스를 이기고 올라갈 때 11번째 방(시크릿 보스)이 생길 확률(%). 소수 가능, 0이면 안 생겨요")
     add("일반.부활체력", "일반", REVIVE_HEAL, 1, 100, note="부활권으로 되살아날 때 최대 HP의 몇 %로 일어날지")
+    add("함정.피해", "일반", TRAP_DAMAGE, 0, 100000, note="함정 방에서 입는 피해(1층 기준, 층이 오를수록 몬스터처럼 늘어나요). 갑옷·피해 감소·무적은 적용되고 가드는 못 써요")
     add("보상.최소", "일반", CLEAR_CANDY[0], 0, 99999, note="클리어 보상 재화 최소")
     add("보상.최대", "일반", CLEAR_CANDY[1], 0, 99999, note="클리어 보상 재화 최대")
     add("보상.획득권확률", "일반", TICKET_CHANCE, 0, 100, integer=False, note="클리어했을 때 히든 칭호 획득권이 나올 확률(%)")
@@ -652,7 +707,7 @@ def _build_params() -> dict[str, Param]:
     for room, table in enumerate(ROOM_PLAN, start=1):
         weights = dict(table)
         for kind, label in ROOM_KINDS:
-            add(f"방{room}.{label}", "방 배치", weights.get(kind, 0), 0, 1000,
+            add(f"방{room}.{label}", "방 배치", weights.get(kind, 0), 0, 1000, integer=(kind != "trap"),
                 note=f"{room}번째 방이 {label}일 가중치(비율). 한 방의 가중치가 모두 0이면 안 돼요")
 
     for m in MONSTERS:
@@ -756,6 +811,8 @@ class Balance:
     bosses: tuple = BOSSES
     gear: tuple = GEAR
     consumables: tuple = CONSUMABLES
+    rooms: tuple = ()            # 관리자가 만든 커스텀 방들
+    trap_damage: int = TRAP_DAMAGE
     mods: tuple = ()             # 장비 개조 레시피 ((무기 key, 재료 key, 결과 무기 key), ...). 만든 쪽에서 쓸 수 있는 것만 남긴다(build).
     gear_by_key: dict = field(init=False, repr=False, compare=False)
     item_by_key: dict = field(init=False, repr=False, compare=False)
@@ -814,6 +871,7 @@ class Balance:
         return cls(
             max_hp=get("일반.최대체력"), floors=get("일반.층수"), floor_scale=get("일반.층당강화"), floor_heal=get("일반.층이동회복"), revive_heal=get("일반.부활체력"), secret_chance=get("일반.시크릿확률"), infinite=get("일반.무한모드"),
             infinite_bonus=get("무한.층보너스"), infinite_step=get("무한.보너스증가"), secrets=custom.get("secrets", SECRET_BOSSES),
+            rooms=custom.get("rooms", ()), trap_damage=get("함정.피해"),
             base_damage=get("일반.맨손공격력"), guard_chance=get("방어.성공확률"),
             guard_base=get("방어.기본피해감소"), guard_heal=get("방어.회복률"), reflect_base=get("방어.기본반사"),
             clear_candy=(get("보상.최소"), get("보상.최대")), ticket_chance=get("보상.획득권확률"), room_plan=plan,

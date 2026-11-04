@@ -12,10 +12,10 @@ from balance import SECTION_LABELS, SECTION_LIMITS, SECTIONS, TIER_ORDER, Balanc
 from store import Store, valid_emoji
 
 # 구역별로 /던전설정 숫자 항목의 이름표(구역을 직접 편집하면 그 숫자는 쓰이지 않으므로 같이 정리한다)
-LEGACY_PREFIX = {"monsters": "몬스터.", "bosses": "보스.", "gear": "장비.", "consumables": "아이템.", "secrets": "시크릿보스."}
+LEGACY_PREFIX = {"monsters": "몬스터.", "bosses": "보스.", "gear": "장비.", "consumables": "아이템.", "secrets": "시크릿보스.", "rooms": "커스텀방."}
 # 같은 이름이 겹치면 안 되는 범위(몬스터와 보스는 같은 이름을 쓰면 헷갈린다)
 NAME_SCOPE = {"monsters": ("monsters", "bosses", "secrets"), "bosses": ("monsters", "bosses", "secrets"), "secrets": ("monsters", "bosses", "secrets"),
-              "gear": ("gear",), "consumables": ("consumables",)}
+              "gear": ("gear",), "consumables": ("consumables",), "rooms": ("rooms",)}
 
 
 class ContentError(Exception):
@@ -50,7 +50,11 @@ def _commit(store: Store, guild: int, section: str, items: list[dict]) -> None:
 
 
 def _check_secret_refs(store: Store, guild: int, section: str, entity) -> None:
-    """시크릿 보스가 떨어뜨릴 장비·아이템이 지금 실제로 있는지 본다."""
+    """시크릿 보스가 떨어뜨릴 장비·아이템, 커스텀 방이 줄 소모품이 지금 실제로 있는지 본다."""
+    if section == "rooms":
+        if entity.item and entity.item not in store.balance(guild).item_by_key:
+            raise ContentError("방이 줄 소모품이 없어요. 이름은 자동완성에서 골라 주세요.")
+        return
     if section != "secrets":
         return
     bal = store.balance(guild)
@@ -99,7 +103,7 @@ def edit(store: Store, guild: int, sections, name: str, changes: dict):
     if hit is None:
         raise ContentError("그런 항목이 없어요. 이름은 자동완성에서 골라 주세요.")
     section, data = hit
-    changes = {k: v for k, v in changes.items() if v is not None or k in ("dodge", "guard", "reflect", "guard_chance", "modify", "drop_gear", "drop_item")}
+    changes = {k: v for k, v in changes.items() if v is not None or k in ("dodge", "guard", "reflect", "guard_chance", "modify", "drop_gear", "drop_item", "item")}
     if not changes:
         raise ContentError("바꿀 내용을 하나 이상 적어 주세요.")
     new = {**data, **changes}
@@ -263,6 +267,17 @@ def describe(section: str, data: dict, bal=None) -> str:
                           + (f" ×{entity.drop_item_amount}" if entity.drop_item_amount > 1 else "") + f" {entity.drop_item_chance:g}%")
         return (f"{head} — HP {entity.hp:,} · 공격 {entity.damage:,} · 등장 {entity.weight:g} · 나오는 층 {balance.floors_text(entity.floors)}"
                 f" · 드롭(하나는 반드시): " + " / ".join(drops) + (" · 🖼️ 그림 있음" if entity.image else ""))
+    if section == "rooms":
+        effects = [f"피해 {entity.damage:,}"] if entity.damage else []
+        effects += [f"회복 {entity.heal:,}"] if entity.heal else []
+        effects += [f"재화 {entity.candy:,}"] if entity.candy else []
+        if entity.item:
+            got = bal.item_by_key.get(entity.item) if bal is not None else None
+            effects.append(f"{got.emoji} {got.name} ×{entity.item_amount}" if got else "(없어진 소모품)" if bal is not None else entity.item)
+        places = ("·".join(f"{r}" for r in entity.rooms) + "번째 방") if entity.rooms else "1~9번째 방"
+        where = f" · 나오는 층 {balance.floors_text(entity.floors)}" if entity.floors else ""
+        text = f" · “{entity.text[:40]}{'…' if len(entity.text) > 40 else ''}”" if entity.text else ""
+        return f"{head} — {' / '.join(effects) or '효과 없음'} · 가중치 {entity.weight:g} · {places}{where}{text}"
     if section in ("monsters", "bosses"):
         dodge = "" if section == "bosses" else f" · 회피 {entity.dodge}%"
         where = f" · 나오는 층 {balance.floors_text(entity.floors)}" if entity.floors else ""

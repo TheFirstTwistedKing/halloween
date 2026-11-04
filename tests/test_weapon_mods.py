@@ -125,7 +125,7 @@ class ContentTests(unittest.TestCase):
 
     def test_bad_recipes_are_refused_with_reasons(self):
         cases = [(("없는무기", "숫돌", "단검"), "장비 **없는무기**"), (("낡은 몽둥이", "없는재료", "단검"), "재료 **없는재료**"),
-                 (("낡은 몽둥이", "숫돌", "없는무기"), "결과 장비"), (("방패", "숫돌", "단검"), "방패로만"), (("낡은 몽둥이", "숫돌", "방패"), "방패로만"),
+                 (("낡은 몽둥이", "숫돌", "없는무기"), "결과 장비"), (("방패", "숫돌", "단검"), "갑옷은 갑옷으로만"), (("낡은 몽둥이", "숫돌", "방패"), "갑옷은 갑옷으로만"),
                  (("낡은 몽둥이", "미약", "단검"), "개조 재료가 아니에요"), (("낡은 몽둥이", "숫돌", "낡은 몽둥이"), "같아요")]
         for args, expect in cases:
             with self.assertRaises(content.ContentError, msg=args) as ctx:
@@ -195,7 +195,7 @@ class UseTests(unittest.TestCase):
         for weapon, held in ((None, "맨손"), ("longsword", "롱소드")):
             run = dungeon.new_run(weapon=weapon, bal=bal)
             run.items = {"m": 1}
-            with self.assertRaisesRegex(DungeonError, f"든 장비\\(무기: {held} · 방패: 없음\\)에는 쓸 수 없어요") as ctx:
+            with self.assertRaisesRegex(DungeonError, f"든 장비\\(무기: {held} · 방패: 없음 · 갑옷: 없음\\)에는 쓸 수 없어요") as ctx:
                 dungeon.use_consumable(run, "m", bal)
             self.assertIn("낡은 몽둥이", str(ctx.exception))                                      # 쓸 수 있는 무기를 알려 준다
             self.assertEqual((run.items, run.weapon, run.last), ({"m": 1}, weapon, []))
@@ -396,7 +396,7 @@ class ShieldRecipeTests(unittest.TestCase):
         bal = self.bal(("wooden_shield", "m", "shield"))
         run = dungeon.new_run(weapon="club", shield="shield", bal=bal)                          # 다른 방패를 들고 있다
         run.items = {"m": 1}
-        with self.assertRaisesRegex(DungeonError, "방패: 방패\\)에는 쓸 수 없어요") as ctx:
+        with self.assertRaisesRegex(DungeonError, "방패: 방패 · 갑옷: 없음\\)에는 쓸 수 없어요") as ctx:
             dungeon.use_consumable(run, "m", bal)
         self.assertIn("나무 방패", str(ctx.exception))
         self.assertEqual(run.items, {"m": 1})
@@ -446,7 +446,7 @@ class ShieldRecipeContentTests(unittest.TestCase):
         for args in (("낡은 몽둥이", "숫돌", "방패"), ("방패", "숫돌", "단검")):
             with self.assertRaises(content.ContentError) as ctx:
                 content.add_mod(self.store, G, *args)
-            self.assertIn("무기는 무기로, 방패는 방패로만", str(ctx.exception))
+            self.assertIn("무기는 무기로, 방패는 방패로, 갑옷은 갑옷으로만", str(ctx.exception))
             self.assertRegex(str(ctx.exception), "무기인데|방패인데")
         self.assertEqual(content.mods(self.store, G), [])
 
@@ -479,7 +479,7 @@ class ShieldRecipeCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("레시피를 만들었어요", text)
         self.assertIn("그 장비를 든 채", text)
         text = await self.run_cmd(ContentAdmin.mod_add, "나무 방패", "방패 숫돌", "단검")
-        self.assertIn("방패로만", text)
+        self.assertIn("갑옷은 갑옷으로만", text)
         self.assertIn("나무 방패", await self.run_cmd(ContentAdmin.mod_list))
         store, locks = self.store, self.w.bot.locks
         store.add_item(G, U, store.ensure_system_items(G)["key"], 1)

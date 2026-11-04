@@ -188,9 +188,9 @@ def add_mod(store: Store, guild: int, weapon: str, item: str, result: str) -> di
         if hit is None:
             raise ContentError(f"{label} **{name}**이(가) 없어요. 이름은 자동완성에서 골라 주세요.")
         found[label] = hit[1]
-    kinds = {"weapon": "무기", "shield": "방패"}
+    kinds = balance.SLOT_NAMES
     if found["장비"]["slot"] != found["결과 장비"]["slot"]:
-        raise ContentError(f"무기는 무기로, 방패는 방패로만 개조할 수 있어요. **{found['장비']['name']}**은(는) {kinds[found['장비']['slot']]}인데 "
+        raise ContentError(f"무기는 무기로, 방패는 방패로, 갑옷은 갑옷으로만 개조할 수 있어요. **{found['장비']['name']}**은(는) {kinds[found['장비']['slot']]}인데 "
                            f"**{found['결과 장비']['name']}**은(는) {kinds[found['결과 장비']['slot']]}예요.")
     if found["재료"].get("material") is not True:
         raise ContentError(f"**{found['재료']['name']}**은(는) 개조 재료가 아니에요. 재료는 `/소모품 추가`의 `재료`를 켜서 만들어요(회복 효과가 있는 소모품은 재료로 쓸 수 없어요).")

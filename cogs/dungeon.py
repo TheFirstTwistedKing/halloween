@@ -63,13 +63,14 @@ def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=No
                         value=f"{bar(enemy['hp'], enemy['max_hp'], '🟥')} {enemy['hp']}/{enemy['max_hp']}")
     embed.add_field(name="❤️ HP", inline=False, value=f"{bar(run.hp, bal.max_hp, '🟩')} {run.hp}/{bal.max_hp}")
     if not ended:
-        weapon, shield = bal.gear_by_key.get(run.weapon), bal.gear_by_key.get(run.shield)
-        gear = [f"{weapon.emoji} {weapon.name}" if weapon else "👊 맨손", f"{shield.emoji} {shield.name}" if shield else "✋ 맨몸 가드"]
+        weapon, shield, armor = bal.gear_by_key.get(run.weapon), bal.gear_by_key.get(run.shield), dungeon._armor(run, bal)
+        gear = [f"{weapon.emoji} {weapon.name}" if weapon else "👊 맨손", f"{shield.emoji} {shield.name}" if shield else "✋ 맨몸 가드",
+                f"{armor.emoji} {armor.name}" if armor else "🧥 맨몸"]
         embed.add_field(name="🎒 장비", value=" · ".join(gear), inline=False)
-        spare = [bal.gear_by_key.get(run.spare_weapon), bal.gear_by_key.get(run.spare_shield)]
+        spare = [bal.gear_by_key.get(run.spare_weapon), bal.gear_by_key.get(run.spare_shield), bal.gear_by_key.get(run.spare_armor)]
         if any(spare):                                    # 예비 칸은 비어 있으면 보여 주지 않는다.
             embed.add_field(name="📦 예비", inline=False,
-                            value=" · ".join(f"{g.emoji} {g.name}" if g else f"{label} —" for g, label in zip(spare, ("⚔️", "🛡️"))))
+                            value=" · ".join(f"{g.emoji} {g.name}" if g else f"{label} —" for g, label in zip(spare, ("⚔️", "🛡️", "🧥"))))
         held = [f"{bal.item_by_key[k].emoji} {bal.item_by_key[k].name} ×{n}" + _ready_mark(run, bal.item_by_key[k], bal)
                 for k, n in run.items.items() if k in bal.item_by_key]
         if held:                                          # 관리자가 지운 아이템만 남았다면 칸 자체를 숨긴다(빈 칸은 디스코드가 거절한다).
@@ -152,7 +153,7 @@ class DungeonView(discord.ui.View):
         elif run.pending_gear:
             self._button("장착", "✅", "equip", discord.ButtonStyle.success)
             gear = bal.gear_by_key.get(run.pending_gear)
-            if gear and dungeon._valid(getattr(run, f"spare_{'shield' if gear.slot == 'shield' else 'weapon'}"), gear.slot, bal) is None:
+            if gear and dungeon._valid(getattr(run, f"spare_{gear.slot}"), gear.slot, bal) is None:
                 self._button("예비에 넣기", "📥", "stash", discord.ButtonStyle.primary)      # 그 종류의 예비 칸이 비어 있을 때만
             self._button("버리기", "🗑️", "discard", discord.ButtonStyle.secondary)
             pending = next((e for e in for_sale if e["id"] == "pending"), None)
@@ -165,7 +166,7 @@ class DungeonView(discord.ui.View):
             self._button("앞으로" if run.room else "출발", "🚪", "advance", discord.ButtonStyle.success)
         if not run.in_battle and any(e["id"] != "pending" for e in for_sale):
             self._button("판매", "💰", "open_sell", discord.ButtonStyle.secondary)
-        if not run.in_battle and (run.weapon or run.shield or run.spare_weapon or run.spare_shield):
+        if not run.in_battle and (run.weapon or run.shield or run.armor or run.spare_weapon or run.spare_shield or run.spare_armor):
             self._button("장비", "🎒", "open_equip", discord.ButtonStyle.secondary)
         if not run.pending_gear and any(k in bal.item_by_key for k in run.items):
             pages = max(1, len(chunks([k for k in run.items if k in bal.item_by_key], ITEM_PAGE)))
@@ -588,10 +589,10 @@ def gear_text(gear) -> str:
 
 def equip_embed(run: Run, bal, result: bool = False) -> discord.Embed:
     """장비 화면: 장착한 무기·방패와 예비 칸. result=True면 방금 한 교체(run.events)를 맨 위에 보여 준다."""
-    intro = ("**무기 1개·방패 1개**를 예비 칸에 가지고 있다가 장착한 것과 서로 바꿀 수 있어요.\n"
+    intro = ("**무기·방패·갑옷을 1개씩** 예비 칸에 가지고 있다가 장착한 것과 서로 바꿀 수 있어요.\n"
              "예비 칸은 이번 던전 동안만 쓰고, 던전을 나가거나 쓰러지면 사라져요.")
     embed = theme.make_embed("🎒 장비", "\n".join(run.events) if result and run.events else intro, color=theme.ORANGE)
-    for slot, name, icon, bare in (("weapon", "무기", "⚔️", "👊 맨손"), ("shield", "방패", "🛡️", "✋ 맨몸 가드")):
+    for slot, name, icon, bare in (("weapon", "무기", "⚔️", "👊 맨손"), ("shield", "방패", "🛡️", "✋ 맨몸 가드"), ("armor", "갑옷", "🧥", "🧥 맨몸")):
         on = dungeon._valid(getattr(run, slot), slot, bal)
         spare = dungeon._valid(getattr(run, f"spare_{slot}"), slot, bal)
         embed.add_field(name=f"{icon} {name}", inline=False,
@@ -605,7 +606,7 @@ class EquipView(discord.ui.View):
     def __init__(self, client, user_id: int, run: Run, bal):
         super().__init__(timeout=900)
         self.client, self.user_id, self.rev = client, user_id, run.rev
-        for slot, name, icon in (("weapon", "무기", "⚔️"), ("shield", "방패", "🛡️")):
+        for slot, name, icon in (("weapon", "무기", "⚔️"), ("shield", "방패", "🛡️"), ("armor", "갑옷", "🧥")):
             on, spare = dungeon._valid(getattr(run, slot), slot, bal), dungeon._valid(getattr(run, f"spare_{slot}"), slot, bal)
             if on and spare:
                 label = f"{name} 교체"

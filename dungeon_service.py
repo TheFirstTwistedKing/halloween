@@ -13,7 +13,7 @@ from dungeon import DungeonError, Run
 from store import Store, StoreError
 
 AUTO_REFUSE = "⏩ 빠른진행 중이에요. ⏹ 멈추기를 누르면 직접 진행할 수 있어요."
-ACTIONS = ("advance", "attack", "defend", "item", "chest", "equip", "stash", "swap_weapon", "swap_shield", "discard", "quit", "finish", "infinite")
+ACTIONS = ("advance", "attack", "defend", "item", "chest", "equip", "stash", "swap_weapon", "swap_shield", "swap_armor", "discard", "quit", "finish", "infinite")
 
 
 @dataclass
@@ -284,7 +284,7 @@ def _apply(run: Run, rng, action: str, arg: str | None, guard_ok: bool | None, b
         dungeon.equip_pending(run, bal)
     elif action == "stash":
         dungeon.stash_pending(run, bal)
-    elif action in ("swap_weapon", "swap_shield"):
+    elif action in ("swap_weapon", "swap_shield", "swap_armor"):
         dungeon.swap_spare(run, action.split("_", 1)[1], bal)
     elif action == "discard":
         dungeon.discard_pending(run, bal)

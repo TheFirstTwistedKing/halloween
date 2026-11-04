@@ -452,15 +452,15 @@ class ContentCommandTests(unittest.IsolatedAsyncioTestCase):
         i = await self.run_cmd(ContentAdmin.dungeon_list, self.ask())
         embed, _ = sent_embed(i)
         fields = {f.name: f.value for f in embed.fields}
-        self.assertEqual(set(fields), {"몬스터 5개 ✏️", "보스 3개", "장비 8개", "소모품 6개", "시크릿 보스 1개"})
+        self.assertEqual(set(fields), {"몬스터 5개 ✏️", "보스 3개", f"장비 {len(balance.GEAR)}개", "소모품 6개", "시크릿 보스 1개"})
         self.assertIn("🐉 **드래곤**", fields["몬스터 5개 ✏️"])
         for value in fields.values():
             self.assertLessEqual(len(value), 1024)
         i = await self.run_cmd(ContentAdmin.dungeon_list, self.ask(), Choice("gear"))
-        self.assertEqual([f.name for f in sent_embed(i)[0].fields], ["장비 8개"])
+        self.assertEqual([f.name for f in sent_embed(i)[0].fields], [f"장비 {len(balance.GEAR)}개"])
 
     async def test_a_full_list_stays_within_discord_limits(self):
-        for n in range(balance.SECTION_LIMITS["gear"] - 8):
+        for n in range(balance.SECTION_LIMITS["gear"] - len(balance.GEAR)):
             content.add(self.store, G, "gear", dict(name="아주아주 긴 이름의 장비" + str(n), emoji="🗡️", slot="weapon", tier="전설", weight=1, attack=99999, crit=100, dodge=95))
         i = await self.run_cmd(ContentAdmin.dungeon_list, self.ask(), Choice("gear"))
         self.assertLessEqual(len(sent_embed(i)[0].fields[0].value), 1000)
@@ -486,7 +486,7 @@ class ContentCommandTests(unittest.IsolatedAsyncioTestCase):
         found = names_for(self.store, G, ("monsters", "bosses"), "슬라임")
         self.assertEqual([c.value for c in found], ["슬라임", "아주 센 슬라임", "거대 슬라임"])
         self.assertEqual(found[0].name, "🟢 슬라임")
-        self.assertEqual(len(names_for(self.store, G, ("gear",), "")), 8)
+        self.assertEqual(len(names_for(self.store, G, ("gear",), "")), len(balance.GEAR))
 
 
 if __name__ == "__main__":

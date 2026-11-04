@@ -12,8 +12,10 @@ from dataclasses import asdict, dataclass, field
 from balance import (BASE_DAMAGE, BASE_DODGE, BOSSES, CLEAR_CANDY, CONSUMABLES, DEFAULT, FLOOR_HEAL, FLOOR_SCALE, FLOORS,  # noqa: F401  (다시 내보냄)
                      GEAR, GUARD_BASE, GUARD_CHANCE, GUARD_HEAL, MAX_HP, MONSTERS, REFLECT_BASE, ROOM_PLAN, ROOMS,
                      TICKET_CHANCE, TIER_ORDER, Balance, Consumable, EVENT_TAG, Gear, Monster, SecretBoss, condition_text, candidates_for_floor, floor_scaled,
-                     monsters_for_floor, reduce_damage)
+                     monsters_for_floor, reduce_damage, GEAR_SLOTS, SLOT_NAMES)
+from josa import eul_reul, i_ga
 
+BARE = {"weapon": "맨손", "shield": "맨몸 가드", "armor": "맨몸"}       # 그 칸이 비었을 때 부르는 말
 GEAR_BY_KEY = {g.key: g for g in GEAR}          # 기본값 표(이름·이모지 조회용). 실제 수치는 bal에서 읽는다.
 ITEM_BY_KEY = {c.key: c for c in CONSUMABLES}
 MONSTER_BY_KEY = {m.key: m for m in MONSTERS + BOSSES}
@@ -46,7 +48,9 @@ class Run:
     weapon: str | None = None
     shield: str | None = None
     spare_weapon: str | None = None                 # 예비 칸(이번 던전 동안만): 장착하지 않고 가지고 있는 무기 1개
-    spare_shield: str | None = None                 # 예비 방패 1개. 예비 칸은 무기 1·방패 1이 전부이고 던전이 끝나면 사라진다.
+    spare_shield: str | None = None                 # 예비 방패 1개. 예비 칸은 무기 1·방패 1·갑옷 1이 전부이고 던전이 끝나면 사라진다.
+    armor: str | None = None                        # 입고 있는 갑옷(받는 피해를 줄인다)
+    spare_armor: str | None = None                  # 예비 갑옷 1개
     regen_amount: int = 0
     regen_turns: int = 0
     drain_amount: int = 0                           # 턴마다 내 HP가 줄어드는 양(자해 소모품)과 남은 턴. HP는 1 밑으로 내려가지 않는다.
@@ -119,6 +123,17 @@ def _weapon(run: Run, bal: Balance) -> Gear | None:
 
 def _shield(run: Run, bal: Balance) -> Gear | None:
     return bal.gear_by_key.get(run.shield)
+
+
+def _armor(run: Run, bal: Balance) -> Gear | None:
+    gear = bal.gear_by_key.get(run.armor)
+    return gear if gear is not None and gear.slot == "armor" else None
+
+
+def armor_percent(run: Run, bal: Balance | None = None) -> int:
+    """입고 있는 갑옷이 줄여 주는 피해(%). 갑옷이 없으면 0."""
+    armor = _armor(run, bal or DEFAULT)
+    return armor.reduction if armor else 0
 
 
 def player_damage(run: Run, bal: Balance | None = None) -> int:
@@ -250,26 +265,31 @@ def go_infinite(run: Run, rng, bal: Balance | None = None) -> list[str]:
     return ["♾️ **무한모드**를 시작해요!", *events]
 
 
-def incoming_damage(run: Run, raw: int, reduction: int = 0) -> int:
-    """몬스터의 공격 raw가 지금 실제로 주는 피해: 무적이면 0, 아니면 가드 감소(reduction%)를 먼저, 소모품의 피해 감소를 이어서 적용한다."""
+def incoming_damage(run: Run, raw: int, reduction: int = 0, bal: Balance | None = None) -> int:
+    """몬스터의 공격 raw가 지금 실제로 주는 피해: 무적이면 0, 아니면 가드 감소(reduction%) → 갑옷 → 소모품의 피해 감소를 차례로 적용한다."""
     if run.invuln_turns > 0:
         return 0
     damage = reduce_damage(raw, reduction)
+    armor = armor_percent(run, bal)
+    if armor:
+        damage = reduce_damage(damage, armor)
     if run.reduce_turns > 0 and run.reduce_percent:
         damage = reduce_damage(damage, run.reduce_percent)
     return damage
 
 
-def _enemy_attack(run: Run, reduction: int) -> list[str]:
+def _enemy_attack(run: Run, reduction: int, bal: Balance | None = None) -> list[str]:
     if run.enemy.get("stunned"):                         # 가드 성공의 충격으로 이번 공격은 건너뛴다.
         run.enemy["stunned"] = False
         return [f"💫 {run.enemy['name']}은(는) 아직 휘청거려서 공격하지 못했어요!"]
-    damage = incoming_damage(run, run.enemy["damage"], reduction)
+    damage = incoming_damage(run, run.enemy["damage"], reduction, bal)
     run.hp = max(0, run.hp - damage)
     if run.invuln_turns > 0:
         events = [f"{run.enemy['emoji']} {run.enemy['name']}의 공격! ✨ **무적**이라 피해를 받지 않았어요."]
     else:
-        notes = ([f"가드로 {reduction}% 줄였어요"] if reduction else []) + ([f"피해 감소 {run.reduce_percent}%"] if run.reduce_turns > 0 and run.reduce_percent else [])
+        armor = armor_percent(run, bal)
+        notes = ([f"가드로 {reduction}% 줄였어요"] if reduction else []) + ([f"갑옷으로 {armor}% 줄였어요"] if armor else []) \
+            + ([f"피해 감소 {run.reduce_percent}%"] if run.reduce_turns > 0 and run.reduce_percent else [])
         events = [f"{run.enemy['emoji']} {run.enemy['name']}의 공격! **{damage}** 피해를 입었어요." + (f" ({', '.join(notes)})" if notes else "")]
     if run.hp <= 0:
         run.phase = "dead"
@@ -351,7 +371,7 @@ def _after_player_action(run: Run, reduction: int, bal: Balance, rng=None) -> li
         if run.enemy.get("secret"):
             events += secret_drops(run, rng or random, bal)
     else:
-        events += _enemy_attack(run, reduction)
+        events += _enemy_attack(run, reduction, bal)
     return events + _end_turn(run, bal, rng)
 
 
@@ -380,12 +400,12 @@ def player_defend(run: Run, guard_ok: bool, bal: Balance | None = None, rng=None
     bal = bal or DEFAULT
     enemy = run.enemy
     if enemy.get("stunned"):
-        events = _enemy_attack(run, 0)
+        events = _enemy_attack(run, 0, bal)
     else:
         raw = enemy["damage"]
         events = [("🛡️ 가드 성공!" if guard_ok else "❌ 가드 실패…")]
         run.last.append("guard_success" if guard_ok else "guard_fail")
-        events += _enemy_attack(run, guard_percent(run, bal) if guard_ok else 0)
+        events += _enemy_attack(run, guard_percent(run, bal) if guard_ok else 0, bal)
         if guard_ok and run.phase != "dead":
             healed = min(bal.max_hp, run.hp + raw * bal.guard_heal // 100) - run.hp
             run.hp += max(0, healed)
@@ -442,9 +462,9 @@ def _can_hit(run: Run) -> bool:
 
 
 def mod_target(run: Run, item_key: str, bal: Balance) -> tuple[Gear | None, Gear | None]:
-    """개조 재료를 쓰면 (지금 들고 있는 장비, 바뀔 장비). 든 무기와 든 방패 모두 이 재료의 레시피가 있으면 **무기를 먼저** 개조한다.
+    """개조 재료를 쓰면 (지금 들고 있는 장비, 바뀔 장비). 든 무기·방패·갑옷 모두 이 재료의 레시피가 있으면 **무기 → 방패 → 갑옷 순**으로 먼저 맞는 것을 개조한다.
     맞는 레시피가 없으면 (None, None)."""
-    for held_key in (run.weapon, run.shield):
+    for held_key in (run.weapon, run.shield, run.armor):
         result = bal.mod_result(held_key, item_key) if held_key else None
         if result is not None:
             return bal.gear_by_key[held_key], bal.gear_by_key[result]
@@ -476,8 +496,8 @@ def use_consumable(run: Run, key: str, bal: Balance | None = None, rng=None) -> 
     if item.material:                                   # 개조 재료: 든 무기나 방패에 맞는 레시피가 있어야 한다.
         before, target = mod_target(run, key, bal)
         if target is None:
-            weapon, shield = bal.gear_by_key.get(run.weapon), bal.gear_by_key.get(run.shield)
-            raise DungeonError(f"{item.name}은(는) 지금 든 장비(무기: {weapon.name if weapon else '맨손'} · 방패: {shield.name if shield else '없음'})에는 "
+            weapon, shield, armor = bal.gear_by_key.get(run.weapon), bal.gear_by_key.get(run.shield), bal.gear_by_key.get(run.armor)
+            raise DungeonError(f"{item.name}은(는) 지금 든 장비(무기: {weapon.name if weapon else '맨손'} · 방패: {shield.name if shield else '없음'} · 갑옷: {armor.name if armor else '없음'})에는 "
                                f"쓸 수 없어요. {_material_hint(item, bal)}")
     elif item.modify:
         target = bal.gear_by_key.get(item.modify)
@@ -494,6 +514,10 @@ def use_consumable(run: Run, key: str, bal: Balance | None = None, rng=None) -> 
             before = before or _weapon(run, bal)
             run.weapon = target.key
             nothing = "맨손"
+        elif target.slot == "armor":
+            before = before or _armor(run, bal)
+            run.armor = target.key
+            nothing = "맨몸"
         else:
             before = before or _shield(run, bal)
             run.shield = target.key
@@ -548,7 +572,7 @@ def open_chest(run: Run, rng, bal: Balance | None = None) -> tuple[Gear, Consuma
     run.items[item.key] = run.items.get(item.key, 0) + 1
     run.last.append(f"item_gain:{item.key}")
     run.loot += [gear.name, item.name]
-    held = _shield(run, bal) if gear.slot == "shield" else _weapon(run, bal)
+    held = {"shield": _shield, "armor": _armor}.get(gear.slot, _weapon)(run, bal)
     swap = f"\n┕ 지금 쓰는 **{held.name}**과(와) 바뀌어요." if held else ""
     run.events = ["🎁 상자를 열었어요!", f"{gear.emoji} **{gear.name}** ({gear.tier}) — {gear.description}{swap}",
                   f"{item.emoji} **{item.name}** ({item.tier}) — {item.description} (소지품에 넣었어요)"]
@@ -585,7 +609,7 @@ def equip_pending(run: Run, bal: Balance | None = None) -> list[str]:
             run.events = ["❔ 그 장비는 사라졌어요. 앞으로 나아갈 수 있어요."]
             return run.events
         raise DungeonError("장착할 장비가 없어요.")
-    slot = "shield" if gear.slot == "shield" else "weapon"
+    slot = gear.slot
     old = _valid(getattr(run, slot), slot, bal)
     setattr(run, slot, gear.key)
     run.pending_gear = None
@@ -599,7 +623,7 @@ def equip_pending(run: Run, bal: Balance | None = None) -> list[str]:
 
 
 def stash_pending(run: Run, bal: Balance | None = None) -> list[str]:
-    """상자에서 나온 장비를 장착하지 않고 예비 칸에 넣는다. 그 종류의 예비 칸이 비어 있어야 한다(무기 1개·방패 1개만 넣을 수 있다)."""
+    """상자에서 나온 장비를 장착하지 않고 예비 칸에 넣는다. 그 종류의 예비 칸이 비어 있어야 한다(무기·방패·갑옷 1개씩만 넣을 수 있다)."""
     bal = bal or DEFAULT
     had = run.pending_gear
     gear = _pending(run, bal)
@@ -608,14 +632,14 @@ def stash_pending(run: Run, bal: Balance | None = None) -> list[str]:
             run.events = ["❔ 그 장비는 사라졌어요. 앞으로 나아갈 수 있어요."]
             return run.events
         raise DungeonError("예비 칸에 넣을 장비가 없어요.")
-    slot = "shield" if gear.slot == "shield" else "weapon"
+    slot = gear.slot
     if _valid(getattr(run, f"spare_{slot}"), slot, bal) is not None:
         held = bal.gear_by_key[getattr(run, f"spare_{slot}")]
-        raise DungeonError(f"예비 {'방패' if slot == 'shield' else '무기'} 칸이 이미 차 있어요 ({held.emoji} {held.name}). "
+        raise DungeonError(f"예비 {SLOT_NAMES[slot]} 칸이 이미 차 있어요 ({held.emoji} {held.name}). "
                            "먼저 [🎒 장비]에서 바꾸거나 팔아 주세요. 또는 [장착]으로 바로 쓰세요.")
     setattr(run, f"spare_{slot}", gear.key)
     run.pending_gear = None
-    run.events = [f"📥 {_label(gear)}을(를) 예비 {'방패' if slot == 'shield' else '무기'} 칸에 넣었어요."]
+    run.events = [f"📥 {_label(gear)}을(를) 예비 {SLOT_NAMES[slot]} 칸에 넣었어요."]
     return run.events
 
 
@@ -623,25 +647,25 @@ def swap_spare(run: Run, slot: str, bal: Balance | None = None) -> list[str]:
     """장착한 장비와 예비 칸의 장비를 서로 바꾼다(slot: weapon | shield). 한쪽이 비어 있으면 넣기(장착한 것을 예비로)나
     꺼내기(예비를 장착)가 된다. 싸우는 중에는 바꿀 수 없다."""
     bal = bal or DEFAULT
-    if slot not in ("weapon", "shield"):
+    if slot not in GEAR_SLOTS:
         raise DungeonError("알 수 없는 장비 칸이에요.")
     if run.finished:
         raise DungeonError("끝난 던전에서는 바꿀 수 없어요.")
     if run.in_battle:
         raise DungeonError("싸우는 중에는 장비를 바꿀 수 없어요. 싸움이 끝난 뒤에 바꿔 주세요.")
-    name = "방패" if slot == "shield" else "무기"
+    name = SLOT_NAMES[slot]
     equipped, spare = _valid(getattr(run, slot), slot, bal), _valid(getattr(run, f"spare_{slot}"), slot, bal)
     if equipped is None and spare is None:
         setattr(run, slot, None)
         setattr(run, f"spare_{slot}", None)
-        raise DungeonError(f"바꿀 {name}가 없어요. 장착한 것도 예비도 비어 있어요.")        # 무기·방패는 받침이 없어서 '가'다.
+        raise DungeonError(f"바꿀 {i_ga(name)} 없어요. 장착한 것도 예비도 비어 있어요.")
     setattr(run, slot, spare)
     setattr(run, f"spare_{slot}", equipped)
     if equipped and spare:
-        run.events = [f"🔄 {name}를 교체했어요: {_label(bal.gear_by_key[equipped])} → {_label(bal.gear_by_key[spare])}",
+        run.events = [f"🔄 {eul_reul(name)} 교체했어요: {_label(bal.gear_by_key[equipped])} → {_label(bal.gear_by_key[spare])}",
                       f"┕ {_label(bal.gear_by_key[equipped])}은(는) 예비 칸으로 갔어요."]
     elif equipped:
-        run.events = [f"📥 {_label(bal.gear_by_key[equipped])}을(를) 예비 칸에 넣었어요. 지금은 {'맨몸 가드' if slot == 'shield' else '맨손'}이에요."]
+        run.events = [f"📥 {_label(bal.gear_by_key[equipped])}을(를) 예비 칸에 넣었어요. 지금은 {BARE[slot]}이에요."]
     else:
         run.events = [f"📤 예비 칸의 {_label(bal.gear_by_key[spare])}을(를) 꺼내 장착했어요!"]
     return run.events
@@ -669,7 +693,8 @@ def sellable(run: Run, bal: Balance | None = None) -> list[dict]:
     bal = bal or DEFAULT
     out = []
     for slot, key, tag in (("pending", run.pending_gear, "새 장비"), ("weapon", run.weapon, "장착 중"), ("shield", run.shield, "장착 중"),
-                           ("spare_weapon", run.spare_weapon, "예비"), ("spare_shield", run.spare_shield, "예비")):
+                           ("armor", run.armor, "장착 중"), ("spare_weapon", run.spare_weapon, "예비"), ("spare_shield", run.spare_shield, "예비"),
+                           ("spare_armor", run.spare_armor, "예비")):
         gear = bal.gear_by_key.get(key) if key else None
         if gear and gear.sell_price > 0:
             out.append({"id": slot, "kind": "gear", "name": gear.name, "emoji": gear.emoji, "qty": 1, "price": gear.sell_price, "tag": tag})
@@ -708,7 +733,9 @@ def sell(run: Run, picks, mode: str = "all", bal: Balance | None = None) -> tupl
             run.weapon = None
         elif entry["id"] == "shield":
             run.shield = None
-        elif entry["id"] in ("spare_weapon", "spare_shield"):
+        elif entry["id"] == "armor":
+            run.armor = None
+        elif entry["id"] in ("spare_weapon", "spare_shield", "spare_armor"):
             setattr(run, entry["id"], None)
         else:
             key = entry["id"].split(":", 1)[1]

@@ -120,7 +120,7 @@ class AdminListTests(unittest.IsolatedAsyncioTestCase):
         self.store = self.w.store
         self.cog = ContentAdmin(self.w.bot)
         self.w.channel(400)
-        for n in range(42):                                                            # 장비는 최대 50개
+        for n in range(50 - len(balance.GEAR)):                                        # 장비는 최대 50개(기본 장비를 빼고 채운다)
             content.add(self.store, G, "gear", dict(name=f"테스트로 만든 아주 긴 이름의 무기 {n:02d}", emoji="🗡️", slot="weapon", tier="일반", weight=1, attack=n + 1))
         for n in range(43):                                                            # 소모품도 최대 50개(재료 하나 자리를 남긴다)
             content.add(self.store, G, "consumables", dict(name=f"테스트로 만든 아주 긴 이름의 약 {n:02d}", emoji="💊", tier="일반", weight=1, heal=5 + n))
@@ -170,7 +170,7 @@ class AdminListTests(unittest.IsolatedAsyncioTestCase):
             await ContentAdmin.dungeon_list.callback(cog, j)
             kwargs = j.response.send_message.await_args.kwargs
             self.assertNotIn("view", kwargs)
-            self.assertEqual({f.name for f in kwargs["embed"].fields}, {"몬스터 4개", "보스 3개", "장비 8개", "소모품 6개", "시크릿 보스 1개"})
+            self.assertEqual({f.name for f in kwargs["embed"].fields}, {"몬스터 4개", "보스 3개", f"장비 {len(balance.GEAR)}개", "소모품 6개", "시크릿 보스 1개"})
         finally:
             await w2.close()
 

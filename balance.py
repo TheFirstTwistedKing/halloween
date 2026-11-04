@@ -44,7 +44,7 @@ class Gear:
     key: str
     name: str
     emoji: str
-    slot: str                    # weapon | shield
+    slot: str                    # weapon | shield | armor
     tier: str
     weight: float                # 상자에서 나올 가중치(소수 가능). 좋은 장비일수록 낮다.
     attack: int = 0              # 공격 피해량 추가
@@ -56,6 +56,12 @@ class Gear:
     sell_price: int = 0          # 던전 안에서 팔 때 받는 재화(개당). 0이면 팔 수 없다.
     guard_chance: int | None = None  # 방패: 이 방패로 방어할 때 가드에 성공할 확률(%). 없으면 서버 기본(방어.성공확률)
     floors: tuple = ()           # 이 장비가 상자에서 나올 수 있는 층(비어 있으면 모든 층)
+    reduction: int = 0           # 갑옷: 몬스터에게 받는 모든 피해를 이 %만큼 줄인다(가드·소모품 효과와 겹쳐 적용)
+
+
+GEAR_SLOTS = ("weapon", "shield", "armor")
+SLOT_NAMES = {"weapon": "무기", "shield": "방패", "armor": "갑옷"}
+ARMOR_MAX = 90                   # 갑옷 피해 감소의 한도(%)
 
 
 @dataclass(frozen=True)
@@ -128,6 +134,8 @@ def describe_gear(gear: Gear) -> str:
         if gear.dodge is not None:
             parts.append(f"대상 회피 확률 {gear.dodge}%로 변환")
         return ", ".join(parts)
+    if gear.slot == "armor":
+        return f"받는 피해 {gear.reduction}% 감소"
     parts = [f"가드 피해 감소 {gear.guard}%"] if gear.guard is not None else []
     if gear.guard_chance is not None:
         parts.append(f"가드 성공률 {gear.guard_chance}%")
@@ -183,6 +191,9 @@ GEAR = (
     _gear("crossbow", "석궁", "🏹", "weapon", "희귀", 8, attack=180, dodge=35),
     _gear("gun", "총", "🔫", "weapon", "전설", 4, attack=300, dodge=50),
     _gear("pumpkin_blade", "호박 대검", "🎃", "weapon", "전설", 3, attack=200, crit=25),
+    _gear("cloth_armor", "천 갑옷", "👘", "armor", "일반", 5, reduction=5),
+    _gear("chain_armor", "사슬 갑옷", "⛓️", "armor", "희귀", 3, reduction=8),
+    _gear("pumpkin_armor", "호박 판금갑옷", "🎃", "armor", "전설", 1, reduction=12),
 )
 CONSUMABLES = (
     _item("candy", "사탕", "🍭", "일반", 38, heal=50),
@@ -474,9 +485,10 @@ def check_entity(section: str, data) -> tuple[object | None, str | None]:
         return None, "등급은 일반·희귀·전설 중 하나여야 해요."
     if section == "gear":
         slot = data.get("slot")
-        if slot not in ("weapon", "shield"):
-            return None, "장비 종류는 무기·방패 중 하나여야 해요."
-        n, problem = numbers(("attack", 0, 100000, 0), ("crit", 0, 100, 0), ("sell_price", 0, SELL_MAX, SELL_DEFAULT[tier]))
+        if slot not in GEAR_SLOTS:
+            return None, "장비 종류는 무기·방패·갑옷 중 하나여야 해요."
+        n, problem = numbers(("attack", 0, 100000, 0), ("crit", 0, 100, 0), ("sell_price", 0, SELL_MAX, SELL_DEFAULT[tier]),
+                             ("reduction", 0, ARMOR_MAX, 0))
         if problem:
             return None, problem
         n["weight"], problem = _weight(data)
@@ -492,14 +504,20 @@ def check_entity(section: str, data) -> tuple[object | None, str | None]:
                 return None, problem
         if slot == "weapon":
             extra["guard"] = extra["reflect"] = extra["guard_chance"] = None
-        else:
-            n["attack"] = n["crit"] = 0
+            n["reduction"] = 0
+        elif slot == "shield":
+            n["attack"] = n["crit"] = n["reduction"] = 0
             extra["dodge"] = None
             if extra["guard"] is None:
                 return None, "방패에는 가드(피해 감소 %)가 필요해요."
+        else:                                              # 갑옷: 받는 피해를 줄이는 것 하나뿐이다
+            n["attack"] = n["crit"] = 0
+            extra["dodge"] = extra["guard"] = extra["reflect"] = extra["guard_chance"] = None
+            if n["reduction"] < 1:
+                return None, f"갑옷에는 피해 감소(1~{ARMOR_MAX}%)가 필요해요."
         gear = Gear(key, name, emoji, slot, tier, n["weight"], attack=n["attack"], crit=n["crit"], dodge=extra["dodge"],
                     guard=extra["guard"], reflect=extra["reflect"], sell_price=n["sell_price"],
-                    guard_chance=extra["guard_chance"], floors=floors)
+                    guard_chance=extra["guard_chance"], floors=floors, reduction=n["reduction"])
         return replace(gear, description=describe_gear(gear)), None
     n, problem = numbers(("heal", 0, 100000, 0), ("regen", 0, 100000, 0), ("regen_turns", 0, 1000, 0),
                          ("sell_price", 0, SELL_MAX, SELL_DEFAULT[tier]), ("damage", 0, 1000000, 0), ("dot", 0, 1000000, 0),
@@ -653,6 +671,8 @@ def _build_params() -> dict[str, Param]:
             add(f"장비.{g.name}.크리티컬", "장비", g.crit, 0, 100, note="크리티컬(피해 2배) 확률(%)")
             if g.dodge is not None:
                 add(f"장비.{g.name}.회피변환", "장비", g.dodge, 0, 95, note="잡몹의 회피 확률을 이 값으로 바꿔요(보스는 영향 없음)")
+        elif g.slot == "armor":
+            add(f"장비.{g.name}.피해감소", "장비", g.reduction, 1, ARMOR_MAX, note="받는 모든 피해를 줄이는 비율(%)")
         else:
             add(f"장비.{g.name}.가드", "장비", g.guard, 0, 100, note="가드 성공 시 피해 감소(%)")
             add(f"장비.{g.name}.반사", "장비", g.reflect, 0, 500, note="가드 성공 시 반사 피해(%)")
@@ -770,6 +790,8 @@ class Balance:
                 g = replace(g, attack=get(f"장비.{g.name}.공격력"), crit=get(f"장비.{g.name}.크리티컬"),
                             dodge=get(f"장비.{g.name}.회피변환") if g.dodge is not None else None,
                             weight=get(f"장비.{g.name}.등장"))
+            elif g.slot == "armor":
+                g = replace(g, reduction=get(f"장비.{g.name}.피해감소"), weight=get(f"장비.{g.name}.등장"))
             else:
                 g = replace(g, guard=get(f"장비.{g.name}.가드"), reflect=get(f"장비.{g.name}.반사"),
                             weight=get(f"장비.{g.name}.등장"))

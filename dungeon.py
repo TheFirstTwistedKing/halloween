@@ -49,6 +49,11 @@ class Run:
     spare_shield: str | None = None                 # 예비 방패 1개. 예비 칸은 무기 1·방패 1이 전부이고 던전이 끝나면 사라진다.
     regen_amount: int = 0
     regen_turns: int = 0
+    drain_amount: int = 0                           # 턴마다 내 HP가 줄어드는 양(자해 소모품)과 남은 턴. HP는 1 밑으로 내려가지 않는다.
+    drain_turns: int = 0
+    invuln_turns: int = 0                           # 남은 무적 턴: 이 동안 몬스터의 공격 피해를 받지 않는다.
+    reduce_percent: int = 0                         # 받는 피해를 줄이는 %와 남은 턴(소모품 효과)
+    reduce_turns: int = 0
     events: list = field(default_factory=list)      # 방금 있었던 일(화면에 보여준다)
     loot: list = field(default_factory=list)        # 이번 던전에서 얻은 물품 이름
     rev: int = 0                                    # 화면 번호. 행동마다 올라가서 지난 화면의 버튼을 가려낸다.
@@ -245,30 +250,70 @@ def go_infinite(run: Run, rng, bal: Balance | None = None) -> list[str]:
     return ["♾️ **무한모드**를 시작해요!", *events]
 
 
+def incoming_damage(run: Run, raw: int, reduction: int = 0) -> int:
+    """몬스터의 공격 raw가 지금 실제로 주는 피해: 무적이면 0, 아니면 가드 감소(reduction%)를 먼저, 소모품의 피해 감소를 이어서 적용한다."""
+    if run.invuln_turns > 0:
+        return 0
+    damage = reduce_damage(raw, reduction)
+    if run.reduce_turns > 0 and run.reduce_percent:
+        damage = reduce_damage(damage, run.reduce_percent)
+    return damage
+
+
 def _enemy_attack(run: Run, reduction: int) -> list[str]:
     if run.enemy.get("stunned"):                         # 가드 성공의 충격으로 이번 공격은 건너뛴다.
         run.enemy["stunned"] = False
         return [f"💫 {run.enemy['name']}은(는) 아직 휘청거려서 공격하지 못했어요!"]
-    damage = reduce_damage(run.enemy["damage"], reduction)
+    damage = incoming_damage(run, run.enemy["damage"], reduction)
     run.hp = max(0, run.hp - damage)
-    note = f" (가드로 {reduction}% 줄였어요)" if reduction else ""
-    events = [f"{run.enemy['emoji']} {run.enemy['name']}의 공격! **{damage}** 피해를 입었어요.{note}"]
+    if run.invuln_turns > 0:
+        events = [f"{run.enemy['emoji']} {run.enemy['name']}의 공격! ✨ **무적**이라 피해를 받지 않았어요."]
+    else:
+        notes = ([f"가드로 {reduction}% 줄였어요"] if reduction else []) + ([f"피해 감소 {run.reduce_percent}%"] if run.reduce_turns > 0 and run.reduce_percent else [])
+        events = [f"{run.enemy['emoji']} {run.enemy['name']}의 공격! **{damage}** 피해를 입었어요." + (f" ({', '.join(notes)})" if notes else "")]
     if run.hp <= 0:
         run.phase = "dead"
         events.append("💀 쓰러졌어요…")
     return events
 
 
-def _end_turn(run: Run, bal: Balance) -> list[str]:
-    """한 턴이 끝날 때: 영혼 에센스처럼 턴마다 회복하는 효과."""
-    if run.phase == "dead" or run.regen_turns <= 0:
+def _end_turn(run: Run, bal: Balance, rng=None) -> list[str]:
+    """한 턴이 끝날 때: 턴마다 회복(영혼 에센스), 턴마다 줄어드는 HP(자해), 무적·피해 감소 턴 줄이기, 몬스터에게 걸린 지속 피해."""
+    if run.phase == "dead":
         return []
-    before = run.hp
-    run.hp = min(bal.max_hp, run.hp + run.regen_amount)
-    run.regen_turns -= 1
-    if run.hp == before:
-        return []
-    return [f"👻 영혼 에센스: HP +{run.hp - before} (남은 {run.regen_turns}턴)"]
+    events = []
+    if run.regen_turns > 0:
+        before = run.hp
+        run.hp = min(bal.max_hp, run.hp + run.regen_amount)
+        run.regen_turns -= 1
+        if run.hp != before:
+            events.append(f"👻 영혼 에센스: HP +{run.hp - before} (남은 {run.regen_turns}턴)")
+    if run.drain_turns > 0:
+        before = run.hp
+        run.hp = max(1, run.hp - run.drain_amount)
+        run.drain_turns -= 1
+        if run.hp != before:
+            events.append(f"🩸 HP -{before - run.hp} (남은 {run.drain_turns}턴)")
+    if run.invuln_turns > 0:
+        run.invuln_turns -= 1
+        if run.invuln_turns == 0:
+            events.append("✨ 무적이 끝났어요.")
+    if run.reduce_turns > 0:
+        run.reduce_turns -= 1
+        if run.reduce_turns == 0:
+            run.reduce_percent = 0
+            events.append("🛡️ 피해 감소가 끝났어요.")
+    enemy = run.enemy
+    if run.in_battle and enemy and enemy.get("dot_turns", 0) > 0 and enemy["hp"] > 0:
+        enemy["hp"] = max(0, enemy["hp"] - enemy["dot"])
+        enemy["dot_turns"] -= 1
+        events.append(f"☠️ {enemy['name']}에게 지속 피해 **{enemy['dot']}**! (남은 {enemy['dot_turns']}턴)")
+        if enemy["hp"] <= 0:
+            events.append(f"🎉 **{enemy['name']}**을(를) 쓰러뜨렸어요!")
+            run.phase = "cleared"
+            if enemy.get("secret"):
+                events += secret_drops(run, rng or random, bal)
+    return events
 
 
 def secret_drops(run: Run, rng, bal: Balance) -> list[str]:
@@ -307,7 +352,7 @@ def _after_player_action(run: Run, reduction: int, bal: Balance, rng=None) -> li
             events += secret_drops(run, rng or random, bal)
     else:
         events += _enemy_attack(run, reduction)
-    return events + _end_turn(run, bal)
+    return events + _end_turn(run, bal, rng)
 
 
 def player_attack(run: Run, rng, bal: Balance | None = None) -> list[str]:
@@ -355,7 +400,7 @@ def player_defend(run: Run, guard_ok: bool, bal: Balance | None = None, rng=None
             else:
                 enemy["stunned"] = True
                 events.append(f"💫 {enemy['name']}이(가) 충격으로 다음 공격을 하지 못해요!")
-    events += _end_turn(run, bal)
+    events += _end_turn(run, bal, rng)
     run.events = events
     return events
 
@@ -386,7 +431,14 @@ def can_use_now(run: Run, item: Consumable, bal: Balance | None = None) -> bool:
     bal = bal or DEFAULT
     if unmet_conditions(run, item, bal):
         return False
+    if (item.damage or item.dot) and not _can_hit(run):
+        return False
     return not item.material or mod_target(run, item.key, bal)[1] is not None
+
+
+def _can_hit(run: Run) -> bool:
+    """몬스터에게 피해를 주는 소모품은 살아 있는 몬스터와 싸우는 중에만 쓸 수 있다."""
+    return run.in_battle and bool(run.enemy) and run.enemy["hp"] > 0
 
 
 def mod_target(run: Run, item_key: str, bal: Balance) -> tuple[Gear | None, Gear | None]:
@@ -404,7 +456,7 @@ def _material_hint(item: Consumable, bal: Balance) -> str:
     return ("이 재료로 개조할 수 있는 장비: " + ", ".join(recipes[:5]) + (" 외" if len(recipes) > 5 else "")) if recipes else "아직 이 재료로 개조할 수 있는 장비가 없어요."
 
 
-def use_consumable(run: Run, key: str, bal: Balance | None = None) -> list[str]:
+def use_consumable(run: Run, key: str, bal: Balance | None = None, rng=None) -> list[str]:
     """아이템 사용. 전투 중이면 한 턴을 쓴 것으로 치고 몬스터가 공격한다. 사용 조건이 있으면 전부 만족해야 쓸 수 있고(아니면 소모되지 않는다),
     개조 소모품은 들고 있는 무기를 지정한 무기로 바꾸고, 개조 재료는 든 무기에 맞는 레시피(/장비개조)가 있을 때 그 결과 무기로 바꾼다."""
     bal = bal or DEFAULT
@@ -417,6 +469,8 @@ def use_consumable(run: Run, key: str, bal: Balance | None = None) -> list[str]:
     if unmet:
         names = {c.key: c.name for c in bal.consumables}
         raise DungeonError(f"지금은 {item.name}을(를) 쓸 수 없어요. 조건: " + " & ".join(condition_text(c, names) for c in unmet))
+    if (item.damage or item.dot) and not _can_hit(run):
+        raise DungeonError(f"{item.name}은(는) 몬스터와 싸우는 중에만 쓸 수 있어요.")
     target = None
     before = None
     if item.material:                                   # 개조 재료: 든 무기나 방패에 맞는 레시피가 있어야 한다.
@@ -446,19 +500,40 @@ def use_consumable(run: Run, key: str, bal: Balance | None = None) -> list[str]:
             nothing = "맨몸 가드"
         events = [f"{item.emoji} **{item.name}**을(를) 사용했어요! 🔧 {before.name if before else nothing}이(가) "
                   f"{target.emoji} **{target.name}**(으)로 개조됐어요. ({target.description})"]
-    elif item.full:
-        gained, run.hp = max(0, bal.max_hp - run.hp), max(run.hp, bal.max_hp)
-        events = [f"{item.emoji} **{item.name}**을(를) 사용했어요. HP가 전부 회복됐어요! (+{gained})"]
-    elif item.heal:
-        gained = max(0, min(bal.max_hp, run.hp + item.heal) - run.hp)
-        run.hp += gained
-        events = [f"{item.emoji} **{item.name}**을(를) 사용했어요. HP +{gained}"]
     else:
-        run.regen_amount, run.regen_turns = item.regen, item.regen_turns
-        events = [f"{item.emoji} **{item.name}**을(를) 사용했어요. {item.regen_turns}턴 동안 턴마다 HP +{item.regen}!"]
+        events = []
+        if item.full:
+            gained, run.hp = max(0, bal.max_hp - run.hp), max(run.hp, bal.max_hp)
+            events.append(f"{item.emoji} **{item.name}**을(를) 사용했어요. HP가 전부 회복됐어요! (+{gained})")
+        elif item.heal:
+            gained = max(0, min(bal.max_hp, run.hp + item.heal) - run.hp)
+            run.hp += gained
+            events.append(f"{item.emoji} **{item.name}**을(를) 사용했어요. HP +{gained}")
+        elif item.regen:
+            run.regen_amount, run.regen_turns = item.regen, item.regen_turns
+            events.append(f"{item.emoji} **{item.name}**을(를) 사용했어요. {item.regen_turns}턴 동안 턴마다 HP +{item.regen}!")
+        else:
+            events.append(f"{item.emoji} **{item.name}**을(를) 사용했어요!")
+        if item.self_damage:                             # 비용: 내 HP를 깎는다(1 밑으로는 안 내려간다). 여러 턴이면 첫 번째는 바로, 나머지는 턴마다.
+            lost = run.hp - max(1, run.hp - item.self_damage)
+            run.hp -= lost
+            events.append(f"🩸 내 HP가 **{lost}** 줄었어요." + (f" (이후 {item.self_turns - 1}턴 동안 턴마다 -{item.self_damage})" if item.self_turns > 1 else ""))
+            if item.self_turns > 1:
+                run.drain_amount, run.drain_turns = item.self_damage, item.self_turns - 1
+        if item.invuln_turns:
+            run.invuln_turns = max(run.invuln_turns, item.invuln_turns)
+            events.append(f"✨ {item.invuln_turns}턴 동안 몬스터의 공격을 받지 않아요!")
+        if item.reduce:
+            run.reduce_percent, run.reduce_turns = item.reduce, item.reduce_turns
+            events.append(f"🛡️ {item.reduce_turns}턴 동안 받는 피해가 {item.reduce}% 줄어요!")
+        if item.damage:
+            run.enemy["hp"] = max(0, run.enemy["hp"] - item.damage)
+            events.append(f"💥 {run.enemy['name']}에게 **{item.damage}** 피해를 줬어요.")
+        if item.dot:
+            run.enemy["dot"], run.enemy["dot_turns"] = item.dot, item.dot_turns
+            events.append(f"☠️ {run.enemy['name']}이(가) {item.dot_turns}턴 동안 턴마다 **{item.dot}** 피해를 입어요.")
     if run.in_battle:
-        events += _enemy_attack(run, 0)
-        events += _end_turn(run, bal)
+        events += _after_player_action(run, 0, bal, rng)          # 몬스터가 쓰러졌다면 공격하지 않고, 아니면 반격한다. 턴 끝 효과도 여기서 처리한다.
     run.events = events
     return events
 

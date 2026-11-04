@@ -30,7 +30,7 @@ def _plain_heals(run: Run, bal: Balance) -> list[Consumable]:
     out = []
     for key in run.items:
         item = bal.item_by_key.get(key)
-        if item and not item.material and not item.modify and (item.full or item.heal or item.regen) and can_use_now(run, item, bal):
+        if item and not item.material and not item.modify and (item.full or item.heal or item.regen) and not item.self_damage and can_use_now(run, item, bal):
             out.append(item)
     return out
 

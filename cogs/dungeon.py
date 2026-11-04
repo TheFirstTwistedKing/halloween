@@ -36,6 +36,20 @@ def _ready_mark(run: Run, item, bal) -> str:
     return " ✨" if dungeon.can_use_now(run, item, bal) else " 🔒"
 
 
+def shop_text(run: Run, bal, cur=None) -> str:
+    """상점 상품 목록: '1. 🍭 사탕 (일반) — HP +50 · 🍬 20'. 이미 산 것은 취소선."""
+    lines = []
+    for number, offer in enumerate(run.shop, start=1):
+        thing = (bal.gear_by_key if offer["kind"] == "gear" else bal.item_by_key).get(offer["key"])
+        if thing is None:
+            lines.append(f"{number}. ~~(사라진 상품)~~")
+            continue
+        text = f"{number}. {thing.emoji} **{thing.name}** ({thing.tier}) — " + (item_summary(thing, bal) if offer["kind"] != "gear" else thing.description)
+        text = text[:230]
+        lines.append(f"~~{text}~~ ✅ 샀어요" if offer.get("sold") else f"{text} · {theme.money(offer['price'], cur)}")
+    return "\n".join(lines)
+
+
 def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=None) -> discord.Embed:
     """지금 화면. 끝난 던전이면 결과(보상)를 보여 준다."""
     bal = bal or DEFAULT
@@ -48,6 +62,8 @@ def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=No
         color, title = theme.PURPLE, "🚪 던전에서 나왔어요"
     elif run.phase == "summit":
         color, title = theme.GOLD, f"🏔️ {max(run.floor, 1)}층 꼭대기에 도착했어요!"
+    elif run.phase == "shop":
+        color, title = theme.GOLD, f"🛒 {max(run.floor, 1)}층 상점"
     elif run.kind == "secret":
         color, title = theme.GOLD, f"🌌 시크릿 방 — {max(run.floor, 1)}/{bal.floors}층"
     elif run.infinite:
@@ -61,6 +77,8 @@ def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=No
             embed.set_image(url=enemy["image"])                # 시크릿 보스의 그림(움직이는 gif도 돼요)
         embed.add_field(name=f"{enemy['emoji']} {enemy['name']}" + (" 🌌 SECRET" if enemy.get("secret") else " 👑" if enemy["boss"] else "") + (" 💫 기절(다음 공격 못 함)" if enemy.get("stunned") else ""), inline=False,
                         value=f"{bar(enemy['hp'], enemy['max_hp'], '🟥')} {enemy['hp']}/{enemy['max_hp']}")
+    if run.phase == "shop" and run.shop and not ended:
+        embed.add_field(name="🛒 상품 (재화로 사요)", inline=False, value=shop_text(run, bal, cur))
     embed.add_field(name="❤️ HP", inline=False, value=f"{bar(run.hp, bal.max_hp, '🟩')} {run.hp}/{bal.max_hp}")
     if not ended:
         weapon, shield, armor = bal.gear_by_key.get(run.weapon), bal.gear_by_key.get(run.shield), dungeon._armor(run, bal)
@@ -145,6 +163,7 @@ class DungeonView(discord.ui.View):
         self.client, self.user_id, self.rev = client, user_id, run.rev
         bal = bal or DEFAULT
         for_sale = dungeon.sellable(run, bal)
+        common = 3 if run.phase == "shop" else None       # 상점은 버튼이 많아서(상품 3 + 나가기) 나머지 버튼은 아래 줄에 둔다(선택 메뉴는 2번째 줄)
         if run.phase == "battle":
             self._button("공격", "⚔️", "attack", discord.ButtonStyle.danger)
             self._button("방어", "🛡️", "defend", discord.ButtonStyle.primary)
@@ -162,12 +181,18 @@ class DungeonView(discord.ui.View):
         elif run.phase == "summit":                       # 꼭대기: 클리어하고 끝낼지, 무한모드로 계속할지 고른다.
             self._button("클리어하고 끝내기", "🏆", "finish", discord.ButtonStyle.success)
             self._button("무한모드 계속", "♾️", "infinite", discord.ButtonStyle.primary)
+        elif run.phase == "shop":                         # 상점: 안 산 상품마다 [사기] 버튼, 그리고 [상점 나가기]
+            for number, offer in enumerate(run.shop):
+                thing = (bal.gear_by_key if offer["kind"] == "gear" else bal.item_by_key).get(offer["key"])
+                if thing is not None and not offer.get("sold"):
+                    self._button(f"{thing.name} {offer['price']:,}"[:80], "🛒", f"buy:{number}", discord.ButtonStyle.primary, row=0)
+            self._button("상점 나가기", "🚪", "advance", discord.ButtonStyle.success, row=0)
         elif run.can_advance:
             self._button("앞으로" if run.room else "출발", "🚪", "advance", discord.ButtonStyle.success)
         if not run.in_battle and any(e["id"] != "pending" for e in for_sale):
-            self._button("판매", "💰", "open_sell", discord.ButtonStyle.secondary)
+            self._button("판매", "💰", "open_sell", discord.ButtonStyle.secondary, row=common)
         if not run.in_battle and (run.weapon or run.shield or run.armor or run.spare_weapon or run.spare_shield or run.spare_armor):
-            self._button("장비", "🎒", "open_equip", discord.ButtonStyle.secondary)
+            self._button("장비", "🎒", "open_equip", discord.ButtonStyle.secondary, row=common)
         if not run.pending_gear and any(k in bal.item_by_key for k in run.items):
             pages = max(1, len(chunks([k for k in run.items if k in bal.item_by_key], ITEM_PAGE)))
             self.item_page = max(0, min(item_page, pages - 1))
@@ -175,8 +200,8 @@ class DungeonView(discord.ui.View):
             if pages > 1:                                    # 아이템 종류가 25개를 넘으면 ◀ ▶로 넘겨 본다(선택 메뉴는 25개까지만 담는다).
                 self._item_pager(self.item_page, pages)
         if not run.auto:
-            self._button("빠른진행", "⏩", "ask_auto", discord.ButtonStyle.secondary)
-        self._button("나가기", "🏃", "ask_quit", discord.ButtonStyle.secondary)
+            self._button("빠른진행", "⏩", "ask_auto", discord.ButtonStyle.secondary, row=common)
+        self._button("나가기", "🏃", "ask_quit", discord.ButtonStyle.secondary, row=common)
 
     def _item_pager(self, page: int, pages: int) -> None:
         for step, label, emoji in ((-1, "아이템 이전", "◀️"), (+1, "아이템 다음", "▶️")):
@@ -194,8 +219,8 @@ class DungeonView(discord.ui.View):
             button.callback = callback
             self.add_item(button)
 
-    def _button(self, label, emoji, action, style):
-        button = discord.ui.Button(label=label, emoji=emoji, style=style)
+    def _button(self, label, emoji, action, style, row=None):
+        button = discord.ui.Button(label=label, emoji=emoji, style=style, row=row)
 
         async def callback(interaction: discord.Interaction):
             if action == "ask_quit":
@@ -214,6 +239,9 @@ class DungeonView(discord.ui.View):
                 return
             if action == "sell_pending":
                 await respond_sell(interaction, self.client, self.rev, ["pending"], "all", stay=False)
+                return
+            if action.startswith("buy:"):                 # 상점 상품 사기: 'buy:번호'
+                await self.handle(interaction, "buy", action[4:])
                 return
             await self.handle(interaction, action)
         button.callback = callback

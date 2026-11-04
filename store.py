@@ -1059,6 +1059,20 @@ class Store:
             self.db.execute("UPDATE wallets SET candy=candy+? WHERE guild=? AND user=?", (total, guild, user))
         return old + total
 
+    def spend_in_dungeon(self, guild: int, user: int, data: str, total: int) -> int:
+        """던전 안 상점에서 산 결과를 저장하고 재화를 뺀다(한 덩어리). 지금 가진 재화를 돌려준다.
+        재화가 모자라거나 진행 중인 던전이 없으면 거절하고 아무것도 바꾸지 않는다."""
+        with self.db:
+            self._ensure_wallet(guild, user)
+            old = self.wallet(guild, user)
+            cur = self.currency(guild)
+            if old < total:
+                raise StoreError(f"{i_ga(cur.name)} 모자라요. 가진 것 {cur.money(old)}, 필요한 것 {cur.money(total)}.")
+            if self.db.execute("UPDATE dungeons SET data=? WHERE guild=? AND user=?", (data, guild, user)).rowcount == 0:
+                raise StoreError("진행 중인 던전이 없어요.")
+            self.db.execute("UPDATE wallets SET candy=candy-? WHERE guild=? AND user=?", (total, guild, user))
+        return old - total
+
     def end_dungeon(self, guild: int, user: int, *, candy: int = 0, tickets: int = 0, items=()) -> tuple[int, int] | None:
         """던전을 끝내고 기록을 지운다. 보상(재화는 최대 보유량까지)을 한 번에 준다.
         (실제로 받은 재화, 지금 가진 획득권 수)를 돌려준다. 이미 끝난 던전이면 None이고 보상도 없다."""

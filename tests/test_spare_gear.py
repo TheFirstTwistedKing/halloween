@@ -370,7 +370,7 @@ class FullRunTests(unittest.IsolatedAsyncioTestCase):
         try:
             store, bot = w.store, w.bot
             store.ensure_defaults(G)
-            store.update_settings(G, dungeon={"일반.맨손공격력": 500, "일반.최대체력": 5000})
+            store.update_settings(G, dungeon={"일반.맨손공격력": 500, "일반.최대체력": 5000, "상점.간격": 0})
             store.add_item(G, U, store.ensure_system_items(G)["key"], 1)
             from cogs.dungeon import Dungeon
             i = w.interaction()

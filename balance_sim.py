@@ -71,6 +71,8 @@ def play(rng, policy: str, bal: Balance) -> tuple[bool, int]:
                 dungeon.player_defend(run, dungeon.roll_guard(rng, bal, run), bal, rng)
             else:
                 dungeon.player_attack(run, rng, bal)
+        elif run.phase == "shop":                           # 시뮬레이션은 재화를 따지지 않아서 상점은 그냥 지나간다.
+            dungeon.advance(run, rng, bal)
         elif run.can_advance:
             missing, used = bal.max_hp - run.hp, False
             for key in sorted(run.items, key=lambda k: -bal.item_by_key[k].heal):
@@ -83,6 +85,7 @@ def play(rng, policy: str, bal: Balance) -> tuple[bool, int]:
                     used = True
                     break
             if not used:
+                run.shop_floor = run.floor                  # 시뮬레이션은 재화를 따지지 않아서 상점은 열지 않는다(난수도 쓰지 않는다).
                 dungeon.advance(run, rng, bal)
         else:
             break

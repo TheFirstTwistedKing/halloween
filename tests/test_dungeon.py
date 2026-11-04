@@ -273,6 +273,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.store, self.locks = Store(":memory:"), Locks()
         self.store.add_item(G, U, self.store.ensure_system_items(G)["key"], 1)
+        self.store.update_settings(G, dungeon={"상점.간격": 0})                # 이 시험들은 상점 없이 흐름만 본다(상점은 test_shop.py)
 
     def tearDown(self):
         self.store.close()

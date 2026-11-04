@@ -31,6 +31,9 @@ TIER_ORDER = {"일반": 0, "희귀": 1, "전설": 2}
 SELL_DEFAULT = {"일반": 5, "희귀": 15, "전설": 50}     # 던전 장비·소모품의 기본 판매가(등급별). 0이면 팔 수 없다.
 SELL_MAX = 1_000_000_000
 
+SHOP_INTERVAL = 5                # 이 층수마다 보스를 이긴 직후 상점이 열린다(0이면 상점 없음)
+SHOP_MARKUP = 400                # 상점 가격 = 그 물건의 판매가 × 이 % (판매가가 0이면 등급 기본 판매가). 기본 4배
+SHOP_SLOTS = 3                   # 상점에 놓이는 상품 수
 TRAP_DAMAGE = 100                # 함정 방에서 입는 피해(1층 기준. 몬스터처럼 층마다 늘어난다)
 ROOM_KINDS = (("chest", "상자"), ("empty", "빈방"), ("trap", "함정"), ("monster", "잡몹"), ("boss", "보스"))
 # 방 배치: 1~10번째 방 각각의 추첨표((종류, 가중치)). 홀수 방은 상자, 짝수 방은 빈 방 또는 잡몹, 마지막 방은 미니 보스.
@@ -657,6 +660,12 @@ def floor_scaled(value: int, floor: int, percent: int) -> int:
     return (value * (100 + percent * (max(floor, 1) - 1)) + 50) // 100
 
 
+def shop_price(entity, markup: int) -> int:
+    """상점 가격: 판매가(0이면 등급 기본 판매가)의 markup%, 반올림하고 최소 1."""
+    base = entity.sell_price or SELL_DEFAULT.get(entity.tier, 5)
+    return max(1, (base * markup + 50) // 100)
+
+
 def reduce_damage(damage: int, percent: int) -> int:
     """피해를 percent% 줄인다(반올림)."""
     return (damage * (100 - percent) + 50) // 100
@@ -699,6 +708,8 @@ def _build_params() -> dict[str, Param]:
     add("무한.보너스증가", "일반", INFINITE_STEP, 0, 99999, note="무한모드에서 한 층 더 오를 때마다 보너스가 늘어나는 양")
     add("일반.시크릿확률", "일반", SECRET_CHANCE, 0, 100, integer=False, note="보스를 이기고 올라갈 때 11번째 방(시크릿 보스)이 생길 확률(%). 소수 가능, 0이면 안 생겨요")
     add("일반.부활체력", "일반", REVIVE_HEAL, 1, 100, note="부활권으로 되살아날 때 최대 HP의 몇 %로 일어날지")
+    add("상점.간격", "일반", SHOP_INTERVAL, 0, 100, note="이 층수마다 보스를 이긴 직후 상점이 열려요(5면 5·10·15…층). 0이면 상점이 없어요")
+    add("상점.가격배율", "일반", SHOP_MARKUP, 1, 100000, note="상점 가격은 그 장비·소모품의 판매가의 몇 %인지(400이면 4배). 판매가가 0이면 등급 기본 판매가를 써요")
     add("함정.피해", "일반", TRAP_DAMAGE, 0, 100000, note="함정 방에서 입는 피해(1층 기준, 층이 오를수록 몬스터처럼 늘어나요). 갑옷·피해 감소·무적은 적용되고 가드는 못 써요")
     add("보상.최소", "일반", CLEAR_CANDY[0], 0, 99999, note="클리어 보상 재화 최소")
     add("보상.최대", "일반", CLEAR_CANDY[1], 0, 99999, note="클리어 보상 재화 최대")
@@ -813,6 +824,8 @@ class Balance:
     consumables: tuple = CONSUMABLES
     rooms: tuple = ()            # 관리자가 만든 커스텀 방들
     trap_damage: int = TRAP_DAMAGE
+    shop_interval: int = SHOP_INTERVAL
+    shop_markup: int = SHOP_MARKUP
     mods: tuple = ()             # 장비 개조 레시피 ((무기 key, 재료 key, 결과 무기 key), ...). 만든 쪽에서 쓸 수 있는 것만 남긴다(build).
     gear_by_key: dict = field(init=False, repr=False, compare=False)
     item_by_key: dict = field(init=False, repr=False, compare=False)
@@ -871,7 +884,7 @@ class Balance:
         return cls(
             max_hp=get("일반.최대체력"), floors=get("일반.층수"), floor_scale=get("일반.층당강화"), floor_heal=get("일반.층이동회복"), revive_heal=get("일반.부활체력"), secret_chance=get("일반.시크릿확률"), infinite=get("일반.무한모드"),
             infinite_bonus=get("무한.층보너스"), infinite_step=get("무한.보너스증가"), secrets=custom.get("secrets", SECRET_BOSSES),
-            rooms=custom.get("rooms", ()), trap_damage=get("함정.피해"),
+            rooms=custom.get("rooms", ()), trap_damage=get("함정.피해"), shop_interval=get("상점.간격"), shop_markup=get("상점.가격배율"),
             base_damage=get("일반.맨손공격력"), guard_chance=get("방어.성공확률"),
             guard_base=get("방어.기본피해감소"), guard_heal=get("방어.회복률"), reflect_base=get("방어.기본반사"),
             clear_candy=(get("보상.최소"), get("보상.최대")), ticket_chance=get("보상.획득권확률"), room_plan=plan,

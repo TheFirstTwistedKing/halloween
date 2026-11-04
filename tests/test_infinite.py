@@ -18,6 +18,7 @@ from tests.helpers import Scripted, World
 
 G, U = 100, 7
 NO_SECRET = 0.99
+NO_SHOP = {"상점.간격": 0}                # 이 시험들은 층을 오르는 흐름만 본다: 상점은 test_shop.py에서 따로 시험한다
 
 
 def boss_cleared(bal, floor=None, **kw):
@@ -29,7 +30,7 @@ def boss_cleared(bal, floor=None, **kw):
 
 
 def at_summit(bal=None):
-    bal = bal or Balance.build({})
+    bal = bal or Balance.build(NO_SHOP)
     run = boss_cleared(bal)
     dungeon.advance(run, Scripted(randoms=[NO_SECRET]), bal)
     return run, bal
@@ -46,7 +47,7 @@ class RuleTests(unittest.TestCase):
         self.assertIn("무한모드", text)
 
     def test_lower_floors_do_not_ask(self):
-        bal = Balance.build({})
+        bal = Balance.build(NO_SHOP)
         for floor in range(1, bal.floors):
             run = boss_cleared(bal, floor=floor)
             dungeon.advance(run, Scripted(randoms=[NO_SECRET]), bal)
@@ -54,7 +55,7 @@ class RuleTests(unittest.TestCase):
             self.assertNotEqual(run.phase, "summit")
 
     def test_turning_the_question_off_clears_immediately_like_before(self):
-        bal = Balance.build({"일반.무한모드": 0})
+        bal = Balance.build({**NO_SHOP, "일반.무한모드": 0})
         run = boss_cleared(bal)
         dungeon.advance(run, Scripted(randoms=[NO_SECRET]), bal)
         self.assertEqual(run.phase, "clear")
@@ -64,7 +65,7 @@ class RuleTests(unittest.TestCase):
         dungeon.take_clear(run)
         self.assertEqual((run.phase, run.finished), ("clear", True))
         with self.assertRaisesRegex(DungeonError, "꼭대기"):
-            dungeon.take_clear(boss_cleared(Balance.build({}), floor=3))
+            dungeon.take_clear(boss_cleared(Balance.build(NO_SHOP), floor=3))
 
     def test_going_infinite_climbs_to_floor_eleven_with_a_bonus_and_a_partial_heal(self):
         run, bal = at_summit()
@@ -77,7 +78,7 @@ class RuleTests(unittest.TestCase):
         self.assertIn(f"{bal.floors + 1}층", "\n".join(events))
 
     def test_the_floor_bonus_grows_with_each_floor_and_is_adjustable(self):
-        bal = Balance.build({"무한.층보너스": 100, "무한.보너스증가": 25})
+        bal = Balance.build({**NO_SHOP, "무한.층보너스": 100, "무한.보너스증가": 25})
         run, _ = at_summit(bal)
         dungeon.go_infinite(run, Scripted(randoms=[NO_SECRET]), bal)
         seen = [run.bonus]
@@ -86,7 +87,7 @@ class RuleTests(unittest.TestCase):
             dungeon.advance(run, Scripted(randoms=[NO_SECRET]), bal)
             seen.append(run.bonus)
         self.assertEqual(seen, [100, 125, 150])
-        zero = Balance.build({"무한.층보너스": 0, "무한.보너스증가": 0})
+        zero = Balance.build({**NO_SHOP, "무한.층보너스": 0, "무한.보너스증가": 0})
         run, _ = at_summit(zero)
         dungeon.go_infinite(run, Scripted(randoms=[NO_SECRET]), zero)
         self.assertEqual(run.bonus, 0)
@@ -100,14 +101,14 @@ class RuleTests(unittest.TestCase):
             self.assertEqual((run.floor, run.phase == "summit", run.finished), (expected, False, False), expected)
 
     def test_monsters_keep_getting_stronger_on_infinite_floors(self):
-        bal = Balance.build({})
+        bal = Balance.build(NO_SHOP)
         low = dungeon._spawn(balance.MONSTERS[1], bal.floors, bal)
         high = dungeon._spawn(balance.MONSTERS[1], bal.floors + 5, bal)
         self.assertGreater(high["max_hp"], low["max_hp"])
         self.assertGreater(high["damage"], low["damage"])
 
     def test_the_secret_room_can_still_open_on_infinite_floors_and_the_top_is_asked_only_once(self):
-        bal = Balance.build({})
+        bal = Balance.build(NO_SHOP)
         run, _ = at_summit(bal)
         dungeon.go_infinite(run, Scripted(randoms=[NO_SECRET]), bal)
         run.room, run.kind, run.phase, run.enemy = dungeon.ROOMS, "boss", "cleared", None
@@ -118,7 +119,7 @@ class RuleTests(unittest.TestCase):
         self.assertEqual((run.floor, run.phase == "summit"), (bal.floors + 2, False))
 
     def test_the_secret_room_comes_before_the_question_on_the_top_floor(self):
-        bal = Balance.build({})
+        bal = Balance.build(NO_SHOP)
         run = boss_cleared(bal)
         dungeon.advance(run, Scripted(randoms=[0.0, 0.0]), bal)
         self.assertEqual(run.kind, "secret")
@@ -139,7 +140,7 @@ class RuleTests(unittest.TestCase):
         self.assertIsNotNone(check_value("일반.무한모드", 0.5)[1])
         self.assertEqual(check_value("무한.층보너스", 99999), (99999, None))
         self.assertIsNotNone(check_value("무한.보너스증가", -1)[1])
-        bal = Balance.build({})
+        bal = Balance.build(NO_SHOP)
         self.assertEqual((bal.infinite, bal.infinite_bonus, bal.infinite_step), (1, 30, 10))
 
 
@@ -148,7 +149,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.store, self.locks = Store(":memory:"), Locks()
         self.key = self.store.ensure_system_items(G)["key"]
         self.store.add_item(G, U, self.key, 2)
-        self.store.update_settings(G, dungeon={"보상.최소": 100, "보상.최대": 100, "보상.획득권확률": 0})
+        self.store.update_settings(G, dungeon={**NO_SHOP, "보상.최소": 100, "보상.최대": 100, "보상.획득권확률": 0})
 
     def tearDown(self):
         self.store.close()
@@ -182,7 +183,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_clear_reward_extras_come_with_it_and_only_once(self):
         gem = self.store.create_item(G, "보석", emoji="💎")
         self.store.update_settings(G, clear_rewards=[{"id": "g", "item": gem["id"], "amount": 3, "chance": 100}],
-                                   dungeon={"보상.최소": 100, "보상.최대": 100, "보상.획득권확률": 100})
+                                   dungeon={**NO_SHOP, "보상.최소": 100, "보상.최대": 100, "보상.획득권확률": 100})
         top = await self.at_top()
         out = await service.act(self.store, self.locks, Scripted(randoms=[0.0, NO_SECRET], ints=[100]), G, U, top.rev, "infinite")
         self.assertTrue(out.ok)
@@ -282,7 +283,7 @@ class ScreenTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.w = World(rng=Scripted(randoms=[NO_SECRET, NO_SECRET]))
         self.bot, self.store = self.w.bot, self.w.store
-        self.store.update_settings(G, dungeon={"보상.최소": 100, "보상.최대": 100, "보상.획득권확률": 0})
+        self.store.update_settings(G, dungeon={**NO_SHOP, "보상.최소": 100, "보상.최대": 100, "보상.획득권확률": 0})
 
     async def asyncTearDown(self):
         await self.w.close()

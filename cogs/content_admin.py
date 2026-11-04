@@ -20,6 +20,7 @@ TIERS = [Choice(name=t, value=t) for t in TIER_ORDER]
 SLOTS = [Choice(name="무기", value="weapon"), Choice(name="방패", value="shield")]
 LIST_CHOICES = [Choice(name=SECTION_LABELS[s], value=s) for s in SECTIONS]
 GUARD_CHANCE_HELP = "방패: 이 방패로 방어할 때 가드에 성공할 확률(%). 비우면 서버 기본(/던전설정 방어.성공확률)을 써요."
+FLOORS_HELP = "나올 층: 3,5,8-10처럼 여러 층을 쉼표로, 범위는 -로. '전체'를 쓰면 모든 층. 비우면 지금 설정만 봐요"
 WEIGHT_HELP = "상자에서 나올 비율. 소수도 돼요(예: 0.5, 0.05). 다른 것들과의 비율로 계산하고 높을수록 자주 나와요"
 SELL_HELP = "던전 안에서 팔 때 받는 재화(개당). 0이면 팔 수 없어요. 비우면 그대로(추가할 땐 등급별 기본값)"
 SELL_TARGETS = [Choice(name="장비와 소모품 모두", value="both"), Choice(name="장비만", value="gear"), Choice(name="소모품만", value="consumables")]
@@ -65,6 +66,41 @@ class ContentAdmin(commands.Cog):
             await self._deny(interaction, str(exc))
             return
         await self._done(interaction, head, section, data)
+
+    async def _floors(self, interaction, sections, command: str, noun: str, target: str, floors: str | None, label_of, when: str) -> None:
+        """몬스터·장비·소모품이 나올 층을 보고 정하는 공통 처리. 층이 비는 설정은 content.edit가 거절한다."""
+        if not await require_admin(interaction):
+            return
+        store, gid = self.bot.store, interaction.guild_id
+        hit = content.find(store, gid, sections, target)
+        if hit is None:
+            await self._deny(interaction, f"그런 {noun} 없어요. 이름은 자동완성에서 골라 주세요.")
+            return
+        section, data = hit
+        label = label_of(section)
+        if floors is None:
+            await interaction.response.send_message(embed=theme.notice(
+                f"{data['emoji']} **{data['name']}**({label})은(는) **{balance.floors_text(data['floors'])}**에서 나와요.\n"
+                f"`{command} 대상:{data['name']} 층:3,5,8-10`처럼 바꿔요."), ephemeral=False)
+            return
+        chosen, problem = balance.parse_floors(floors)
+        if problem:
+            await self._deny(interaction, problem)
+            return
+        try:
+            _, entity = content.edit(store, gid, sections, data["name"], {"floors": chosen})
+        except content.ContentError as exc:
+            await self._deny(interaction, str(exc))
+            return
+        bal = store.balance(gid)
+        notes = []
+        if chosen and min(chosen) > bal.floors and not bal.infinite:
+            notes.append(f"⚠️ 지금은 {bal.floors}층까지만 있고 무한모드도 꺼져 있어서(`일반.무한모드`) 이 층들에서는 나올 수 없어요.")
+        elif chosen and max(chosen) > bal.floors:
+            notes.append(f"ℹ️ {bal.floors + 1}층부터는 무한모드를 골라야 갈 수 있어요.")
+        await interaction.response.send_message(embed=theme.notice(
+            f"{entity.emoji} **{entity.name}**({label})이(가) 나올 층: **{balance.floors_text(entity.floors)}**\n"
+            f"{when}, 나올 수 있는 {label}들 중에서 `등장` 비율로 골라요." + "".join("\n" + n for n in notes)), ephemeral=False)
 
     async def _bulk(self, interaction, noun: str, sections) -> None:
         """던전 콘텐츠(몬스터·장비·소모품·시크릿 보스)를 여러 개 골라 지우는 화면. sections = ((구역, 종류 표시), ...)."""
@@ -127,40 +163,10 @@ class ContentAdmin(commands.Cog):
 
     @monster.command(name="층", description="이 몬스터·보스가 나올 층을 정해요. 여러 층은 쉼표로(3,5,8-10). 비우면 지금 설정을 봐요 (관리자)")
     @app_commands.rename(target="대상", floors="층")
-    @app_commands.describe(target="층을 정할 몬스터나 보스", floors="나올 층: 3,5,8-10처럼 여러 층을 쉼표로, 범위는 -로. '전체'를 쓰면 모든 층. 비우면 지금 설정만 봐요")
+    @app_commands.describe(target="층을 정할 몬스터나 보스", floors=FLOORS_HELP)
     async def monster_floors(self, interaction: discord.Interaction, target: str, floors: str | None = None):
-        if not await require_admin(interaction):
-            return
-        store, gid = self.bot.store, interaction.guild_id
-        hit = content.find(store, gid, ("monsters", "bosses"), target)
-        if hit is None:
-            await self._deny(interaction, "그런 몬스터·보스가 없어요. 이름은 자동완성에서 골라 주세요.")
-            return
-        section, data = hit
-        label = "보스" if section == "bosses" else "몬스터"
-        if floors is None:
-            await interaction.response.send_message(embed=theme.notice(
-                f"{data['emoji']} **{data['name']}**({label})은(는) **{balance.floors_text(data['floors'])}**에서 나와요.\n"
-                f"`/몬스터 층 대상:{data['name']} 층:3,5,8-10`처럼 바꿔요."), ephemeral=False)
-            return
-        chosen, problem = balance.parse_floors(floors)
-        if problem:
-            await self._deny(interaction, problem)
-            return
-        try:
-            _, entity = content.edit(store, gid, ("monsters", "bosses"), data["name"], {"floors": chosen})
-        except content.ContentError as exc:
-            await self._deny(interaction, str(exc))
-            return
-        bal = store.balance(gid)
-        notes = []
-        if chosen and min(chosen) > bal.floors and not bal.infinite:
-            notes.append(f"⚠️ 지금은 {bal.floors}층까지만 있고 무한모드도 꺼져 있어서(`일반.무한모드`) 이 층들에서는 나올 수 없어요.")
-        elif chosen and max(chosen) > bal.floors:
-            notes.append(f"ℹ️ {bal.floors + 1}층부터는 무한모드를 골라야 갈 수 있어요.")
-        await interaction.response.send_message(embed=theme.notice(
-            f"{entity.emoji} **{entity.name}**({label})이(가) 나올 층: **{balance.floors_text(entity.floors)}**\n"
-            "그 층에서 이 종류의 방이 나올 때, 나올 수 있는 " + label + "들 중에서 `등장` 비율로 골라요." + "".join("\n" + n for n in notes)), ephemeral=False)
+        await self._floors(interaction, ("monsters", "bosses"), "/몬스터 층", "몬스터·보스가", target, floors,
+                           lambda section: "보스" if section == "bosses" else "몬스터", "그 층에서 이 종류의 방이 나올 때")
 
     @monster.command(name="대량삭제", description="몬스터·보스를 여러 개 골라 한 번에 지워요 (관리자)")
     async def monster_bulk(self, interaction: discord.Interaction):
@@ -228,12 +234,19 @@ class ContentAdmin(commands.Cog):
     async def gear_delete(self, interaction: discord.Interaction, target: str):
         await self._run(interaction, lambda: content.delete(self.bot.store, interaction.guild_id, ("gear",), target), "🗑️ 지웠어요.")
 
+    @gear.command(name="층", description="이 장비가 상자에서 나올 층을 정해요. 여러 층은 쉼표로(3,5,8-10). 비우면 지금 설정을 봐요 (관리자)")
+    @app_commands.rename(target="대상", floors="층")
+    @app_commands.describe(target="층을 정할 장비", floors=FLOORS_HELP)
+    async def gear_floors(self, interaction: discord.Interaction, target: str, floors: str | None = None):
+        await self._floors(interaction, ("gear",), "/장비 층", "장비가", target, floors, lambda section: "장비", "그 층의 상자에서 장비가 나올 때")
+
     @gear.command(name="대량삭제", description="장비를 여러 개 골라 한 번에 지워요 (관리자)")
     async def gear_bulk(self, interaction: discord.Interaction):
         await self._bulk(interaction, "장비", (("gear", ""),))
 
     @gear_edit.autocomplete("target")
     @gear_delete.autocomplete("target")
+    @gear_floors.autocomplete("target")
     async def gear_names(self, interaction: discord.Interaction, current: str):
         return names_for(self.bot.store, interaction.guild_id, ("gear",), current) if interaction.guild_id else []
 
@@ -306,12 +319,19 @@ class ContentAdmin(commands.Cog):
     async def potion_delete(self, interaction: discord.Interaction, target: str):
         await self._run(interaction, lambda: content.delete(self.bot.store, interaction.guild_id, ("consumables",), target), "🗑️ 지웠어요.")
 
+    @potion.command(name="층", description="이 소모품이 상자에서 나올 층을 정해요. 여러 층은 쉼표로(3,5,8-10). 비우면 지금 설정을 봐요 (관리자)")
+    @app_commands.rename(target="대상", floors="층")
+    @app_commands.describe(target="층을 정할 소모품", floors=FLOORS_HELP)
+    async def potion_floors(self, interaction: discord.Interaction, target: str, floors: str | None = None):
+        await self._floors(interaction, ("consumables",), "/소모품 층", "소모품이", target, floors, lambda section: "소모품", "그 층의 상자에서 소모품이 나올 때")
+
     @potion.command(name="대량삭제", description="소모품을 여러 개 골라 한 번에 지워요 (관리자)")
     async def potion_bulk(self, interaction: discord.Interaction):
         await self._bulk(interaction, "소모품", (("consumables", ""),))
 
     @potion_edit.autocomplete("target")
     @potion_delete.autocomplete("target")
+    @potion_floors.autocomplete("target")
     async def potion_names(self, interaction: discord.Interaction, current: str):
         return names_for(self.bot.store, interaction.guild_id, ("consumables",), current) if interaction.guild_id else []
 

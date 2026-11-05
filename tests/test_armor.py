@@ -100,20 +100,36 @@ class DamageTests(unittest.TestCase):
         self.assertEqual(run.hp, MAX - 70)
         self.assertTrue(any("갑옷으로 30% 줄였어요" in e for e in events))
 
-    def test_it_applies_after_the_guard_and_before_potion_reduction(self):
+    def test_without_a_guard_the_armor_comes_before_the_potion_reduction(self):
         bal = bal_with(armor(reduction=50))
         run = battle(bal, damage=1000, armor="a")
-        self.assertEqual(dungeon.incoming_damage(run, 1000, 60, bal), 200)               # 1000 → 가드 60% → 400 → 갑옷 50% → 200
+        self.assertEqual(dungeon.incoming_damage(run, 1000, 0, bal), 500)                # 1000 → 갑옷 50% → 500
         run.reduce_percent, run.reduce_turns = 50, 2
-        self.assertEqual(dungeon.incoming_damage(run, 1000, 60, bal), 100)
+        self.assertEqual(dungeon.incoming_damage(run, 1000, 0, bal), 250)                # → 소모품 50% → 250
         run.invuln_turns = 1
-        self.assertEqual(dungeon.incoming_damage(run, 1000, 60, bal), 0)
+        self.assertEqual(dungeon.incoming_damage(run, 1000, 0, bal), 0)
 
-    def test_defending_with_an_armor_stacks_with_the_shield(self):
+    def test_a_successful_guard_applies_only_the_shields_reduction(self):
         bal = bal_with(armor(reduction=50))
-        run = battle(bal, hp=500, damage=1000, armor="a")
+        run = battle(bal, hp=500, damage=1000, armor="a", reduce_percent=50, reduce_turns=2)
+        self.assertEqual(dungeon.incoming_damage(run, 1000, 60, bal, guarded=True), 400)     # 갑옷·소모품 감소는 빠지고 가드 60%만
+        events = dungeon.player_defend(run, True, bal)
+        self.assertEqual(run.hp, 500 - 400 + 500)                                        # 가드 60%로 400 맞고, 가드 회복 +500(원래 피해의 50%)
+        self.assertTrue(any("가드로 60% 줄였어요" in e for e in events))
+        self.assertFalse(any("갑옷으로" in e or "피해 감소 50%" in e for e in events))
+
+    def test_a_failed_guard_still_gets_the_armor_and_potion_reduction(self):
+        bal = bal_with(armor(reduction=50))
+        run = battle(bal, hp=1000, damage=1000, armor="a", reduce_percent=50, reduce_turns=2)
+        events = dungeon.player_defend(run, False, bal)
+        self.assertEqual(run.hp, 1000 - 250)
+        self.assertTrue(any("갑옷으로 50% 줄였어요" in e for e in events))
+
+    def test_invulnerability_still_blocks_a_guarded_hit(self):
+        bal = bal_with(armor(reduction=50))
+        run = battle(bal, hp=1000, damage=1000, invuln_turns=2)
         dungeon.player_defend(run, True, bal)
-        self.assertEqual(run.hp, 500 - 200 + 500)                                        # 가드 60% + 갑옷 50% = 200, 가드 회복 +500(원래 피해의 50%)
+        self.assertEqual(run.hp, 1000 + 0)                                               # 맞지 않았고, 가드 회복은 최대 HP까지
 
     def test_no_armor_or_a_deleted_one_changes_nothing(self):
         bal = bal_with(armor())

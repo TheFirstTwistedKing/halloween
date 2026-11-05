@@ -220,14 +220,14 @@ class DefenseBuffTests(unittest.TestCase):
         dungeon.player_defend(run, False, bal)
         self.assertEqual(run.hp, MAX - 200)
 
-    def test_guard_and_reduction_stack(self):
+    def test_a_successful_guard_ignores_the_potion_reduction_but_a_failed_one_gets_it(self):
         bal = bal_with(potion(reduce=50, reduce_turns=3))
         run = battle(bal, hp=500, damage=1000)
         run.reduce_percent, run.reduce_turns = 50, 3
-        dungeon.player_defend(run, True, bal)                                           # 기본 가드 60% 감소 → 400, 거기서 50% → 200
-        self.assertEqual(run.hp, 500 - 200 + 500)                                       # 맞은 뒤 300, 가드 성공 회복 +500(원래 피해의 50%)
-        self.assertEqual(dungeon.incoming_damage(run, 1000, 60), 200)
-        self.assertEqual(dungeon.incoming_damage(run, 1000, 0), 500)
+        dungeon.player_defend(run, True, bal)                                           # 가드 성공: 기본 가드 60%만 → 400
+        self.assertEqual(run.hp, 500 - 400 + 500)                                       # 맞은 뒤 100, 가드 성공 회복 +500(원래 피해의 50%)
+        self.assertEqual(dungeon.incoming_damage(run, 1000, 60, guarded=True), 400)
+        self.assertEqual(dungeon.incoming_damage(run, 1000, 0), 500)                    # 가드 없이는 소모품 감소 50%
 
     def test_invulnerability_beats_reduction(self):
         run = dungeon.new_run()

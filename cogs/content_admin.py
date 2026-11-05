@@ -26,6 +26,8 @@ ROOM_PLACES_HELP = "나올 방 번호(1~9번째. 10번째는 보스 방): 3,5,8-
 FLOORS_HELP = "나올 층: 3,5,8-10처럼 여러 층을 쉼표로, 범위는 -로. '전체'를 쓰면 모든 층. 비우면 지금 설정만 봐요"
 WEIGHT_HELP = "상자에서 나올 비율. 소수도 돼요(예: 0.5, 0.05). 다른 것들과의 비율로 계산하고 높을수록 자주 나와요"
 SELL_HELP = "던전 안에서 팔 때 받는 재화(개당). 0이면 팔 수 없어요. 비우면 그대로(추가할 땐 등급별 기본값)"
+SHOP_PRICE_HELP = "상점에서 파는 값(재화). 비우면 판매가 × 상점.가격배율(기본 4배)로 자동 계산해요"
+SHOP_PRICE_EDIT_HELP = SHOP_PRICE_HELP + ". -1이면 자동 계산으로 되돌려요"
 SELL_TARGETS = [Choice(name="장비와 소모품 모두", value="both"), Choice(name="장비만", value="gear"), Choice(name="소모품만", value="consumables")]
 COND_CHOICES = [Choice(name=COND_LABELS[k].format(v="N"), value=k) for k in COND_STATE + COND_EVENT]
 CHANCE_HELP = "그 드롭이 나올 확률(%). 소수도 돼요(기본 100). 둘 다 안 나오면 확률이 더 높은 쪽이 반드시 나와요"
@@ -196,8 +198,8 @@ class ContentAdmin(commands.Cog):
 
     @gear.command(name="추가", description="장비를 새로 만들어요 (관리자)")
     @app_commands.rename(name="이름", emoji="이모지", slot="종류", tier="등급", weight="등장", attack="공격력", crit="크리티컬",
-                         dodge="회피변환", guard="가드", reflect="반사", guard_chance="가드성공률", sell_price="판매가", reduction="피해감소")
-    @app_commands.describe(slot="무기 / 방패 / 갑옷", weight=WEIGHT_HELP, reduction=REDUCTION_HELP, attack="무기: 공격 피해 추가", crit="무기: 크리티컬(2배) 확률(%)",
+                         dodge="회피변환", guard="가드", reflect="반사", guard_chance="가드성공률", sell_price="판매가", reduction="피해감소", shop_price="상점가")
+    @app_commands.describe(slot="무기 / 방패 / 갑옷", weight=WEIGHT_HELP, reduction=REDUCTION_HELP, shop_price=SHOP_PRICE_HELP, attack="무기: 공격 피해 추가", crit="무기: 크리티컬(2배) 확률(%)",
                            dodge="무기: 잡몹의 회피 확률을 이 값으로 바꿔요(%)", guard="방패: 가드 성공 시 피해 감소(%)(필수)",
                            reflect="방패: 가드 성공 시 반사 피해(%)", guard_chance=GUARD_CHANCE_HELP, sell_price=SELL_HELP)
     @app_commands.choices(slot=SLOTS, tier=TIERS)
@@ -207,10 +209,11 @@ class ContentAdmin(commands.Cog):
                        guard: app_commands.Range[int, 0, 100] | None = None, reflect: app_commands.Range[int, 0, 500] | None = None,
                        sell_price: app_commands.Range[int, 0, SELL_MAX] | None = None,
                        guard_chance: app_commands.Range[int, 0, 100] | None = None,
-                       reduction: app_commands.Range[int, 0, balance.ARMOR_MAX] = 0):
+                       reduction: app_commands.Range[int, 0, balance.ARMOR_MAX] = 0,
+                       shop_price: app_commands.Range[int, 1, SELL_MAX] | None = None):
         def go():
             data = dict(name=name, emoji=emoji.strip(), slot=slot.value, tier=tier.value, weight=weight, attack=attack, crit=crit,
-                        dodge=dodge, guard=guard, reflect=reflect, guard_chance=guard_chance, reduction=reduction)
+                        dodge=dodge, guard=guard, reflect=reflect, guard_chance=guard_chance, reduction=reduction, shop_price=shop_price)
             if sell_price is not None:                  # 비우면 등급별 기본 판매가
                 data["sell_price"] = sell_price
             entity = content.add(self.bot.store, interaction.guild_id, "gear", data)
@@ -219,8 +222,9 @@ class ContentAdmin(commands.Cog):
 
     @gear.command(name="수정", description="장비의 값을 고쳐요. 바꿀 것만 적으세요 (-1은 해제) (관리자)")
     @app_commands.rename(target="대상", new_name="새이름", emoji="이모지", tier="등급", weight="등장", attack="공격력", crit="크리티컬",
-                         dodge="회피변환", guard="가드", reflect="반사", guard_chance="가드성공률", sell_price="판매가", reduction="피해감소")
-    @app_commands.describe(weight=WEIGHT_HELP, guard_chance=GUARD_CHANCE_HELP + " -1은 해제(서버 기본으로)", sell_price=SELL_HELP, reduction=REDUCTION_HELP)
+                         dodge="회피변환", guard="가드", reflect="반사", guard_chance="가드성공률", sell_price="판매가", reduction="피해감소", shop_price="상점가")
+    @app_commands.describe(weight=WEIGHT_HELP, guard_chance=GUARD_CHANCE_HELP + " -1은 해제(서버 기본으로)", sell_price=SELL_HELP, reduction=REDUCTION_HELP,
+                           shop_price=SHOP_PRICE_EDIT_HELP)
     @app_commands.choices(tier=TIERS)
     async def gear_edit(self, interaction: discord.Interaction, target: str, new_name: str | None = None, emoji: str | None = None,
                         tier: Choice[str] | None = None, weight: app_commands.Range[float, 0, 1000] | None = None,
@@ -229,7 +233,8 @@ class ContentAdmin(commands.Cog):
                         reflect: app_commands.Range[int, -1, 500] | None = None,
                         sell_price: app_commands.Range[int, 0, SELL_MAX] | None = None,
                         guard_chance: app_commands.Range[int, -1, 100] | None = None,
-                        reduction: app_commands.Range[int, 1, balance.ARMOR_MAX] | None = None):
+                        reduction: app_commands.Range[int, 1, balance.ARMOR_MAX] | None = None,
+                        shop_price: app_commands.Range[int, -1, SELL_MAX] | None = None):
         def go():
             changes = dict(name=new_name, emoji=emoji and emoji.strip(), tier=tier and tier.value, weight=weight, attack=attack,
                            crit=crit, guard=guard, sell_price=sell_price, reduction=reduction)
@@ -240,6 +245,8 @@ class ContentAdmin(commands.Cog):
                 changes["reflect"] = None if reflect < 0 else reflect
             if guard_chance is not None:                # -1은 '해제'(서버 기본 성공률로)
                 changes["guard_chance"] = None if guard_chance < 0 else guard_chance
+            if shop_price is not None:                  # -1은 '해제'(판매가 × 배율로 자동 계산). 0은 쓸 수 없다.
+                changes["shop_price"] = None if shop_price < 0 else shop_price
             section, entity = content.edit(self.bot.store, interaction.guild_id, ("gear",), target, changes)
             return section, self._entity_dict(entity)
         await self._run(interaction, go, "✏️ 고쳤어요.")
@@ -270,9 +277,9 @@ class ContentAdmin(commands.Cog):
 
     @potion.command(name="추가", description="소모품을 새로 만들어요. 회복량·전체회복·지속회복·무기 개조 중 하나를 정해요 (관리자)")
     @app_commands.rename(name="이름", emoji="이모지", tier="등급", weight="등장", heal="회복량", full="전체회복", regen="지속회복량", turns="지속턴",
-                         sell_price="판매가", modify="개조무기", material="재료", **EFFECT_NAMES)
+                         sell_price="판매가", modify="개조무기", material="재료", shop_price="상점가", **EFFECT_NAMES)
     @app_commands.describe(weight=WEIGHT_HELP, heal="한 번에 회복하는 HP", full="HP를 전부 회복", regen="턴마다 회복하는 HP", turns="지속 회복이 이어지는 턴 수",
-                           sell_price=SELL_HELP, modify=MODIFY_HELP, material=MATERIAL_HELP, damage=DAMAGE_HELP, dot=DOT_HELP, dot_turns=DOT_TURNS_HELP,
+                           shop_price=SHOP_PRICE_HELP, sell_price=SELL_HELP, modify=MODIFY_HELP, material=MATERIAL_HELP, damage=DAMAGE_HELP, dot=DOT_HELP, dot_turns=DOT_TURNS_HELP,
                            self_damage=SELF_HELP, self_turns=SELF_TURNS_HELP, invuln_turns=INVULN_HELP, reduce=REDUCE_HELP, reduce_turns=REDUCE_TURNS_HELP)
     @app_commands.choices(tier=TIERS)
     async def potion_add(self, interaction: discord.Interaction, name: str, emoji: str, tier: Choice[str],
@@ -282,11 +289,13 @@ class ContentAdmin(commands.Cog):
                          damage: app_commands.Range[int, 0, 1000000] = 0, dot: app_commands.Range[int, 0, 1000000] = 0,
                          dot_turns: app_commands.Range[int, 0, 1000] = 0, self_damage: app_commands.Range[int, 0, 100000] = 0,
                          self_turns: app_commands.Range[int, 0, 1000] = 0, invuln_turns: app_commands.Range[int, 0, 1000] = 0,
-                         reduce: app_commands.Range[int, 0, 100] = 0, reduce_turns: app_commands.Range[int, 0, 1000] = 0):
+                         reduce: app_commands.Range[int, 0, 100] = 0, reduce_turns: app_commands.Range[int, 0, 1000] = 0,
+                         shop_price: app_commands.Range[int, 1, SELL_MAX] | None = None):
         def go():
             effects = dict(damage=damage, dot=dot, dot_turns=dot_turns, self_damage=self_damage, self_turns=self_turns,
                            invuln_turns=invuln_turns, reduce=reduce, reduce_turns=reduce_turns)
-            data = dict(name=name, emoji=emoji.strip(), tier=tier.value, weight=weight, heal=heal, full=full, regen=regen, regen_turns=turns, **effects)
+            data = dict(name=name, emoji=emoji.strip(), tier=tier.value, weight=weight, heal=heal, full=full, regen=regen, regen_turns=turns,
+                        shop_price=shop_price, **effects)
             if material:
                 if heal or full or regen or turns or modify or any(effects.values()):
                     raise content.ContentError("개조 재료는 효과가 없어요. 회복·피해·개조무기 같은 옵션과 함께 쓸 수 없어요.")
@@ -303,8 +312,8 @@ class ContentAdmin(commands.Cog):
 
     @potion.command(name="수정", description="소모품의 값을 고쳐요. 효과를 바꾸면 이전 효과는 사라져요 (관리자)")
     @app_commands.rename(target="대상", new_name="새이름", emoji="이모지", tier="등급", weight="등장", heal="회복량", full="전체회복",
-                         regen="지속회복량", turns="지속턴", sell_price="판매가", modify="개조무기", material="재료", **EFFECT_NAMES)
-    @app_commands.describe(weight=WEIGHT_HELP, sell_price=SELL_HELP, modify=MODIFY_HELP, material=MATERIAL_HELP, damage=DAMAGE_HELP + " (0이면 없애요)",
+                         regen="지속회복량", turns="지속턴", sell_price="판매가", modify="개조무기", material="재료", shop_price="상점가", **EFFECT_NAMES)
+    @app_commands.describe(weight=WEIGHT_HELP, shop_price=SHOP_PRICE_EDIT_HELP, sell_price=SELL_HELP, modify=MODIFY_HELP, material=MATERIAL_HELP, damage=DAMAGE_HELP + " (0이면 없애요)",
                            dot=DOT_HELP + " (0이면 없애요)", dot_turns=DOT_TURNS_HELP, self_damage=SELF_HELP + " (0이면 없애요)", self_turns=SELF_TURNS_HELP,
                            invuln_turns=INVULN_HELP + " (0이면 없애요)", reduce=REDUCE_HELP + " (0이면 없애요)", reduce_turns=REDUCE_TURNS_HELP)
     @app_commands.choices(tier=TIERS)
@@ -316,7 +325,8 @@ class ContentAdmin(commands.Cog):
                           damage: app_commands.Range[int, 0, 1000000] | None = None, dot: app_commands.Range[int, 0, 1000000] | None = None,
                           dot_turns: app_commands.Range[int, 0, 1000] | None = None, self_damage: app_commands.Range[int, 0, 100000] | None = None,
                           self_turns: app_commands.Range[int, 0, 1000] | None = None, invuln_turns: app_commands.Range[int, 0, 1000] | None = None,
-                          reduce: app_commands.Range[int, 0, 100] | None = None, reduce_turns: app_commands.Range[int, 0, 1000] | None = None):
+                          reduce: app_commands.Range[int, 0, 100] | None = None, reduce_turns: app_commands.Range[int, 0, 1000] | None = None,
+                          shop_price: app_commands.Range[int, -1, SELL_MAX] | None = None):
         def go():
             effects = {k: v for k, v in dict(damage=damage, dot=dot, dot_turns=dot_turns, self_damage=self_damage, self_turns=self_turns,
                                               invuln_turns=invuln_turns, reduce=reduce, reduce_turns=reduce_turns).items() if v is not None}
@@ -324,6 +334,8 @@ class ContentAdmin(commands.Cog):
             changes = dict(name=new_name, emoji=emoji and emoji.strip(), tier=tier and tier.value, weight=weight, sell_price=sell_price)
             changes = {k: v for k, v in changes.items() if v is not None}
             changes.update(effects)
+            if shop_price is not None:                  # -1은 '해제'(판매가 × 배율로 자동 계산). 0은 쓸 수 없다.
+                changes["shop_price"] = None if shop_price < 0 else shop_price
             if any(effects.values()) and not material and not modify:     # 새 효과를 정하면 개조 소모품·재료였던 것도 일반 소모품이 된다
                 changes.update(modify=None, material=False)
             if material:                                # 개조 재료로 바꾼다: 효과는 모두 지운다.

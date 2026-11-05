@@ -415,11 +415,14 @@ def go_infinite(run: Run, rng, bal: Balance | None = None) -> list[str]:
     return ["♾️ **무한모드**를 시작해요!", *events]
 
 
-def incoming_damage(run: Run, raw: int, reduction: int = 0, bal: Balance | None = None) -> int:
-    """몬스터의 공격 raw가 지금 실제로 주는 피해: 무적이면 0, 아니면 가드 감소(reduction%) → 갑옷 → 소모품의 피해 감소를 차례로 적용한다."""
+def incoming_damage(run: Run, raw: int, reduction: int = 0, bal: Balance | None = None, guarded: bool = False) -> int:
+    """몬스터의 공격 raw가 지금 실제로 주는 피해: 무적이면 0. 가드에 성공했다면(guarded) **방패(가드)의 감소만** 적용한다.
+    아니면 가드 감소(reduction%) → 갑옷 → 소모품의 피해 감소를 차례로 적용한다."""
     if run.invuln_turns > 0:
         return 0
     damage = reduce_damage(raw, reduction)
+    if guarded:
+        return damage
     armor = armor_percent(run, bal)
     if armor:
         damage = reduce_damage(damage, armor)
@@ -428,18 +431,19 @@ def incoming_damage(run: Run, raw: int, reduction: int = 0, bal: Balance | None 
     return damage
 
 
-def _enemy_attack(run: Run, reduction: int, bal: Balance | None = None) -> list[str]:
+def _enemy_attack(run: Run, reduction: int, bal: Balance | None = None, guarded: bool = False) -> list[str]:
     if run.enemy.get("stunned"):                         # 가드 성공의 충격으로 이번 공격은 건너뛴다.
         run.enemy["stunned"] = False
         return [f"💫 {run.enemy['name']}은(는) 아직 휘청거려서 공격하지 못했어요!"]
-    damage = incoming_damage(run, run.enemy["damage"], reduction, bal)
+    damage = incoming_damage(run, run.enemy["damage"], reduction, bal, guarded)
     run.hp = max(0, run.hp - damage)
     if run.invuln_turns > 0:
         events = [f"{run.enemy['emoji']} {run.enemy['name']}의 공격! ✨ **무적**이라 피해를 받지 않았어요."]
     else:
-        armor = armor_percent(run, bal)
+        armor = 0 if guarded else armor_percent(run, bal)           # 가드 중에는 방패의 감소만 적용된다
+        buff = run.reduce_turns > 0 and run.reduce_percent and not guarded
         notes = ([f"가드로 {reduction}% 줄였어요"] if reduction else []) + ([f"갑옷으로 {armor}% 줄였어요"] if armor else []) \
-            + ([f"피해 감소 {run.reduce_percent}%"] if run.reduce_turns > 0 and run.reduce_percent else [])
+            + ([f"피해 감소 {run.reduce_percent}%"] if buff else [])
         events = [f"{run.enemy['emoji']} {run.enemy['name']}의 공격! **{damage}** 피해를 입었어요." + (f" ({', '.join(notes)})" if notes else "")]
     if run.hp <= 0:
         run.phase = "dead"
@@ -555,7 +559,7 @@ def player_defend(run: Run, guard_ok: bool, bal: Balance | None = None, rng=None
         raw = enemy["damage"]
         events = [("🛡️ 가드 성공!" if guard_ok else "❌ 가드 실패…")]
         run.last.append("guard_success" if guard_ok else "guard_fail")
-        events += _enemy_attack(run, guard_percent(run, bal) if guard_ok else 0, bal)
+        events += _enemy_attack(run, guard_percent(run, bal) if guard_ok else 0, bal, guarded=bool(guard_ok))
         if guard_ok and run.phase != "dead":
             healed = min(bal.max_hp, run.hp + raw * bal.guard_heal // 100) - run.hp
             run.hp += max(0, healed)

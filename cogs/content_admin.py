@@ -19,7 +19,7 @@ Choice = app_commands.Choice
 TIERS = [Choice(name=t, value=t) for t in TIER_ORDER]
 SLOTS = [Choice(name="무기", value="weapon"), Choice(name="방패", value="shield"), Choice(name="갑옷", value="armor")]
 LIST_CHOICES = [Choice(name=SECTION_LABELS[s], value=s) for s in SECTIONS]
-REDUCTION_HELP = f"갑옷: 받는 모든 피해를 줄이는 비율(%, 1~{balance.ARMOR_MAX}). 갑옷에는 필수예요. 가드·소모품 효과와 겹쳐 적용돼요"
+REDUCTION_HELP = f"갑옷: 받는 모든 피해를 줄이는 비율(%, 1~{balance.ARMOR_MAX}). 갑옷에는 필수예요. 가드에 성공한 공격에는 적용되지 않아요(방패의 감소만)"
 GUARD_CHANCE_HELP = "방패: 이 방패로 방어할 때 가드에 성공할 확률(%). 비우면 서버 기본(/던전설정 방어.성공확률)을 써요."
 ROOM_WEIGHT_HELP = "방 배치에서 다른 방(상자·빈방·잡몹…)과 겨루는 가중치. 소수도 돼요. 예: 빈 방 40·잡몹 60인 방에 10을 주면 약 9%로 나와요"
 ROOM_PLACES_HELP = "나올 방 번호(1~9번째. 10번째는 보스 방): 3,5,8-9처럼. 비우거나 '전체'면 1~9번째 모두"
@@ -37,7 +37,7 @@ DOT_TURNS_HELP = "지속 피해가 이어지는 턴 수"
 SELF_HELP = "쓰면 내 HP가 줄어요(1 밑으로는 안 줄어서 이것만으로 죽지는 않아요). 강한 효과의 대가로 붙여 보세요"
 SELF_TURNS_HELP = "자해가 이어지는 턴 수. 2 이상이면 첫 번째는 바로, 나머지는 턴마다 줄어요. 비우면 한 번만"
 INVULN_HELP = "이 턴 수 동안 몬스터의 공격 피해를 받지 않아요. 턴은 싸우는 중에만 지나가요"
-REDUCE_HELP = "받는 피해를 줄이는 %(1~100). 피해감소턴과 함께 정해요. 가드와 겹치면 둘 다 적용돼요"
+REDUCE_HELP = "받는 피해를 줄이는 %(1~100). 피해감소턴과 함께 정해요. 가드에 성공한 공격에는 적용되지 않아요"
 REDUCE_TURNS_HELP = "피해 감소가 이어지는 턴 수"
 EFFECT_NAMES = dict(damage="몬스터피해", dot="지속피해", dot_turns="지속피해턴", self_damage="자해", self_turns="자해턴",
                     invuln_turns="무적턴", reduce="피해감소", reduce_turns="피해감소턴")

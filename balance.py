@@ -60,7 +60,8 @@ class Gear:
     sell_price: int = 0          # 던전 안에서 팔 때 받는 재화(개당). 0이면 팔 수 없다.
     guard_chance: int | None = None  # 방패: 이 방패로 방어할 때 가드에 성공할 확률(%). 없으면 서버 기본(방어.성공확률)
     floors: tuple = ()           # 이 장비가 상자에서 나올 수 있는 층(비어 있으면 모든 층)
-    reduction: int = 0           # 갑옷: 몬스터에게 받는 모든 피해를 이 %만큼 줄인다(가드·소모품 효과와 겹쳐 적용)
+    reduction: int = 0           # 갑옷: 몬스터에게 받는 모든 피해를 이 %만큼 줄인다(가드에 성공한 공격에는 적용되지 않는다)
+    shop_price: int | None = None  # 상점에서 팔 때 값(재화). 없으면 판매가 × 상점.가격배율
 
 
 GEAR_SLOTS = ("weapon", "shield", "armor")
@@ -93,6 +94,7 @@ class Consumable:
     invuln_turns: int = 0        # 이 턴 수 동안 몬스터의 공격 피해를 받지 않는다
     reduce: int = 0              # 받는 피해를 이 %만큼 줄인다
     reduce_turns: int = 0        # 피해 감소가 이어지는 턴 수
+    shop_price: int | None = None  # 상점에서 팔 때 값(재화). 없으면 판매가 × 상점.가격배율
 
 
 @dataclass(frozen=True)
@@ -572,9 +574,12 @@ def check_entity(section: str, data) -> tuple[object | None, str | None]:
             extra["dodge"] = extra["guard"] = extra["reflect"] = extra["guard_chance"] = None
             if n["reduction"] < 1:
                 return None, f"갑옷에는 피해 감소(1~{ARMOR_MAX}%)가 필요해요."
+        shop, problem = _num(data, "shop_price", 1, SELL_MAX, None, none_ok=True)
+        if problem:
+            return None, problem
         gear = Gear(key, name, emoji, slot, tier, n["weight"], attack=n["attack"], crit=n["crit"], dodge=extra["dodge"],
                     guard=extra["guard"], reflect=extra["reflect"], sell_price=n["sell_price"],
-                    guard_chance=extra["guard_chance"], floors=floors, reduction=n["reduction"])
+                    guard_chance=extra["guard_chance"], floors=floors, reduction=n["reduction"], shop_price=shop)
         return replace(gear, description=describe_gear(gear)), None
     n, problem = numbers(("heal", 0, 100000, 0), ("regen", 0, 100000, 0), ("regen_turns", 0, 1000, 0),
                          ("sell_price", 0, SELL_MAX, SELL_DEFAULT[tier]), ("damage", 0, 1000000, 0), ("dot", 0, 1000000, 0),
@@ -628,10 +633,13 @@ def check_entity(section: str, data) -> tuple[object | None, str | None]:
             n["reduce_turns"] = 0
         if not (full or n["heal"] or n["regen"] or n["damage"] or n["dot"] or n["self_damage"] or n["invuln_turns"] or n["reduce"]):
             return None, ("효과가 하나는 있어야 해요: 회복량·전체 회복·지속 회복·몬스터 피해·지속 피해·자해·무적·피해 감소 중에서 골라 주세요.")
+    shop, problem = _num(data, "shop_price", 1, SELL_MAX, None, none_ok=True)
+    if problem:
+        return None, problem
     item = Consumable(key, name, emoji, tier, n["weight"], heal=n["heal"], full=full, regen=n["regen"], regen_turns=n["regen_turns"],
                       sell_price=n["sell_price"], modify=modify or None, conditions=conditions, material=material, floors=floors,
                       damage=n["damage"], dot=n["dot"], dot_turns=n["dot_turns"], self_damage=n["self_damage"], self_turns=n["self_turns"],
-                      invuln_turns=n["invuln_turns"], reduce=n["reduce"], reduce_turns=n["reduce_turns"])
+                      invuln_turns=n["invuln_turns"], reduce=n["reduce"], reduce_turns=n["reduce_turns"], shop_price=shop)
     return replace(item, description=describe_item(item)), None
 
 
@@ -661,7 +669,9 @@ def floor_scaled(value: int, floor: int, percent: int) -> int:
 
 
 def shop_price(entity, markup: int) -> int:
-    """상점 가격: 판매가(0이면 등급 기본 판매가)의 markup%, 반올림하고 최소 1."""
+    """상점 가격: 관리자가 그 물건에 따로 정한 값(shop_price)이 있으면 그것, 없으면 판매가(0이면 등급 기본 판매가)의 markup%(반올림, 최소 1)."""
+    if entity.shop_price:
+        return entity.shop_price
     base = entity.sell_price or SELL_DEFAULT.get(entity.tier, 5)
     return max(1, (base * markup + 50) // 100)
 

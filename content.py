@@ -103,7 +103,7 @@ def edit(store: Store, guild: int, sections, name: str, changes: dict):
     if hit is None:
         raise ContentError("그런 항목이 없어요. 이름은 자동완성에서 골라 주세요.")
     section, data = hit
-    changes = {k: v for k, v in changes.items() if v is not None or k in ("dodge", "guard", "reflect", "guard_chance", "modify", "drop_gear", "drop_item", "item")}
+    changes = {k: v for k, v in changes.items() if v is not None or k in ("dodge", "guard", "reflect", "guard_chance", "modify", "drop_gear", "drop_item", "item", "shop_price")}
     if not changes:
         raise ContentError("바꿀 내용을 하나 이상 적어 주세요.")
     new = {**data, **changes}
@@ -282,7 +282,7 @@ def describe(section: str, data: dict, bal=None) -> str:
         dodge = "" if section == "bosses" else f" · 회피 {entity.dodge}%"
         where = f" · 나오는 층 {balance.floors_text(entity.floors)}" if entity.floors else ""
         return f"{head} — HP {entity.hp:,} · 공격 {entity.damage:,}{dodge} · 등장 {entity.weight:g}{where}"
-    sell = f"판매 {entity.sell_price:,}" if entity.sell_price else "판매 불가"
+    sell = (f"판매 {entity.sell_price:,}" if entity.sell_price else "판매 불가") + (f" · 상점가 {entity.shop_price:,}" if entity.shop_price else "")
     text = balance.item_summary(entity, bal) if bal is not None and section == "consumables" else entity.description
     where = f" · 나오는 층 {balance.floors_text(entity.floors)}" if entity.floors else ""
     return f"{head} ({entity.tier}) — {text} · 등장 {entity.weight:g}{where} · {sell}"

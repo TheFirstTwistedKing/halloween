@@ -281,14 +281,14 @@ class QuantityModalTests(UiFixture):
 class BagTests(UiFixture):
     async def test_the_bag_shows_candy_items_and_roles(self):
         ids = self.store.ensure_system_items(100)
-        self.store.add_candy(100, 7, 12345)
+        self.store.add_candy(100, 7, 1_234_567_890)
         self.store.add_item(100, 7, ids["key"], 2)
         self.store.add_item(100, 7, self.candle["id"], 5)
         self.w.member.roles.append(self.w.roles[50])
         embed = bag_for(self.w.bot, self.w.member)
         fields = {f.name: f.value for f in embed.fields}
         self.assertEqual(embed.title, "🎒 user7의 가방")
-        self.assertIn("**12,345** / 99,999", fields["💾 RAM"])
+        self.assertIn("**1,234,567,890** / 9,999,999,999", fields["💾 RAM"])
         self.assertTrue(fields["💾 RAM"].endswith("🟦" + "⬛" * 9))          # 12% → 10칸 중 1칸
         self.assertNotIn("✨ 경험치", fields)                                      # 경험치 기능은 없다.
         self.assertEqual(fields["🎒 물품"], "🗝️ 열쇠 ×2\n🕯️ 호박 초 ×5")
@@ -298,7 +298,7 @@ class BagTests(UiFixture):
         embed = bag_for(self.w.bot, self.w.new_member(9, name="새내기"))
         fields = {f.name: f.value for f in embed.fields}
         self.assertEqual(embed.title, "🎒 새내기의 가방")
-        self.assertIn("**0** / 99,999", fields["💾 RAM"])
+        self.assertIn("**0** / 9,999,999,999", fields["💾 RAM"])
         self.assertEqual(fields["🎒 물품"], "비어 있어요 📭")
         self.assertNotIn("👑 역할", fields)
         self.assertNotIn("✨ 경험치", fields)

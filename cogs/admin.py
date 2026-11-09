@@ -195,7 +195,7 @@ class Admin(commands.Cog):
     @app_commands.default_permissions(administrator=True)
     @app_commands.rename(target="대상", amount="수량")
     async def give_candy(self, interaction: discord.Interaction, target: discord.Member,
-                         amount: app_commands.Range[int, -1_000_000_000, 1_000_000_000]):
+                         amount: app_commands.Range[int, -9_999_999_999, 9_999_999_999]):
         if not await require_admin(interaction):
             return
         if problem := self._bad_target(target):
@@ -238,7 +238,7 @@ class Admin(commands.Cog):
     @app_commands.rename(role="역할", amount="수량")
     @app_commands.describe(role="재화를 받을 역할 (봇은 제외돼요)", amount="1인당 수량 (음수면 회수)")
     async def give_role_candy(self, interaction: discord.Interaction, role: discord.Role,
-                              amount: app_commands.Range[int, -1_000_000_000, 1_000_000_000]):
+                              amount: app_commands.Range[int, -9_999_999_999, 9_999_999_999]):
         if not await require_admin(interaction):
             return
         if amount == 0:

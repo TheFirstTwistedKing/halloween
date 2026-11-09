@@ -223,7 +223,7 @@ def advance(run: Run, rng, bal: Balance | None = None) -> list[str]:
         run.room, run.kind = ROOMS + 1, "secret"
         run.enemy, run.phase = _spawn(boss, run.floor, bal), "battle"
         run.last.append("secret_intro")                   # 화면이 특별한 등장 연출을 보여 주라는 표시
-        run.events = [f"🌌 **시크릿 방**이 열렸어요! **{boss.name}**이(가) 나타났어요!"]
+        run.events = [f"🌌 **시크릿 방**이 열렸어요! **{boss.name}**이(가) 가동됐어요!"]
         return run.events
     if run.room >= ROOMS:
         if shop_due(run, bal):                            # 보스(시크릿 보스 포함)를 이기고 올라가기 직전에 상점이 열린다.
@@ -234,7 +234,7 @@ def advance(run: Run, rng, bal: Balance | None = None) -> list[str]:
             if bal.infinite:                              # 꼭대기: 클리어하고 끝낼지, 무한모드로 계속할지 묻는다(고를 때까지 이 방에서 안 움직인다).
                 run.phase, run.enemy, run.kind = "summit", None, "summit"
                 run.events = [f"🏆 **{bal.floors}층 꼭대기**에 도착했어요!", "**클리어하고 끝낼지**, **♾️ 무한모드**로 계속 올라갈지 정해 주세요.",
-                              "무한모드를 고르면 클리어 보상을 지금 받고, 쓰러져도 잃지 않아요. 층마다 보너스 재화가 나오지만 몬스터는 계속 강해져요."]
+                              "무한모드를 고르면 클리어 보상을 지금 받고, 다운돼도 잃지 않아요. 층마다 보너스 재화가 나오지만 몬스터는 계속 강해져요."]
                 return run.events
             run.phase, run.enemy, run.kind = "clear", None, ""
             run.events = [f"🏆 {bal.floors}층 꼭대기에 도착했어요! 던전을 모두 돌파했어요!"]
@@ -245,7 +245,7 @@ def advance(run: Run, rng, bal: Balance | None = None) -> list[str]:
         run.room = 0
         healed = (bal.max_hp - run.hp) * bal.floor_heal // 100
         run.hp = min(bal.max_hp, run.hp + max(0, healed))
-        climb = [f"⬆️ **{run.floor}층**으로 올라왔어요!" + (f" 숨을 돌려 HP +{healed}" if healed > 0 else "")
+        climb = [f"⬆️ **{run.floor}층**으로 올라왔어요!" + (f" 정비로 HP +{healed}" if healed > 0 else "")
                  + (f" 몬스터는 1층의 {floor_scaled(100, run.floor, bal.floor_scale)}% 수준이에요." if bal.floor_scale else "")]
     run.room += 1
     run.kind, run.enemy = roll_room(rng, run.room, bal, run.floor), None
@@ -259,13 +259,13 @@ def advance(run: Run, rng, bal: Balance | None = None) -> list[str]:
         table = bal.bosses if run.kind == "boss" else bal.monsters
         monster = pick_weighted(rng, monsters_for_floor(table, run.floor))      # 이 층에 나올 수 있는 것 중에서 '등장' 비율대로(기본은 모두 같은 확률)
         run.enemy, run.phase = _spawn(monster, run.floor, bal), "battle"
-        text = (f"👑 미니 보스의 방! **{monster.name}**이(가) 나타났어요!" if monster.boss
-                else f"⚠️ 몬스터 조우! **{monster.name}**이(가) 나타났어요!")
+        text = (f"👑 관문 노드! **{monster.name}**이(가) 가동됐어요!" if monster.boss
+                else f"⚠️ 적성 개체 감지! **{monster.name}**이(가) 접근해요!")
     elif run.kind == "chest":
-        run.phase, text = "chest", "🎁 보물 상자가 놓여 있는 방이에요."
+        run.phase, text = "chest", "🎁 보급 상자가 놓여 있는 방이에요."
     elif run.kind == "trap":
         text = _trap(run, bal)
-        run.phase = "dead" if run.hp <= 0 else "empty"          # 함정에 쓰러졌다면 던전은 끝난다(부활권은 서비스가 쓴다).
+        run.phase = "dead" if run.hp <= 0 else "empty"          # 함정에 다운됐다면 던전은 끝난다(부활권은 서비스가 쓴다).
     elif run.kind == "custom":
         text = _custom_room(run, custom, bal)
         run.phase = "dead" if run.hp <= 0 else "empty"
@@ -343,7 +343,7 @@ def buy_offer(run: Run, arg, bal: Balance) -> int:
     return offer["price"]
 
 
-TRAP_TEXTS = ("바닥이 푹 꺼졌어요!", "벽에서 화살이 쏟아져요!", "천장에서 돌덩이가 떨어져요!", "독가스가 뿜어져 나와요!")
+TRAP_TEXTS = ("바닥 패널이 꺼지며 합선이 일어나요!", "벽면 터릿에서 볼트가 쏟아져요!", "천장 크레인이 떨어져요!", "냉각 가스가 누출돼요!")
 
 
 def _hurt(run: Run, raw: int, bal: Balance) -> tuple[int, str]:
@@ -364,11 +364,11 @@ def _trap(run: Run, bal: Balance) -> list[str]:
     raw = floor_scaled(bal.trap_damage, run.floor, bal.floor_scale)
     flavor = TRAP_TEXTS[(run.floor + run.room) % len(TRAP_TEXTS)]
     if raw <= 0:
-        return [f"🪤 함정 방이에요. {flavor} 다행히 아무 일도 없었어요."]
+        return [f"⚡ 함정 방이에요. {flavor} 다행히 아무 일도 없었어요."]
     damage, note = _hurt(run, raw, bal)
-    events = [f"🪤 **함정 방!** {flavor} **{damage}** 피해를 입었어요.{note}"]
+    events = [f"⚡ **함정 방!** {flavor} **{damage}** 피해를 입었어요.{note}"]
     if run.phase == "dead":
-        events.append("💀 쓰러졌어요…")
+        events.append("💀 시스템이 다운됐어요…")
     return events
 
 
@@ -379,7 +379,7 @@ def _custom_room(run: Run, room, bal: Balance) -> list[str]:
         damage, note = _hurt(run, room.damage, bal)
         events.append(f"💢 **{damage}** 피해를 입었어요.{note}")
         if run.phase == "dead":
-            events.append("💀 쓰러졌어요…")
+            events.append("💀 시스템이 다운됐어요…")
             return events
     if room.heal:
         gained = max(0, min(bal.max_hp, run.hp + room.heal) - run.hp)
@@ -447,12 +447,12 @@ def _enemy_attack(run: Run, reduction: int, bal: Balance | None = None, guarded:
         events = [f"{run.enemy['emoji']} {run.enemy['name']}의 공격! **{damage}** 피해를 입었어요." + (f" ({', '.join(notes)})" if notes else "")]
     if run.hp <= 0:
         run.phase = "dead"
-        events.append("💀 쓰러졌어요…")
+        events.append("💀 시스템이 다운됐어요…")
     return events
 
 
 def _end_turn(run: Run, bal: Balance, rng=None) -> list[str]:
-    """한 턴이 끝날 때: 턴마다 회복(영혼 에센스), 턴마다 줄어드는 HP(자해), 무적·피해 감소 턴 줄이기, 몬스터에게 걸린 지속 피해."""
+    """한 턴이 끝날 때: 턴마다 회복(나노봇 주입제), 턴마다 줄어드는 HP(자해), 무적·피해 감소 턴 줄이기, 몬스터에게 걸린 지속 피해."""
     if run.phase == "dead":
         return []
     events = []
@@ -461,13 +461,13 @@ def _end_turn(run: Run, bal: Balance, rng=None) -> list[str]:
         run.hp = min(bal.max_hp, run.hp + run.regen_amount)
         run.regen_turns -= 1
         if run.hp != before:
-            events.append(f"👻 영혼 에센스: HP +{run.hp - before} (남은 {run.regen_turns}턴)")
+            events.append(f"🧬 나노봇 주입제: HP +{run.hp - before} (남은 {run.regen_turns}턴)")
     if run.drain_turns > 0:
         before = run.hp
         run.hp = max(1, run.hp - run.drain_amount)
         run.drain_turns -= 1
         if run.hp != before:
-            events.append(f"🩸 HP -{before - run.hp} (남은 {run.drain_turns}턴)")
+            events.append(f"🔥 HP -{before - run.hp} (남은 {run.drain_turns}턴)")
     if run.invuln_turns > 0:
         run.invuln_turns -= 1
         if run.invuln_turns == 0:
@@ -481,9 +481,9 @@ def _end_turn(run: Run, bal: Balance, rng=None) -> list[str]:
     if run.in_battle and enemy and enemy.get("dot_turns", 0) > 0 and enemy["hp"] > 0:
         enemy["hp"] = max(0, enemy["hp"] - enemy["dot"])
         enemy["dot_turns"] -= 1
-        events.append(f"☠️ {enemy['name']}에게 지속 피해 **{enemy['dot']}**! (남은 {enemy['dot_turns']}턴)")
+        events.append(f"🌡️ {enemy['name']}에게 지속 피해 **{enemy['dot']}**! (남은 {enemy['dot_turns']}턴)")
         if enemy["hp"] <= 0:
-            events.append(f"🎉 **{enemy['name']}**을(를) 쓰러뜨렸어요!")
+            events.append(f"🎉 **{enemy['name']}**을(를) 무력화했어요!")
             run.phase = "cleared"
             if enemy.get("secret"):
                 events += secret_drops(run, rng or random, bal)
@@ -491,7 +491,7 @@ def _end_turn(run: Run, bal: Balance, rng=None) -> list[str]:
 
 
 def secret_drops(run: Run, rng, bal: Balance) -> list[str]:
-    """쓰러뜨린 시크릿 보스의 드롭을 준다: 장비와 아이템을 각자 확률로 굴리고, 둘 다 안 나오면 **반드시 하나는** 준다(확률이 더 높은 쪽, 같으면 장비).
+    """무력화한 시크릿 보스의 드롭을 준다: 장비와 아이템을 각자 확률로 굴리고, 둘 다 안 나오면 **반드시 하나는** 준다(확률이 더 높은 쪽, 같으면 장비).
     장비는 상자처럼 장착/예비/버리기를 정해야 하고, 아이템은 소지품에 들어간다. 없어진 장비·아이템은 건너뛴다. 줄 수 있는 게 하나도 없으면 빈 목록."""
     spec = run.enemy.get("drops") or {}
     gear, item = bal.gear_by_key.get(spec.get("gear")), bal.item_by_key.get(spec.get("item"))
@@ -520,7 +520,7 @@ def _after_player_action(run: Run, reduction: int, bal: Balance, rng=None) -> li
     """플레이어 행동 뒤: 적이 살아 있으면 적이 공격하고, 턴이 끝난다."""
     events = []
     if run.enemy["hp"] <= 0:
-        events.append(f"🎉 **{run.enemy['name']}**을(를) 쓰러뜨렸어요!")
+        events.append(f"🎉 **{run.enemy['name']}**을(를) 무력화했어요!")
         run.phase = "cleared"
         if run.enemy.get("secret"):
             events += secret_drops(run, rng or random, bal)
@@ -567,7 +567,7 @@ def player_defend(run: Run, guard_ok: bool, bal: Balance | None = None, rng=None
             enemy["hp"] = max(0, enemy["hp"] - reflected)
             events.append(f"💚 막아 낸 힘으로 HP +{max(0, healed)} · 🔁 **{reflected}** 피해를 되돌려 줬어요.")
             if enemy["hp"] <= 0:
-                events.append(f"🎉 **{enemy['name']}**을(를) 쓰러뜨렸어요!")
+                events.append(f"🎉 **{enemy['name']}**을(를) 무력화했어요!")
                 run.phase = "cleared"
                 if enemy.get("secret"):
                     events += secret_drops(run, rng or random, bal)
@@ -695,7 +695,7 @@ def use_consumable(run: Run, key: str, bal: Balance | None = None, rng=None) -> 
         if item.self_damage:                             # 비용: 내 HP를 깎는다(1 밑으로는 안 내려간다). 여러 턴이면 첫 번째는 바로, 나머지는 턴마다.
             lost = run.hp - max(1, run.hp - item.self_damage)
             run.hp -= lost
-            events.append(f"🩸 내 HP가 **{lost}** 줄었어요." + (f" (이후 {item.self_turns - 1}턴 동안 턴마다 -{item.self_damage})" if item.self_turns > 1 else ""))
+            events.append(f"🔥 내 HP가 **{lost}** 줄었어요." + (f" (이후 {item.self_turns - 1}턴 동안 턴마다 -{item.self_damage})" if item.self_turns > 1 else ""))
             if item.self_turns > 1:
                 run.drain_amount, run.drain_turns = item.self_damage, item.self_turns - 1
         if item.invuln_turns:
@@ -709,15 +709,15 @@ def use_consumable(run: Run, key: str, bal: Balance | None = None, rng=None) -> 
             events.append(f"💥 {run.enemy['name']}에게 **{item.damage}** 피해를 줬어요.")
         if item.dot:
             run.enemy["dot"], run.enemy["dot_turns"] = item.dot, item.dot_turns
-            events.append(f"☠️ {run.enemy['name']}이(가) {item.dot_turns}턴 동안 턴마다 **{item.dot}** 피해를 입어요.")
+            events.append(f"🌡️ {run.enemy['name']}이(가) {item.dot_turns}턴 동안 턴마다 **{item.dot}** 피해를 입어요.")
     if run.in_battle:
-        events += _after_player_action(run, 0, bal, rng)          # 몬스터가 쓰러졌다면 공격하지 않고, 아니면 반격한다. 턴 끝 효과도 여기서 처리한다.
+        events += _after_player_action(run, 0, bal, rng)          # 몬스터가 다운됐다면 공격하지 않고, 아니면 반격한다. 턴 끝 효과도 여기서 처리한다.
     run.events = events
     return events
 
 
 def open_chest(run: Run, rng, bal: Balance | None = None) -> tuple[Gear, Consumable, list[str]]:
-    """보물 상자: 장비 한 개와 아이템 한 개. 좋은 것일수록 확률이 낮다."""
+    """보급 상자: 장비 한 개와 아이템 한 개. 좋은 것일수록 확률이 낮다."""
     bal = bal or DEFAULT
     gear = pick_weighted(rng, candidates_for_floor(bal.gear, run.floor))         # 이 층 상자에서 나올 수 있는 것 중에서 '등장' 비율대로
     item = pick_weighted(rng, candidates_for_floor(bal.consumables, run.floor))

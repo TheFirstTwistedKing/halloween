@@ -80,7 +80,7 @@ async def _buy_role(store: Store, member, item) -> Result:
     price = item["buy_price"]
     store.spend_candy(guild.id, member.id, price)          # 부족하면 StoreError → 위에서 안내
     try:
-        await member.add_roles(role, reason="할로윈 상점 구매")
+        await member.add_roles(role, reason="부품 상점 구매")
     except discord.HTTPException:
         store.add_candy(guild.id, member.id, price)        # 역할을 못 줬으면 낸 재화를 돌려준다.
         return Result(False, "역할을 줄 수 없어서 재화를 돌려 드렸어요. 관리자에게 알려 주세요.")
@@ -121,7 +121,7 @@ async def _sell_role(store: Store, member, item) -> Result:
     if candy + price > cur.max:
         return Result(False, f"{i_ga(cur.name)} 최대({cur.max:,}개)를 넘어서 팔 수 없어요. 먼저 재화를 써 주세요.")
     try:
-        await member.remove_roles(role, reason="할로윈 상점 판매")
+        await member.remove_roles(role, reason="부품 상점 판매")
     except discord.HTTPException:
         return Result(False, "역할을 거둘 수 없어서 판매하지 못했어요. 관리자에게 알려 주세요.")
     store.add_candy(guild.id, member.id, price)

@@ -111,27 +111,27 @@ class ScalingTests(unittest.TestCase):
         return dungeon._spawn(monster, floor, bal or balance.DEFAULT)
 
     def test_monsters_and_bosses_get_stronger_but_dodge_stays(self):
-        bat = self.spawn("거대 박쥐", 1)
+        bat = self.spawn("정찰 드론", 1)
         self.assertEqual((bat["hp"], bat["max_hp"], bat["damage"], bat["dodge"]), (225, 225, 65, 10))
-        bat = self.spawn("거대 박쥐", 10)                           # 136%
+        bat = self.spawn("정찰 드론", 10)                           # 136%
         self.assertEqual((bat["hp"], bat["max_hp"], bat["damage"], bat["dodge"]), (306, 306, 88, 10))
-        king = self.spawn("해골 왕", 10)
+        king = self.spawn("메인프레임 군주", 10)
         self.assertEqual((king["hp"], king["damage"], king["dodge"], king["boss"]), (1224, 184, 0, True))
-        rat = self.spawn("거대 쥐", 10)
+        rat = self.spawn("고장 난 마우스", 10)
         self.assertEqual(rat["dodge"], 30)
 
     def test_zero_percent_means_every_floor_is_the_same(self):
         bal = Balance.build({"일반.층당강화": 0})
-        self.assertEqual(self.spawn("마녀", 10, bal), self.spawn("마녀", 1, bal))
+        self.assertEqual(self.spawn("악성 AI", 10, bal), self.spawn("악성 AI", 1, bal))
 
     def test_a_monster_in_the_room_uses_the_floors_numbers(self):
         run = dungeon.new_run()
         run.floor, run.room, run.phase = 10, 1, "chest_done"
         dungeon.advance(run, Scripted(randoms=[MONSTER, 0.3]))          # 2번째 방, 잡몹, 같은 확률 4칸 중 2번째(0.25~0.5)인 슬라임
-        self.assertEqual((run.enemy["name"], run.enemy["hp"], run.enemy["damage"]), ("슬라임", 367, 61))
+        self.assertEqual((run.enemy["name"], run.enemy["hp"], run.enemy["damage"]), ("오일 슬러지", 367, 61))
         run.room, run.phase = dungeon.ROOMS - 1, "cleared"
-        dungeon.advance(run, Scripted(randoms=[0.0]))                           # 10번째 방 보스(해골 왕)
-        self.assertEqual((run.enemy["name"], run.enemy["hp"]), ("해골 왕", 1224))
+        dungeon.advance(run, Scripted(randoms=[0.0]))                           # 10번째 방 보스(메인프레임 군주)
+        self.assertEqual((run.enemy["name"], run.enemy["hp"]), ("메인프레임 군주", 1224))
 
     def test_the_player_is_not_scaled(self):
         run = dungeon.new_run()
@@ -220,9 +220,9 @@ class ScreenTests(unittest.TestCase):
     def test_the_title_shows_floor_and_room(self):
         run = dungeon.new_run()
         run.floor, run.room, run.phase = 3, 4, "empty"
-        self.assertEqual(run_embed(run).title, "🏚️ 던전 — 3/10층 · 방 4/10")
+        self.assertEqual(run_embed(run).title, "🏭 던전 — 3/10층 · 방 4/10")
         run.floor, run.room = 1, 0
-        self.assertEqual(run_embed(run).title, "🏚️ 던전 — 1/10층 · 방 1/10")
+        self.assertEqual(run_embed(run).title, "🏭 던전 — 1/10층 · 방 1/10")
         short = Balance.build({"일반.층수": 3})
         self.assertIn("1/3층", run_embed(run, None, short).title)
 

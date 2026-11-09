@@ -1,4 +1,4 @@
-"""할로윈 봇 시작 파일."""
+"""기계 분위기 이벤트 봇 시작 파일(내부 이름·DB 경로는 예전 그대로 halloween이다)."""
 from __future__ import annotations
 
 import logging
@@ -44,7 +44,7 @@ def parse_guild_ids(raw: str) -> list[int]:
     return ids
 
 
-class HalloweenBot(commands.Bot):
+class EventBot(commands.Bot):
     def __init__(self, store: Store, guild_ids: list[int] | None = None, rng: random.Random | None = None,
                  members_intent: bool = False):
         intents = discord.Intents.default()          # 기본은 특권 인텐트(멤버·메시지 내용)가 필요 없어요.
@@ -125,7 +125,7 @@ def main():
     except ValueError as exc:
         sys.exit(str(exc))
     store = Store(BASE / os.getenv("DATABASE_PATH", "data/halloween.sqlite3"))
-    bot = HalloweenBot(store, guild_ids, members_intent=env_flag(os.getenv("MEMBERS_INTENT", "")))
+    bot = EventBot(store, guild_ids, members_intent=env_flag(os.getenv("MEMBERS_INTENT", "")))
     try:
         bot.run(token, log_handler=None)
     except discord.LoginFailure:

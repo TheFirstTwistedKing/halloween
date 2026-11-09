@@ -88,7 +88,7 @@ class Economy(commands.Cog):
     async def bag(self, interaction: discord.Interaction):
         await send_bag(interaction)
 
-    @app_commands.command(name="도움말", description="할로윈 이벤트 사용법을 알려줘요")
+    @app_commands.command(name="도움말", description="이벤트 사용법을 알려줘요")
     @app_commands.guild_only()
     async def help(self, interaction: discord.Interaction):
         store, gid = self.bot.store, interaction.guild_id
@@ -98,7 +98,7 @@ class Economy(commands.Cog):
         table = store.package_table(gid)
         total = sum(e["weight"] for e in table) or 1
         results = " · ".join(f"{' '.join(theme.entry_icon_title(e, store, gid))} {e['weight'] / total * 100:g}%" for e in table if e["weight"] > 0)
-        embed = theme.make_embed("🎃 할로윈 이벤트 안내", "채팅하고, 패키지를 뜯고, 상점에서 쇼핑해 보세요!", color=theme.ORANGE)
+        embed = theme.make_embed("🖥️ 이벤트 안내", "채팅하고, 패키지를 뜯고, 상점에서 쇼핑해 보세요!", color=theme.ORANGE)
         embed.add_field(name=f"{cur.emoji} 모으는 법", inline=False,
                         value=f"📍 {where}\n채팅하면 **{cfg['candy_chance']:g}%** 확률로 **{cfg['candy_min']}~{cfg['candy_max']}**개를 얻어요.")
         embed.add_field(name="📦 패키지", inline=False,

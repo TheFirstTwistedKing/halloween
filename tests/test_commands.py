@@ -151,7 +151,7 @@ class SettingsCommandTests(CommandFixture):
     async def test_invalid_combinations_are_refused_and_change_nothing(self):
         interaction = await self.call(Admin.settings, self.admin, self.ask(), candy_min=9, candy_max=3)
         embed, _ = sent_embed(interaction)
-        self.assertEqual(embed.title, "👻 앗!")
+        self.assertEqual(embed.title, "⚠️ 오류 발생")
         self.assertIn("최소값이 최대값보다", embed.description)
         self.assertEqual(self.store.settings(100), DEFAULT_SETTINGS)
 
@@ -159,7 +159,7 @@ class SettingsCommandTests(CommandFixture):
 class GrantTests(CommandFixture):
     async def test_candy_grants_report_the_real_change(self):
         interaction = await self.call(Admin.give_candy, self.admin, self.ask(), self.target, 40)
-        self.assertEqual(self.reply(interaction)[0], "<@8>의 할로윈 재화가 +40만큼 바뀌었어요. (지금 🍬 40)")
+        self.assertEqual(self.reply(interaction)[0], "<@8>의 RAM이 +40만큼 바뀌었어요. (지금 💾 40)")
         interaction = await self.call(Admin.give_candy, self.admin, self.ask(), self.target, CANDY_MAX)
         self.assertIn(f"+{CANDY_MAX - 40:,}만큼", self.reply(interaction)[0])                   # 상한까지만
         interaction = await self.call(Admin.give_candy, self.admin, self.ask(), self.target, -99999)
@@ -208,7 +208,7 @@ class ShopRegistrationTests(CommandFixture):
     async def test_registering_in_the_current_channel(self):
         interaction = await self.call(Shop.register_shop, self.shop, self.ask(channel=self.channel))
         self.channel.send.assert_awaited_once()
-        self.assertEqual(self.channel.sent[0]["embed"].title, "🎃 할로윈 상점")
+        self.assertEqual(self.channel.sent[0]["embed"].title, "🖥️ 부품 상점")
         self.assertEqual(len(self.store.shops(100)), 1)
         text = interaction.followup.send.await_args.kwargs["embed"].description
         self.assertIn("<#400>에 상점을 열었어요", text)
@@ -250,14 +250,14 @@ class ItemManagementTests(CommandFixture):
         embed, kwargs = sent_embed(interaction)
         self.assertFalse(kwargs["ephemeral"])
         self.assertIn("🕯️ **호박 초**을(를) 등록했어요.", embed.description)
-        self.assertIn("구입 ✅ 🍬 30 · 판매 ❌", embed.description)
+        self.assertIn("구입 ✅ 💾 30 · 판매 ❌", embed.description)
         item = self.store.item_by_name(100, "호박 초")
         self.assertEqual((item["buyable"], item["sellable"], item["buy_price"], item["description"]), (1, 0, 30, "은은해요"))
         self.refresh.assert_awaited_once()                                                   # 상점 메시지가 새 목록으로 바뀐다.
 
     async def test_add_item_true_false_flags_and_price_rules(self):
         interaction = await self.call(Shop.add_item, self.shop, self.ask(), "파는 물건", False, True, 0, 12)
-        self.assertIn("구입 ❌ · 판매 ✅ 🍬 12", self.reply(interaction)[0])
+        self.assertIn("구입 ❌ · 판매 ✅ 💾 12", self.reply(interaction)[0])
         interaction = await self.call(Shop.add_item, self.shop, self.ask(), "숨김", False, False)
         self.assertIn("상점에는 나오지 않아요", self.reply(interaction)[0])
         for args, text in [(("공짜", True, False, 0), "구매가"), (("공짜2", False, True, 0, 0), "판매가"),
@@ -266,7 +266,7 @@ class ItemManagementTests(CommandFixture):
             before = self.refresh.await_count
             interaction = await self.call(Shop.add_item, self.shop, self.ask(), *args)
             embed, _ = sent_embed(interaction)
-            self.assertEqual(embed.title, "👻 앗!", args)
+            self.assertEqual(embed.title, "⚠️ 오류 발생", args)
             self.assertIn(text, embed.description)
             self.assertEqual(self.refresh.await_count, before)                          # 실패하면 패널을 고치지 않는다.
 
@@ -332,12 +332,12 @@ class ItemManagementTests(CommandFixture):
         self.store.create_item(100, "VIP", kind="role", role_id=50, sell_price=9, sellable=True)
         interaction = await self.call(Shop.list_items, self.shop, self.ask())
         text = sent_embed(interaction)[0].description
-        self.assertIn("🕯️ **초** · 구입 🍬 5 · 판매 ❌", text)
-        self.assertIn("**유령 손님** `역할` · 구입 ❌ · 판매 🍬 9", text)
+        self.assertIn("🕯️ **초** · 구입 💾 5 · 판매 ❌", text)
+        self.assertIn("**유령 손님** `역할` · 구입 ❌ · 판매 💾 9", text)
         self.assertIn("🗝️ **열쇠** · 구입 ❌ · 판매 ❌", text)
-        self.assertIn("🗑️ **쓰레기** · 구입 ❌ · 판매 🍬 -20 ~ 20", text)                 # 판매가 범위
-        self.assertIn("🥃 **깨진 유리조각** · 구입 ❌ · 판매 🍬 -150", text)                # 팔 때 재화를 내는 물품
-        self.assertIn("🧙 **마녀 모자** · 구입 ❌ · 판매 🍬 100", text)
+        self.assertIn("🗑️ **쓰레기** · 구입 ❌ · 판매 💾 -20 ~ 20", text)                 # 판매가 범위
+        self.assertIn("📺 **깨진 디스플레이 파편** · 구입 ❌ · 판매 💾 -150", text)                # 팔 때 재화를 내는 물품
+        self.assertIn("🔲 **구형 CPU** · 구입 ❌ · 판매 💾 100", text)
         self.assertIn("상점에 진열 10/25", text)                                        # 초 + 역할 + 쓰레기 + 새 물품 7종
 
     async def test_item_autocomplete(self):
@@ -398,7 +398,7 @@ class DeleteTests(CommandFixture):
         self.store.delete_item(100, item["id"])
         interaction = self.ask(uid=1000)
         await view.children[0].callback(interaction)
-        self.assertEqual(interaction.response.edit_message.await_args.kwargs["embed"].title, "👻 앗!")
+        self.assertEqual(interaction.response.edit_message.await_args.kwargs["embed"].title, "⚠️ 오류 발생")
 
 
 class EconomyCommandTests(CommandFixture):
@@ -412,8 +412,8 @@ class EconomyCommandTests(CommandFixture):
         self.assertIn("**0.1%** 확률로 패키지", text)
         self.assertIn("누구나 한 번씩", text)
         self.assertNotIn("EXP", text)
-        self.assertIn("👻 꽝 39.9% · 🗝️ 열쇠 14% · 🍬 할로윈 재화 50 7% · 🗑️ 쓰레기 11% · 🧙 마녀 모자 5.5% · 👻 유령의 천 5.5% · "
-                      "🥃 깨진 유리조각 8% · 🎃 잭 오 랜턴 3% · 🌙 달 조각 1.5% · 🍷 뱀파이어맛 와인 0.5% · ⚗️ 수상한 액체가 담긴 병 4% · 🎟️ 부활권 0.1%", text)
+        self.assertIn("📭 빈 패킷 39.9% · 🗝️ 열쇠 14% · 💾 RAM 50 7% · 🗑️ 쓰레기 11% · 🔲 구형 CPU 5.5% · 🧊 방열 패드 5.5% · "
+                      "📺 깨진 디스플레이 파편 8% · 🔌 무정전 전원 장치 3% · 💿 실리콘 웨이퍼 1.5% · 🧪 액체 냉각제 0.5% · 🧰 출처 불명 부품 키트 4% · 🎟️ 부활권 0.1%", text)
         self.assertIn("최대 99,999개", text)
         self.store.update_settings(100, channels=[400, 401], candy_chance=80, package_mode="first")
         interaction = await self.call(Economy.help, self.economy, self.ask(admin=False))

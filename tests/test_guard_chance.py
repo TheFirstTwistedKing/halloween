@@ -156,9 +156,9 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.chance_of("수호 방패"))
 
     async def test_default_shields_can_be_given_a_chance_too(self):
-        await self.run_cmd(ContentAdmin.gear_edit, "방패", guard_chance=75)
-        self.assertEqual(self.chance_of("방패"), 75)
-        self.assertIsNone(self.chance_of("나무 방패"))                                              # 다른 방패는 그대로
+        await self.run_cmd(ContentAdmin.gear_edit, "에너지 실드", guard_chance=75)
+        self.assertEqual(self.chance_of("에너지 실드"), 75)
+        self.assertIsNone(self.chance_of("구리 방열판"))                                              # 다른 방패는 그대로
 
     def test_options_are_declared_as_integers_in_range(self):
         for command, low in ((ContentAdmin.gear_add, 0), (ContentAdmin.gear_edit, -1)):

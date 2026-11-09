@@ -42,7 +42,7 @@ class PolicyTests(unittest.TestCase):
 
     def test_only_better_gear_is_equipped(self):
         weapon = lambda key, **kw: run_with(pending_gear=key, phase="chest_done", **kw)
-        self.assertEqual(dungeon_auto.choose(weapon("longsword", weapon="club"), BAL), ("equip", None))       # 롱소드 > 몽둥이
+        self.assertEqual(dungeon_auto.choose(weapon("longsword", weapon="club"), BAL), ("equip", None))       # 플라즈마 블레이드 > 몽둥이
         self.assertEqual(dungeon_auto.choose(weapon("club", weapon="longsword"), BAL), ("discard", None))
         self.assertEqual(dungeon_auto.choose(weapon("club"), BAL), ("equip", None))                          # 맨손보다는 낫다
         self.assertEqual(dungeon_auto.choose(weapon("shield", shield="wooden_shield"), BAL), ("equip", None))

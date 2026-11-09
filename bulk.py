@@ -158,7 +158,7 @@ class BulkDelete(discord.ui.View):
     def result_embed(self, deleted, failed) -> discord.Embed:
         label = lambda v: (f"{self.by_value[v].emoji} " if self.by_value[v].emoji else "") + f"**{self.by_value[v].label}**"
         head = f"🗑️ **{len(deleted)}개**를 지웠어요." + (f" 못 지운 것 **{len(failed)}개**." if failed else "")
-        embed = theme.make_embed("🗑️ 대량 삭제 결과" if deleted or not failed else "👻 하나도 못 지웠어요", head, color=theme.GREEN if deleted else theme.RED)
+        embed = theme.make_embed("🗑️ 대량 삭제 결과" if deleted or not failed else "⚠️ 하나도 못 지웠어요", head, color=theme.GREEN if deleted else theme.RED)
         if deleted:
             lines = [label(v) + (f" — {note}" if note else "") for v, note in deleted]
             for number, part in enumerate(split_pages(lines, 1000)[:3], start=1):

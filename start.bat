@@ -3,10 +3,10 @@ setlocal EnableExtensions
 chcp 65001 >nul
 set "PYTHONUTF8=1"
 set "PYTHONIOENCODING=utf-8"
-title 할로윈 봇
+title 이벤트 봇
 cd /d "%~dp0"
 echo ==============================================
-echo   할로윈 봇을 시작해요
+echo   이벤트 봇을 시작해요
 echo ==============================================
 echo.
 

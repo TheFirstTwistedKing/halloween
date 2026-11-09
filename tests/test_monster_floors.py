@@ -132,44 +132,44 @@ class ValidationTests(unittest.IsolatedAsyncioTestCase):
         return next(m.floors for m in self.store.balance(G).monsters + self.store.balance(G).bosses if m.name == name)
 
     def test_restricting_everything_is_refused_naming_the_empty_floor(self):
-        for name in ("거대 박쥐", "슬라임", "마녀"):
+        for name in ("정찰 드론", "오일 슬러지", "악성 AI"):
             content.edit(self.store, G, ("monsters",), name, {"floors": [1, 2, 3]})
         with self.assertRaises(content.ContentError) as ctx:
-            content.edit(self.store, G, ("monsters",), "거대 쥐", {"floors": [1, 2, 3]})
+            content.edit(self.store, G, ("monsters",), "고장 난 마우스", {"floors": [1, 2, 3]})
         self.assertIn("4층에 나올 수 있는 몬스터가 하나도 없어요", str(ctx.exception))
-        self.assertEqual(self.floors_of("거대 쥐"), ())                                                 # 저장되지 않았다
+        self.assertEqual(self.floors_of("고장 난 마우스"), ())                                                 # 저장되지 않았다
 
     def test_one_unrestricted_monster_is_enough(self):
-        for name in ("거대 박쥐", "슬라임", "마녀"):
+        for name in ("정찰 드론", "오일 슬러지", "악성 AI"):
             content.edit(self.store, G, ("monsters",), name, {"floors": [1]})
-        self.assertEqual(self.floors_of("거대 쥐"), ())
+        self.assertEqual(self.floors_of("고장 난 마우스"), ())
 
     def test_bosses_need_a_boss_for_every_floor_too(self):
-        content.edit(self.store, G, ("bosses",), "해골 왕", {"floors": [1, 2, 3, 4, 5]})
-        content.edit(self.store, G, ("bosses",), "거대 슬라임", {"floors": [6, 7, 8, 9]})
+        content.edit(self.store, G, ("bosses",), "메인프레임 군주", {"floors": [1, 2, 3, 4, 5]})
+        content.edit(self.store, G, ("bosses",), "슬러지 코어", {"floors": [6, 7, 8, 9]})
         with self.assertRaises(content.ContentError) as ctx:
-            content.edit(self.store, G, ("bosses",), "고블린 왕", {"floors": [1, 2, 3]})                # 10층에 나올 보스가 없다
+            content.edit(self.store, G, ("bosses",), "스크랩 봇 왕", {"floors": [1, 2, 3]})                # 10층에 나올 보스가 없다
         self.assertIn("10층에 나올 수 있는 보스가 하나도 없어요", str(ctx.exception))
-        content.edit(self.store, G, ("bosses",), "고블린 왕", {"floors": [10]})
-        self.assertEqual(self.floors_of("고블린 왕"), (10,))
+        content.edit(self.store, G, ("bosses",), "스크랩 봇 왕", {"floors": [10]})
+        self.assertEqual(self.floors_of("스크랩 봇 왕"), (10,))
 
     def test_a_zero_weight_monster_does_not_count_as_a_candidate(self):
-        content.edit(self.store, G, ("monsters",), "거대 쥐", {"weight": 0})
+        content.edit(self.store, G, ("monsters",), "고장 난 마우스", {"weight": 0})
         nine = list(range(1, 10))
-        content.edit(self.store, G, ("monsters",), "거대 박쥐", {"floors": nine})
-        content.edit(self.store, G, ("monsters",), "슬라임", {"floors": nine})
+        content.edit(self.store, G, ("monsters",), "정찰 드론", {"floors": nine})
+        content.edit(self.store, G, ("monsters",), "오일 슬러지", {"floors": nine})
         with self.assertRaises(content.ContentError) as ctx:
-            content.edit(self.store, G, ("monsters",), "마녀", {"floors": nine})
+            content.edit(self.store, G, ("monsters",), "악성 AI", {"floors": nine})
         self.assertIn("10층", str(ctx.exception))
 
     def test_with_fewer_floors_the_same_restrictions_are_fine(self):
         self.store.update_settings(G, dungeon={"일반.층수": 3})
-        for name in ("거대 박쥐", "슬라임", "마녀", "거대 쥐"):
+        for name in ("정찰 드론", "오일 슬러지", "악성 AI", "고장 난 마우스"):
             content.edit(self.store, G, ("monsters",), name, {"floors": [1, 2, 3]})
 
     async def test_raising_the_floor_count_is_also_checked_against_the_restrictions(self):
         self.store.update_settings(G, dungeon={"일반.층수": 3})
-        for name in ("거대 박쥐", "슬라임", "마녀", "거대 쥐"):
+        for name in ("정찰 드론", "오일 슬러지", "악성 AI", "고장 난 마우스"):
             content.edit(self.store, G, ("monsters",), name, {"floors": [1, 2, 3]})
         admin = DungeonAdmin(self.w.bot)
         i = self.w.interaction(admin=True)
@@ -199,47 +199,47 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         return next(m.floors for m in bal.monsters + bal.bosses if m.name == name)
 
     async def test_set_view_and_clear_floors_for_a_monster(self):
-        text = await self.run_cmd(ContentAdmin.monster_floors, "슬라임", "1-3,5")
+        text = await self.run_cmd(ContentAdmin.monster_floors, "오일 슬러지", "1-3,5")
         self.assertIn("1~3층, 5층", text)
-        self.assertEqual(self.floors("슬라임"), (1, 2, 3, 5))
-        self.assertIn("1~3층, 5층", await self.run_cmd(ContentAdmin.monster_floors, "슬라임"))
-        self.assertIn("모든 층", await self.run_cmd(ContentAdmin.monster_floors, "슬라임", "전체"))
-        self.assertEqual(self.floors("슬라임"), ())
+        self.assertEqual(self.floors("오일 슬러지"), (1, 2, 3, 5))
+        self.assertIn("1~3층, 5층", await self.run_cmd(ContentAdmin.monster_floors, "오일 슬러지"))
+        self.assertIn("모든 층", await self.run_cmd(ContentAdmin.monster_floors, "오일 슬러지", "전체"))
+        self.assertEqual(self.floors("오일 슬러지"), ())
 
     async def test_bosses_work_the_same_way(self):
-        text = await self.run_cmd(ContentAdmin.monster_floors, "해골 왕", "1~4")
+        text = await self.run_cmd(ContentAdmin.monster_floors, "메인프레임 군주", "1~4")
         self.assertIn("(보스)", text)
-        self.assertEqual(self.floors("해골 왕"), (1, 2, 3, 4))
+        self.assertEqual(self.floors("메인프레임 군주"), (1, 2, 3, 4))
 
     async def test_bad_input_unknown_name_and_empty_floor_are_explained(self):
-        self.assertIn("층 번호가 아니에요", await self.run_cmd(ContentAdmin.monster_floors, "슬라임", "abc"))
+        self.assertIn("층 번호가 아니에요", await self.run_cmd(ContentAdmin.monster_floors, "오일 슬러지", "abc"))
         self.assertIn("그런 몬스터·보스가 없어요", await self.run_cmd(ContentAdmin.monster_floors, "없는몹", "3"))
-        for name in ("거대 박쥐", "마녀", "거대 쥐"):
+        for name in ("정찰 드론", "악성 AI", "고장 난 마우스"):
             await self.run_cmd(ContentAdmin.monster_floors, name, "1-3")
-        text = await self.run_cmd(ContentAdmin.monster_floors, "슬라임", "1-3")
+        text = await self.run_cmd(ContentAdmin.monster_floors, "오일 슬러지", "1-3")
         self.assertIn("4층에 나올 수 있는 몬스터가 하나도 없어요", text)
-        self.assertEqual(self.floors("슬라임"), ())
+        self.assertEqual(self.floors("오일 슬러지"), ())
 
     async def test_warnings_for_floors_nobody_can_reach(self):
-        self.assertIn("무한모드를 골라야", await self.run_cmd(ContentAdmin.monster_floors, "슬라임", "11"))
+        self.assertIn("무한모드를 골라야", await self.run_cmd(ContentAdmin.monster_floors, "오일 슬러지", "11"))
         self.store.update_settings(G, dungeon={"일반.무한모드": 0})
-        self.assertIn("나올 수 없어요", await self.run_cmd(ContentAdmin.monster_floors, "슬라임", "12"))
+        self.assertIn("나올 수 없어요", await self.run_cmd(ContentAdmin.monster_floors, "오일 슬러지", "12"))
 
     async def test_the_list_shows_floors_only_when_restricted(self):
         default = content.describe("monsters", content.current(self.store, G, "monsters")[1])
         self.assertNotIn("나오는 층", default)
         self.assertTrue(default.endswith("등장 1"))                                                     # 예전 표시 그대로
-        await self.run_cmd(ContentAdmin.monster_floors, "슬라임", "2,4")
-        line = content.describe("monsters", next(d for d in content.current(self.store, G, "monsters") if d["name"] == "슬라임"))
+        await self.run_cmd(ContentAdmin.monster_floors, "오일 슬러지", "2,4")
+        line = content.describe("monsters", next(d for d in content.current(self.store, G, "monsters") if d["name"] == "오일 슬러지"))
         self.assertIn("나오는 층 2층, 4층", line)
 
     async def test_admin_only_and_autocomplete(self):
-        self.assertIn("관리자만", await self.run_cmd(ContentAdmin.monster_floors, "슬라임", "3", admin=False))
-        self.assertEqual(self.floors("슬라임"), ())
+        self.assertIn("관리자만", await self.run_cmd(ContentAdmin.monster_floors, "오일 슬러지", "3", admin=False))
+        self.assertEqual(self.floors("오일 슬러지"), ())
         i = self.w.interaction(admin=True)
         names = [c.value for c in await self.cog.monster_names(i, "")]
-        self.assertIn("슬라임", names)
-        self.assertIn("해골 왕", names)
+        self.assertIn("오일 슬러지", names)
+        self.assertIn("메인프레임 군주", names)
 
     def test_options_are_text_so_many_floors_fit(self):
         kinds = {p.name: (p.type.name, p.required) for p in ContentAdmin.monster_floors.parameters}

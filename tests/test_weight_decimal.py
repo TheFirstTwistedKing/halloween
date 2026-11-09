@@ -67,9 +67,9 @@ class WeightValidationTests(unittest.TestCase):
 
 class DecimalChanceTests(unittest.TestCase):
     def test_a_decimal_weight_really_changes_how_often_it_drops(self):
-        """낡은 몽둥이 0.5 : 단검 1.5 → 몽둥이는 25% 안팎으로 나와야 한다."""
+        """낡은 스패너 0.5 : 단검 1.5 → 몽둥이는 25% 안팎으로 나와야 한다."""
         changes = {f"장비.{g.name}.등장": 0 for g in dungeon.GEAR}
-        changes.update({"장비.낡은 몽둥이.등장": 0.5, "장비.단검.등장": 1.5})
+        changes.update({"장비.낡은 스패너.등장": 0.5, "장비.레이저 커터.등장": 1.5})
         bal = Balance.build(changes)
         rng, counts = random.Random(7), {}
         for _ in range(20000):
@@ -80,7 +80,7 @@ class DecimalChanceTests(unittest.TestCase):
 
     def test_boundary_with_decimal_weights(self):
         changes = {f"장비.{g.name}.등장": 0 for g in dungeon.GEAR}
-        changes.update({"장비.낡은 몽둥이.등장": 0.25, "장비.단검.등장": 0.75})
+        changes.update({"장비.낡은 스패너.등장": 0.25, "장비.레이저 커터.등장": 0.75})
         bal = Balance.build(changes)
         for draw, expected in ((0.0, "club"), (0.2499, "club"), (0.25, "dagger"), (0.9999, "dagger")):
             run = dungeon.new_run(bal=bal)
@@ -119,12 +119,12 @@ class MonsterWeightTests(unittest.TestCase):
         self.assertEqual(loaded, entity)
 
     def test_dungeon_settings_take_decimal_monster_and_boss_weights(self):
-        self.assertEqual(check_value("몬스터.슬라임.등장", 0.5), (0.5, None))
-        self.assertEqual(check_value("보스.해골 왕.등장", 2.25), (2.25, None))
-        self.assertIsNotNone(check_value("몬스터.슬라임.등장", -1)[1])
-        bal = Balance.build({"몬스터.슬라임.등장": 0.5, "보스.해골 왕.등장": 4})
-        self.assertEqual(next(m.weight for m in bal.monsters if m.name == "슬라임"), 0.5)
-        self.assertEqual(next(b.weight for b in bal.bosses if b.name == "해골 왕"), 4)
+        self.assertEqual(check_value("몬스터.오일 슬러지.등장", 0.5), (0.5, None))
+        self.assertEqual(check_value("보스.메인프레임 군주.등장", 2.25), (2.25, None))
+        self.assertIsNotNone(check_value("몬스터.오일 슬러지.등장", -1)[1])
+        bal = Balance.build({"몬스터.오일 슬러지.등장": 0.5, "보스.메인프레임 군주.등장": 4})
+        self.assertEqual(next(m.weight for m in bal.monsters if m.name == "오일 슬러지"), 0.5)
+        self.assertEqual(next(b.weight for b in bal.bosses if b.name == "메인프레임 군주"), 4)
 
     def test_default_pick_is_still_an_even_split(self):
         bal = Balance.build({})
@@ -133,22 +133,22 @@ class MonsterWeightTests(unittest.TestCase):
             self.assertEqual(dungeon.pick_weighted(Scripted(randoms=[draw]), bal.monsters).key, expected, draw)
 
     def test_a_decimal_weight_really_changes_which_monster_shows_up(self):
-        bal = Balance.build({"몬스터.거대 박쥐.등장": 0.5, "몬스터.슬라임.등장": 1.5, "몬스터.마녀.등장": 0, "몬스터.거대 쥐.등장": 0})
+        bal = Balance.build({"몬스터.정찰 드론.등장": 0.5, "몬스터.오일 슬러지.등장": 1.5, "몬스터.악성 AI.등장": 0, "몬스터.고장 난 마우스.등장": 0})
         rng, counts = random.Random(11), {}
         for _ in range(20000):
             run = dungeon.new_run(bal=bal)
             run.room, run.phase = 1, "cleared"
             dungeon.advance(run, Scripted(randoms=[0.99, rng.random()]), bal)               # 0.99 = 잡몹 방
             counts[run.enemy["name"]] = counts.get(run.enemy["name"], 0) + 1
-        self.assertEqual(set(counts), {"거대 박쥐", "슬라임"})                               # 0은 절대 안 나온다
-        self.assertAlmostEqual(counts["거대 박쥐"] / 20000, 0.25, delta=0.015)
+        self.assertEqual(set(counts), {"정찰 드론", "오일 슬러지"})                               # 0은 절대 안 나온다
+        self.assertAlmostEqual(counts["정찰 드론"] / 20000, 0.25, delta=0.015)
 
     def test_boss_weights_decide_the_boss_too(self):
-        bal = Balance.build({"보스.해골 왕.등장": 0, "보스.거대 슬라임.등장": 0, "보스.고블린 왕.등장": 0.001})
+        bal = Balance.build({"보스.메인프레임 군주.등장": 0, "보스.슬러지 코어.등장": 0, "보스.스크랩 봇 왕.등장": 0.001})
         run = dungeon.new_run(bal=bal)
         run.room, run.phase = dungeon.ROOMS - 1, "cleared"
         dungeon.advance(run, Scripted(randoms=[0.0]), bal)
-        self.assertEqual(run.enemy["name"], "고블린 왕")
+        self.assertEqual(run.enemy["name"], "스크랩 봇 왕")
 
     def test_zeroing_every_monster_weight_is_refused_with_a_reason(self):
         store = Store(":memory:")
@@ -223,8 +223,8 @@ class DecimalCommandTests(unittest.IsolatedAsyncioTestCase):
         i = await self.run_cmd(ContentAdmin.monster_edit, self.ask(), "드래곤", weight=0.0125)
         self.assertIn("등장 0.0125", self.text(i))
         self.assertEqual(next(m.weight for m in self.store.balance(G).monsters if m.name == "드래곤"), 0.0125)
-        i = await self.run_cmd(ContentAdmin.monster_edit, self.ask(), "슬라임", weight=2.5)         # 기본 몬스터도 고칠 수 있다
-        self.assertEqual(next(m.weight for m in self.store.balance(G).monsters if m.name == "슬라임"), 2.5)
+        i = await self.run_cmd(ContentAdmin.monster_edit, self.ask(), "오일 슬러지", weight=2.5)         # 기본 몬스터도 고칠 수 있다
+        self.assertEqual(next(m.weight for m in self.store.balance(G).monsters if m.name == "오일 슬러지"), 2.5)
         i = await self.run_cmd(ContentAdmin.monster_add, self.ask(), "마왕", "😈", 1500, 200, 0, True, 0.2)
         self.assertEqual(next(b.weight for b in self.store.balance(G).bosses if b.name == "마왕"), 0.2)
 
@@ -233,11 +233,11 @@ class DecimalCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(next(m.weight for m in self.store.balance(G).monsters if m.name == "드래곤"), 1)
 
     async def test_monster_edit_that_would_zero_everything_is_refused(self):
-        for name in ("거대 박쥐", "슬라임", "마녀"):
+        for name in ("정찰 드론", "오일 슬러지", "악성 AI"):
             await self.run_cmd(ContentAdmin.monster_edit, self.ask(), name, weight=0)
-        i = await self.run_cmd(ContentAdmin.monster_edit, self.ask(), "거대 쥐", weight=0)
+        i = await self.run_cmd(ContentAdmin.monster_edit, self.ask(), "고장 난 마우스", weight=0)
         self.assertIn("등장", self.text(i))
-        self.assertEqual(next(m.weight for m in self.store.balance(G).monsters if m.name == "거대 쥐"), 1)
+        self.assertEqual(next(m.weight for m in self.store.balance(G).monsters if m.name == "고장 난 마우스"), 1)
 
     def test_monster_options_are_declared_as_decimals(self):
         for command in (ContentAdmin.monster_add, ContentAdmin.monster_edit):

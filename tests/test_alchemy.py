@@ -129,7 +129,7 @@ class RecipeRuleTests(StoreFixture):
 
     def test_ingredients_need_a_fixed_price_of_at_least_one(self):
         free = self.store.create_item(G, "공짜", emoji="🎈")
-        negative = self.store.create_item(G, "유리", emoji="🥃", sell_price=-50, sellable=True)
+        negative = self.store.create_item(G, "유리", emoji="📺", sell_price=-50, sellable=True)
         ranged = self.store.create_item(G, "복불복", emoji="🎲", sell_price=-10, sell_max=30, sellable=True)
         for bad in (free, negative, ranged):
             with self.assertRaisesRegex(StoreError, "판매가가 1 이상의 고정값"):
@@ -164,7 +164,7 @@ class RecipeRuleTests(StoreFixture):
         with self.store.db:
             listed = len(self.store.items(G, shop_only=True))
             for n in range(MAX_SHOP_ITEMS - listed):
-                self.store.db.execute("INSERT INTO items(guild,name,emoji,kind,buyable,buy_price) VALUES(?,?,?,?,?,?)", (G, f"자리{n}", "🎃", "item", 1, 1))
+                self.store.db.execute("INSERT INTO items(guild,name,emoji,kind,buyable,buy_price) VALUES(?,?,?,?,?,?)", (G, f"자리{n}", "⚙️", "item", 1, 1))
         done = self.add(self.out, self.a, self.b)
         self.assertFalse(done["listed"])
         out = self.item(self.out)
@@ -333,7 +333,7 @@ class AdminCommandTests(unittest.IsolatedAsyncioTestCase):
         text = self.text(i)
         self.assertIn("레시피를 더했어요", text)
         self.assertIn("✨ 마나 가루 + ✨ 달빛 이슬 → 🧪 마력 약", text)
-        self.assertIn("🍬 160 = (100 + 100) ×0.8", text)
+        self.assertIn("💾 160 = (100 + 100) ×0.8", text)
         self.assertIn("상점에 올라가 있어요", text)
         self.assertFalse(i.response.send_message.await_args.kwargs["ephemeral"])
         self.refresh.assert_awaited_once()
@@ -341,7 +341,7 @@ class AdminCommandTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_three_ingredients_use_the_60_percent_rule(self):
         i = await self.run_cmd(Alchemy.recipe_add, "마력 약", "마나 가루", "달빛 이슬", "별 조각")
-        self.assertIn("🍬 300 = (100 + 100 + 300) ×0.6", self.text(i))
+        self.assertIn("💾 300 = (100 + 100 + 300) ×0.6", self.text(i))
 
     async def test_a_warning_when_the_result_is_not_worth_more_than_the_best_ingredient(self):
         self.store.create_item(G, "황금", emoji="🥇", sell_price=1000, sellable=True)
@@ -372,7 +372,7 @@ class AdminCommandTests(unittest.IsolatedAsyncioTestCase):
         await self.run_cmd(Alchemy.recipe_add, "마력 약", "마나 가루", "달빛 이슬")
         i = await self.run_cmd(Alchemy.recipe_list)
         self.assertIn("레시피 1개", self.text(i))
-        self.assertIn("→ 🧪 마력 약 (판매가 🍬 160)", self.text(i))
+        self.assertIn("→ 🧪 마력 약 (판매가 💾 160)", self.text(i))
         self.assertIn("오후 6시부터 자정", self.text(i))
         i = await self.run_cmd(Alchemy.recipe_delete, "마력 약")
         self.assertIn("레시피를 지웠어요", self.text(i))
@@ -382,7 +382,7 @@ class AdminCommandTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_autocompletes_offer_only_items_that_fit(self):
         await self.run_cmd(Alchemy.recipe_add, "마력 약", "마나 가루", "달빛 이슬")
-        self.store.create_item(G, "유리병", emoji="🥃", sell_price=-5, sellable=True)
+        self.store.create_item(G, "유리병", emoji="📺", sell_price=-5, sellable=True)
         self.store.create_item(G, "새 약", emoji="💊")
         ingredient = [c.value for c in await self.cog.ingredient_autocomplete(self.ask(), "")]
         self.assertIn("별 조각", ingredient)
@@ -488,7 +488,7 @@ class PlayerScreenTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["embed"].title, "⚗️ 연금술 성공!")
         self.assertIn("✨ 마나 가루 + 💧 달빛 이슬", kwargs["embed"].description)
         self.assertIn("🧪 마력 약 **×1**", kwargs["embed"].description)
-        self.assertIn("🍬 160", kwargs["embed"].description)
+        self.assertIn("💾 160", kwargs["embed"].description)
         self.assertEqual(self.selects(kwargs["view"]), [])                      # 재료가 떨어졌으니 선택창도 없다
 
     async def test_three_ingredients_through_the_screen(self):

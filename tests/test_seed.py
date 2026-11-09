@@ -12,7 +12,7 @@ import discord
 import services
 import theme
 from cogs.shop import Shop
-from main import HalloweenBot
+from main import EventBot
 from store import (MAX_SHOP_ITEMS, NEW_ITEMS, SEED_VERSION, TRASH_SELL, Store, StoreError, first_package_table)
 from tests.helpers import Scripted, World, sent_embed
 
@@ -46,7 +46,7 @@ class DefaultsTests(unittest.TestCase):
             row = self.store.item(G, self.ids[system])
             low, high = PRICES[system]
             self.assertEqual((row["name"], row["sell_price"], row["sell_max"], row["sellable"], row["buyable"]), (name, low, high, 1, 0), name)
-        self.assertEqual([item[1] for item in NEW_ITEMS], ["마녀 모자", "유령의 천", "깨진 유리조각", "잭 오 랜턴", "달 조각", "뱀파이어맛 와인", "수상한 액체가 담긴 병"])
+        self.assertEqual([item[1] for item in NEW_ITEMS], ["구형 CPU", "방열 패드", "깨진 디스플레이 파편", "무정전 전원 장치", "실리콘 웨이퍼", "액체 냉각제", "출처 불명 부품 키트"])
 
     def test_trash_is_sellable_between_minus_20_and_20(self):
         trash = self.store.item(G, self.ids["trash"])
@@ -76,7 +76,7 @@ class DefaultsTests(unittest.TestCase):
         self.assertTrue(w["none"] == max(w.values()))
 
     def test_expected_sale_value_of_a_package_is_modest(self):
-        """안 팔면 그만인 손해 물품(깨진 유리조각)은 빼고, 팔면 받는 평균을 센다."""
+        """안 팔면 그만인 손해 물품(깨진 디스플레이 파편)은 빼고, 팔면 받는 평균을 센다."""
         table, total = self.store.package_table(G), 0.0
         for e in table:
             row = self.store.item(G, e["item"]) if e["kind"] == "item" else None
@@ -194,10 +194,10 @@ class DisplayTests(unittest.TestCase):
         return {"sell_price": low, "sell_max": high}
 
     def test_sell_text(self):
-        self.assertEqual(theme.sell_text(self.row(100)), "🍬 100")
-        self.assertEqual(theme.sell_text(self.row(-150)), "🍬 -150")
-        self.assertEqual(theme.sell_text(self.row(-300, 300)), "🍬 -300 ~ 300")
-        self.assertEqual(theme.sell_text({"sell_price": 5}), "🍬 5")                    # 칸이 없는 옛 형식도 그대로
+        self.assertEqual(theme.sell_text(self.row(100)), "💾 100")
+        self.assertEqual(theme.sell_text(self.row(-150)), "💾 -150")
+        self.assertEqual(theme.sell_text(self.row(-300, 300)), "💾 -300 ~ 300")
+        self.assertEqual(theme.sell_text({"sell_price": 5}), "💾 5")                    # 칸이 없는 옛 형식도 그대로
         gem = theme.Currency("<:gem:123456789012345678>", "젬", 999)
         self.assertEqual(theme.sell_text(self.row(-300, 300), gem, plain=True), "젬 -300 ~ 300")
 
@@ -226,13 +226,13 @@ class ServiceMessageTests(unittest.IsolatedAsyncioTestCase):
         self.store.add_item(G, U, self.ids["witch_hat"], 1)
         paid = await self.sell("witch_hat", 1)
         self.assertTrue(paid.ok)
-        self.assertIn("🍬 100을 받았어요", paid.text)
+        self.assertIn("💾 100을 받았어요", paid.text)
         self.assertEqual(self.store.wallet(G, U), 100)
         self.store.add_candy(G, U, 100)                                                   # 150을 내려면 재화가 있어야 한다.
         self.store.add_item(G, U, self.ids["broken_glass"], 1)
         charged = await self.sell("broken_glass", 1)
         self.assertTrue(charged.ok)
-        self.assertIn("🍬 150을 냈어요", charged.text)
+        self.assertIn("💾 150을 냈어요", charged.text)
         self.assertEqual(self.store.wallet(G, U), 50)
         self.store.add_item(G, U, self.ids["trash"], 1)
         nothing = await self.sell("trash", 1, Scripted2(ints=[0]))
@@ -262,11 +262,11 @@ class ShopCommandTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_register_a_negative_and_a_range_item_with_the_commands(self):
         i = self.ask()
-        await Shop.add_item.callback(self.cog, i, "함정", False, True, 0, -50, "", "🪤", None)
-        self.assertIn("판매 ✅ 🍬 -50", sent_embed(i)[0].description)
+        await Shop.add_item.callback(self.cog, i, "함정", False, True, 0, -50, "", "⚡", None)
+        self.assertIn("판매 ✅ 💾 -50", sent_embed(i)[0].description)
         i = self.ask()
         await Shop.add_item.callback(self.cog, i, "복불복", False, True, 0, -10, "", "🎲", 30)
-        self.assertIn("🍬 -10 ~ 30", sent_embed(i)[0].description)
+        self.assertIn("💾 -10 ~ 30", sent_embed(i)[0].description)
         row = self.store.item_by_name(G, "복불복")
         self.assertEqual((row["sell_price"], row["sell_max"]), (-10, 30))
 
@@ -274,7 +274,7 @@ class ShopCommandTests(unittest.IsolatedAsyncioTestCase):
         self.store.create_item(G, "물건", sell_price=5, sellable=True)
         i = self.ask()
         await Shop.edit_item.callback(self.cog, i, "물건", sell_price=-20, sell_max=20)
-        self.assertIn("🍬 -20 ~ 20", sent_embed(i)[0].description)
+        self.assertIn("💾 -20 ~ 20", sent_embed(i)[0].description)
         i = self.ask()
         await Shop.edit_item.callback(self.cog, i, "물건", sell_price=9, sell_max=9)
         row = self.store.item_by_name(G, "물건")
@@ -310,9 +310,9 @@ def _old_database(path, *, shop_items=0, custom_table=None, trash_sellable=False
     db.execute("INSERT INTO items(id,guild,name,emoji,description,kind,system,sellable,sell_price) VALUES(2,100,'쓰레기','🗑️','','item','trash',?,?)",
                (int(trash_sellable), 3 if trash_sellable else 0))
     for n in range(shop_items):
-        db.execute("INSERT INTO items(guild,name,emoji,kind,buyable,buy_price) VALUES(100,?,'🎃','item',1,5)", (f"진열{n}",))
+        db.execute("INSERT INTO items(guild,name,emoji,kind,buyable,buy_price) VALUES(100,?,'⚙️','item',1,5)", (f"진열{n}",))
     for name in extra_names:
-        db.execute("INSERT INTO items(guild,name,emoji,description,kind) VALUES(100,?,'🎃','내가 만든 것','item')", (name,))
+        db.execute("INSERT INTO items(guild,name,emoji,description,kind) VALUES(100,?,'⚙️','내가 만든 것','item')", (name,))
     db.execute("INSERT INTO wallets(guild,user,candy) VALUES(100,7,777)")
     db.execute("INSERT INTO inventory VALUES(100,7,1,4)")
     import json
@@ -389,9 +389,9 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual((trash["sell_price"], trash["sell_max"]), (3, None))
 
     def test_an_item_the_admin_made_with_the_same_name_is_reused_not_overwritten(self):
-        store = self.open(extra_names=("마녀 모자",))
+        store = self.open(extra_names=("구형 CPU",))
         store.ensure_defaults(100)
-        hats = [r for r in store.items(100) if r["name"] == "마녀 모자"]
+        hats = [r for r in store.items(100) if r["name"] == "구형 CPU"]
         self.assertEqual(len(hats), 1)
         self.assertEqual((hats[0]["description"], hats[0]["sell_price"], hats[0]["sellable"]), ("내가 만든 것", 0, 0))
         table = store.settings(100)["package_table"]
@@ -460,7 +460,7 @@ class ApplyDefaultTableTests(unittest.IsolatedAsyncioTestCase):
     async def test_the_preview_shows_the_new_table_and_changes_nothing_until_confirmed(self):
         i = await self.ask_default()
         text = self.text(i)
-        for needle in ("지금 결과표 **2칸**", "꽝 39.9%", "열쇠 14%", "마녀 모자 5.5%", "뱀파이어맛 와인 0.5%", "수상한 액체가 담긴 병 4%", "부활권 0.1%", "가방·재화·상점·던전 설정은 바뀌지 않아요"):
+        for needle in ("지금 결과표 **2칸**", "빈 패킷 39.9%", "열쇠 14%", "구형 CPU 5.5%", "액체 냉각제 0.5%", "출처 불명 부품 키트 4%", "부활권 0.1%", "가방·재화·상점·던전 설정은 바뀌지 않아요"):
             self.assertIn(needle, text)
         self.assertEqual(self.store.settings(G)["package_table"], self.custom)
 
@@ -474,18 +474,18 @@ class ApplyDefaultTableTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.store.item(G, by_id[system]["item"])["name"], name)
 
     async def test_it_makes_only_the_missing_items_and_keeps_existing_ones_untouched(self):
-        mine = self.store.item_by_name(G, "마녀 모자")
+        mine = self.store.item_by_name(G, "구형 CPU")
         self.store.update_item(G, mine["id"], sell_price=999)                  # 관리자가 값을 바꿔 둔 물품
-        moon = self.store.item_by_name(G, "달 조각")
+        moon = self.store.item_by_name(G, "실리콘 웨이퍼")
         with self.store.db:
             self.store.db.execute("DELETE FROM items WHERE id=?", (moon["id"],))      # 지워진 물품
         before = {r["name"]: r["id"] for r in self.store.items(G)}
         await self.press(await self.ask_default())
         after = {r["name"]: r["id"] for r in self.store.items(G)}
-        self.assertEqual(self.store.item_by_name(G, "마녀 모자")["sell_price"], 999)       # 기존 물품은 그대로
-        self.assertEqual(after["마녀 모자"], before["마녀 모자"])
-        self.assertIn("달 조각", after)                                                   # 없던 것만 새로 만든다
-        self.assertEqual(self.store.item_by_name(G, "달 조각")["sell_price"], 300)
+        self.assertEqual(self.store.item_by_name(G, "구형 CPU")["sell_price"], 999)       # 기존 물품은 그대로
+        self.assertEqual(after["구형 CPU"], before["구형 CPU"])
+        self.assertIn("실리콘 웨이퍼", after)                                                   # 없던 것만 새로 만든다
+        self.assertEqual(self.store.item_by_name(G, "실리콘 웨이퍼")["sell_price"], 300)
         self.assertEqual(len(after), len(before) + 1)
 
     async def test_wallets_bags_and_other_settings_are_not_touched(self):
@@ -525,11 +525,11 @@ class ApplyDefaultTableTests(unittest.IsolatedAsyncioTestCase):
         from packages import open_package
         await self.press(await self.ask_default())
         self.store.create_package(G, 400, 9001, time.time() + 600, "all")
-        self.w.bot.rng.randoms.append(0.9985)                                             # 부활권 바로 앞 = 수상한 액체가 담긴 병
+        self.w.bot.rng.randoms.append(0.9985)                                             # 부활권 바로 앞 = 출처 불명 부품 키트
         i = self.w.interaction(uid=5, message_id=9001)
         await open_package(i)
-        self.assertIn("수상한 액체가 담긴 병", i.response.send_message.await_args.kwargs["embed"].title)
-        bottle = self.store.item_by_name(G, "수상한 액체가 담긴 병")
+        self.assertIn("출처 불명 부품 키트", i.response.send_message.await_args.kwargs["embed"].title)
+        bottle = self.store.item_by_name(G, "출처 불명 부품 키트")
         self.assertEqual(self.store.qty(G, 5, bottle["id"]), 1)
 
 
@@ -537,11 +537,11 @@ class PurgeTests(unittest.IsolatedAsyncioTestCase):
     """디스코드에 남은 코드에 없는 옛 명령어를 시작할 때 지운다."""
 
     def bot(self, guild_ids=None, guilds=(), existing=None):
-        bot = HalloweenBot(Store(":memory:"), guild_ids)
+        bot = EventBot(Store(":memory:"), guild_ids)
         existing = existing or {}
         bot.tree.fetch_commands = AsyncMock(side_effect=lambda guild=None: [NS(name=n) for n in existing.get(getattr(guild, "id", None), [])])
         bot.tree.sync = AsyncMock(return_value=[])
-        patcher = patch.object(HalloweenBot, "guilds", new_callable=PropertyMock, return_value=[NS(id=g) for g in guilds])
+        patcher = patch.object(EventBot, "guilds", new_callable=PropertyMock, return_value=[NS(id=g) for g in guilds])
         patcher.start()
         self.addCleanup(patcher.stop)
         return bot
@@ -602,7 +602,7 @@ class PurgeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_it_runs_once_even_if_the_connection_is_restored(self):
         bot = self.bot(None, guilds=[111], existing={111: ["옛명령"]})
-        with patch.object(HalloweenBot, "user", new_callable=PropertyMock, return_value="봇"):
+        with patch.object(EventBot, "user", new_callable=PropertyMock, return_value="봇"):
             await bot.on_ready()
             await bot.on_ready()
         self.assertEqual(bot.tree.sync.await_count, 1)

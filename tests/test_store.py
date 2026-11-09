@@ -42,8 +42,8 @@ class ProbabilityTests(unittest.TestCase):
 
     def test_package_result_boundaries(self):
         table = Store(":memory:").package_table(1)
-        # 누적 경계(%): 꽝 0~39.9 · 열쇠 ~53.9 · 재화 ~60.9 · 쓰레기 ~71.9 · 마녀 모자 ~77.4 · 유령의 천 ~82.9 · 깨진 유리조각 ~90.9 · 잭 오 랜턴 ~93.9
-        #              · 달 조각 ~95.4 · 뱀파이어맛 와인 ~95.9 · 수상한 병 ~99.9 · 부활권 ~100(0.1%)
+        # 누적 경계(%): 꽝 0~39.9 · 열쇠 ~53.9 · 재화 ~60.9 · 쓰레기 ~71.9 · 구형 CPU ~77.4 · 방열 패드 ~82.9 · 깨진 디스플레이 파편 ~90.9 · 무정전 전원 장치 ~93.9
+        #              · 실리콘 웨이퍼 ~95.4 · 액체 냉각제 ~95.9 · 수상한 병 ~99.9 · 부활권 ~100(0.1%)
         order = ["none", "key", "candy", "trash", "witch_hat", "ghost_cloth", "broken_glass", "jack_o_lantern", "moon_shard",
                  "vampire_wine", "mystery_bottle", "revive"]
         edges = [39.9, 53.9, 60.9, 71.9, 77.4, 82.9, 90.9, 93.9, 95.4, 95.9, 99.9]
@@ -149,10 +149,10 @@ class CurrencyTests(unittest.TestCase):
 
     def test_default_currency_and_changes_are_per_server(self):
         cur = self.store.currency(1)
-        self.assertEqual((cur.emoji, cur.name, cur.max), ("🍬", "할로윈 재화", CANDY_MAX))
+        self.assertEqual((cur.emoji, cur.name, cur.max), ("💾", "RAM", CANDY_MAX))
         self.store.set_currency(1, emoji="💎", name="젬", max=500)
         self.assertEqual(tuple(self.store.currency(1)), ("💎", "젬", 500))
-        self.assertEqual(self.store.currency(2).name, "할로윈 재화")
+        self.assertEqual(self.store.currency(2).name, "RAM")
         self.assertEqual(self.store.currency(1).money(1234), "💎 1,234")
 
     def test_the_max_is_used_everywhere(self):
@@ -181,7 +181,7 @@ class CurrencyTests(unittest.TestCase):
         for bad in (dict(emoji="abc"), dict(emoji=""), dict(name=" 젬"), dict(name="가" * 21), dict(max=0), dict(max=-5), dict(zzz=1)):
             with self.assertRaises(ValueError, msg=str(bad)):
                 self.store.set_currency(1, **bad)
-        self.assertEqual((self.store.wallet(1, 7), self.store.currency(1).name), (900, "할로윈 재화"))
+        self.assertEqual((self.store.wallet(1, 7), self.store.currency(1).name), (900, "RAM"))
         with self.assertRaises(ValueError):
             self.store.set_currency(1, max=10, emoji="abc")                           # 일부만 잘못돼도 지갑을 건드리지 않는다.
         self.assertEqual(self.store.wallet(1, 7), 900)
@@ -194,7 +194,7 @@ class ItemTests(unittest.TestCase):
         self.store = Store(":memory:")
 
     def test_create_and_read(self):
-        item = self.store.create_item(1, "호박 랜턴", emoji="🎃", description="빛나요", buy_price=30, sell_price=10,
+        item = self.store.create_item(1, "호박 랜턴", emoji="⚙️", description="빛나요", buy_price=30, sell_price=10,
                                       buyable=True, sellable=True)
         self.assertEqual((item["name"], item["buy_price"], item["sell_price"], item["buyable"], item["sellable"]), ("호박 랜턴", 30, 10, 1, 1))
         self.assertEqual(self.store.item_by_name(1, "  호박 랜턴 ")["id"], item["id"])
@@ -220,9 +220,9 @@ class ItemTests(unittest.TestCase):
         self.assertEqual(self.store.items(1), [])
 
     def test_emoji_rules(self):
-        for ok in ["🎃", "🍬", "👻", "🕸️", "<:pumpkin:123456789012345678>", "<a:spin:123456789012345678>"]:
+        for ok in ["⚙️", "💾", "👻", "🕸️", "<:pumpkin:123456789012345678>", "<a:spin:123456789012345678>"]:
             self.assertTrue(valid_emoji(ok), ok)
-        for bad in ["", "a", "1", "ab", " ", "호", "🎃🎃🎃🎃🎃🎃🎃🎃🎃", "<:x:1>", "<:pumpkin:abc>"]:
+        for bad in ["", "a", "1", "ab", " ", "호", "⚙️⚙️⚙️⚙️⚙️⚙️⚙️⚙️⚙️", "<:x:1>", "<:pumpkin:abc>"]:
             self.assertFalse(valid_emoji(bad), bad)
 
     def test_role_items_must_be_unique_by_role(self):
@@ -325,7 +325,7 @@ class TradeTests(unittest.TestCase):
         self.assertEqual((self.store.wallet(1, 7), self.store.qty(1, 7, self.item)), (40, 2))
 
     def test_buy_failures_change_nothing(self):
-        with self.assertRaisesRegex(StoreError, "부족해요. 필요 🍬120"):
+        with self.assertRaisesRegex(StoreError, "부족해요. 필요 💾120"):
             self.store.buy_item(1, 7, self.item, 4)
         for qty in (0, -1, 1000, True, 1.5):
             with self.assertRaisesRegex(StoreError, "수량"):

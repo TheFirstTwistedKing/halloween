@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 import discord
 
 import main as entry
-from main import HalloweenBot, parse_guild_ids
+from main import EventBot, parse_guild_ids
 from store import Store
 
 
@@ -38,7 +38,7 @@ class SetupTests(unittest.IsolatedAsyncioTestCase):
         self.store.close()
 
     async def test_startup_loads_everything_registers_persistent_buttons_and_syncs_each_server(self):
-        bot = HalloweenBot(self.store, [111, 222])
+        bot = EventBot(self.store, [111, 222])
         bot._ready = asyncio.Event()
         bot.tree.sync = AsyncMock(return_value=[1, 2, 3])
         with self.assertLogs("halloween", level="INFO") as logs:
@@ -52,7 +52,7 @@ class SetupTests(unittest.IsolatedAsyncioTestCase):
         await bot.close()
 
     async def test_without_guild_ids_commands_are_registered_globally(self):
-        bot = HalloweenBot(self.store)
+        bot = EventBot(self.store)
         bot._ready = asyncio.Event()
         bot.tree.sync = AsyncMock(return_value=[1])
         with self.assertLogs("halloween", level="INFO") as logs:
@@ -62,7 +62,7 @@ class SetupTests(unittest.IsolatedAsyncioTestCase):
         await bot.close()
 
     async def test_one_failing_server_does_not_block_the_others(self):
-        bot = HalloweenBot(self.store, [111, 222])
+        bot = EventBot(self.store, [111, 222])
         bot._ready = asyncio.Event()
         bot.tree.sync = AsyncMock(side_effect=[discord.Forbidden(NS(status=403, reason="x"), "Missing Access"), [1]])
         with self.assertLogs("halloween", level="INFO") as logs:
@@ -73,7 +73,7 @@ class SetupTests(unittest.IsolatedAsyncioTestCase):
         await bot.close()
 
     async def test_the_configured_server_list_limits_where_the_bot_works(self):
-        everywhere, limited = HalloweenBot(self.store), HalloweenBot(self.store, [111])
+        everywhere, limited = EventBot(self.store), EventBot(self.store, [111])
         self.assertTrue(everywhere.allowed_guild(999))
         self.assertTrue(limited.allowed_guild(111))
         self.assertFalse(limited.allowed_guild(999))
@@ -81,7 +81,7 @@ class SetupTests(unittest.IsolatedAsyncioTestCase):
         await limited.close()
 
     async def test_no_privileged_intents_are_needed(self):
-        bot = HalloweenBot(self.store)
+        bot = EventBot(self.store)
         intents = bot.intents
         self.assertFalse(intents.message_content or intents.members or intents.presences)
         self.assertTrue(intents.guilds and intents.guild_messages)
@@ -106,7 +106,7 @@ class MainFunctionTests(unittest.TestCase):
     def test_a_wrong_token_is_reported_and_the_database_is_closed(self):
         import tempfile
         with tempfile.TemporaryDirectory() as temp, mock.patch("main.BASE", __import__("pathlib").Path(temp)), \
-                mock.patch.object(HalloweenBot, "run", side_effect=discord.LoginFailure("bad")):
+                mock.patch.object(EventBot, "run", side_effect=discord.LoginFailure("bad")):
             with self.assertRaises(SystemExit) as caught:
                 self.run_main({"DISCORD_TOKEN": "wrong", "GUILD_ID": "", "DATABASE_PATH": "data/test.sqlite3"})
             self.assertIn("토큰이 올바르지 않아요", str(caught.exception))

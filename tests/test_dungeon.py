@@ -178,7 +178,7 @@ class RuleTests(unittest.TestCase):
         self.assertEqual(steel.hp, 500 - dungeon.reduce_damage(135, 90) + 135 * dungeon.GUARD_HEAL // 100)
 
     def test_reflect_can_kill_and_heal_never_exceeds_max(self):
-        run = self._fight(dungeon.MONSTERS[3])                               # 거대 쥐 HP 90
+        run = self._fight(dungeon.MONSTERS[3])                               # 고장 난 마우스 HP 90
         run.enemy["hp"] = 10
         dungeon.player_defend(run, True)                                     # 반사 13 ≥ 10
         self.assertEqual((run.phase, run.enemy["hp"], run.hp), ("cleared", 0, dungeon.MAX_HP))
@@ -187,7 +187,7 @@ class RuleTests(unittest.TestCase):
     def test_dying_to_the_guarded_hit_gives_no_bonus(self):
         run = self._fight(dungeon.MONSTERS[2])
         run.hp = 10
-        dungeon.player_defend(run, True)                                     # 54 피해로 쓰러진다
+        dungeon.player_defend(run, True)                                     # 54 피해로 다운된다
         self.assertEqual((run.phase, run.hp, run.enemy["hp"]), ("dead", 0, 135))
 
     def test_defending_against_a_stunned_enemy_just_burns_the_stun(self):
@@ -210,7 +210,7 @@ class RuleTests(unittest.TestCase):
 
     def test_old_saved_enemy_without_stun_field_still_works(self):
         run = dungeon.new_run()
-        run.phase, run.enemy = "battle", {"key": "slime", "name": "슬라임", "emoji": "🟢", "hp": 300, "max_hp": 300,
+        run.phase, run.enemy = "battle", {"key": "slime", "name": "오일 슬러지", "emoji": "🟢", "hp": 300, "max_hp": 300,
                                           "damage": 50, "dodge": 20, "boss": False}
         dungeon.player_defend(run, True)
         self.assertTrue(run.enemy["stunned"])
@@ -329,7 +329,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         run = (await service.enter(self.store, self.locks, G, U)).run
         data = json.loads(run.to_json())
         data.update(hp=10, phase="battle", room=1, kind="monster",
-                    enemy={"key": "witch", "name": "마녀", "emoji": "🧙", "hp": 150, "max_hp": 150, "damage": 150,
+                    enemy={"key": "witch", "name": "악성 AI", "emoji": "🧙", "hp": 150, "max_hp": 150, "damage": 150,
                            "dodge": 20, "boss": False})
         self.store.save_dungeon(G, U, json.dumps(data))
         result = await self.go(Scripted(randoms=[0.99]), "attack", run.rev)         # 공격은 맞지만 마녀를 못 잡고 마녀에게 맞는다

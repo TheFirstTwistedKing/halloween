@@ -38,22 +38,22 @@ class PanelContentTests(UiFixture):
         self.store.ensure_system_items(100)
         embed, view = build_panel(self.store, self.w.guild)
         text = embed.description
-        self.assertIn("🕯️ **호박 초**\n┕ 구매 🍬 30 · 판매 🍬 10", text)
-        self.assertIn("🦇 **박쥐 날개**\n┕ 구매 — · 판매 🍬 7", text)
-        self.assertIn("👑 **유령 손님** `역할`\n┕ 구매 🍬 200 · 판매 —", text)          # 역할은 실제 역할 이름으로
+        self.assertIn("🕯️ **호박 초**\n┕ 구매 💾 30 · 판매 💾 10", text)
+        self.assertIn("🦇 **박쥐 날개**\n┕ 구매 — · 판매 💾 7", text)
+        self.assertIn("👑 **유령 손님** `역할`\n┕ 구매 💾 200 · 판매 —", text)          # 역할은 실제 역할 이름으로
         for hidden in ("비밀 물품", "열쇠"):                                         # 판매가 꺼진 물품은 안 나온다(쓰레기·새 물품 7종은 팔 수 있다).
             self.assertNotIn(hidden, text)
-        self.assertIn("🍬 = 할로윈 재화", embed.fields[0].name)
+        self.assertIn("💾 = RAM", embed.fields[0].name)
         select, bag = view.children
         labels = [o.label for o in select.options]
         self.assertEqual(labels, ["호박 초", "박쥐 날개", "쓰레기", *(item[1] for item in NEW_ITEMS), "유령 손님"])   # 물품(만든 순서) 다음 역할
         values = [o.value for o in select.options]
         self.assertEqual((values[0], values[1], values[-1]), (str(self.candle["id"]), str(self.bat["id"]), str(self.vip["id"])))
-        self.assertEqual(select.options[0].description, "구매 🍬 30 · 판매 🍬 10")
-        self.assertEqual(select.options[1].description, "구매 불가 · 판매 🍬 7")
-        self.assertEqual(select.options[2].description, "구매 불가 · 판매 🍬 -20 ~ 20")        # 범위 판매가
-        self.assertEqual(select.options[4].description, "구매 불가 · 판매 🍬 100")                # 유령의 천
-        self.assertIn("🥃 **깨진 유리조각**\n┕ 구매 — · 판매 🍬 -150", text)                    # 음수 판매가(팔 때 재화를 낸다)
+        self.assertEqual(select.options[0].description, "구매 💾 30 · 판매 💾 10")
+        self.assertEqual(select.options[1].description, "구매 불가 · 판매 💾 7")
+        self.assertEqual(select.options[2].description, "구매 불가 · 판매 💾 -20 ~ 20")        # 범위 판매가
+        self.assertEqual(select.options[4].description, "구매 불가 · 판매 💾 100")                # 방열 패드
+        self.assertIn("📺 **깨진 디스플레이 파편**\n┕ 구매 — · 판매 💾 -150", text)                    # 음수 판매가(팔 때 재화를 낸다)
         self.assertEqual([str(o.emoji) for o in (select.options[0], select.options[1], select.options[-1])], ["🕯️", "🦇", "👑"])
         self.assertEqual((bag.label, str(bag.emoji)), ("가방", "🎒"))
 
@@ -84,7 +84,7 @@ class PanelContentTests(UiFixture):
 
     async def test_the_panel_uses_halloween_colours_and_a_footer(self):
         embed, _ = build_panel(self.store, self.w.guild)
-        self.assertEqual((embed.title, embed.color.value, embed.footer.text), ("🎃 할로윈 상점", 0xFF7518, "🕸️ Happy Halloween"))
+        self.assertEqual((embed.title, embed.color.value, embed.footer.text), ("🖥️ 부품 상점", 0x00A8E8, "⚙️ SYSTEM ONLINE"))
 
     async def test_server_emoji_become_select_emoji(self):
         self.store.update_item(100, self.candle["id"], emoji="<:pumpkin:123456789012345678>")
@@ -102,7 +102,7 @@ class PostAndRefreshTests(UiFixture):
     async def test_post_panel_sends_and_records_it(self):
         message = await post_panel(self.w.bot, self.channel)
         sent = self.channel.sent[0]
-        self.assertEqual(sent["embed"].title, "🎃 할로윈 상점")
+        self.assertEqual(sent["embed"].title, "🖥️ 부품 상점")
         self.assertIsInstance(sent["view"], ShopPanelView)
         self.assertEqual([(r["channel"], r["message"]) for r in self.store.shops(100)], [(400, message.id)])
 
@@ -136,7 +136,7 @@ class PostAndRefreshTests(UiFixture):
         self.assertEqual(await refresh_panels(self.w.bot, self.w.guild), 2)
         for channel in (self.channel, other):
             edit = list(channel.partial.values())[0].edit
-            self.assertIn("구매 🍬 45", edit.await_args.kwargs["embed"].description)
+            self.assertIn("구매 💾 45", edit.await_args.kwargs["embed"].description)
             self.assertIsInstance(edit.await_args.kwargs["view"], ShopPanelView)
 
     async def test_deleted_messages_and_channels_are_forgotten(self):
@@ -176,7 +176,7 @@ class SelectAndDetailTests(UiFixture):
         self.assertEqual(embed.title, "🕯️ 호박 초")
         self.assertEqual(embed.description, "은은하게 빛나요")
         fields = {f.name: f.value for f in embed.fields}
-        self.assertEqual(fields, {"구매": "🍬 30", "판매": "🍬 10", "보유": "×4", "내 재화": "🍬 25"})
+        self.assertEqual(fields, {"구매": "💾 30", "판매": "💾 10", "보유": "×4", "내 재화": "💾 25"})
         buy, sell = kwargs["view"].children
         self.assertEqual((buy.disabled, sell.disabled), (False, False))
 
@@ -254,21 +254,21 @@ class QuantityModalTests(UiFixture):
         self.store.add_candy(100, 7, 100)
         embed, kwargs = await self.submit("buy", " 2 ")
         self.assertTrue(kwargs["ephemeral"])
-        self.assertEqual((embed.title, embed.description), ("🎃 완료!", "🍬 60을 내고 🕯️ **호박 초** ×2을(를) 샀어요."))
+        self.assertEqual((embed.title, embed.description), ("✅ 처리 완료", "💾 60을 내고 🕯️ **호박 초** ×2을(를) 샀어요."))
         embed, _ = await self.submit("sell", "1")
-        self.assertEqual(embed.description, "🕯️ **호박 초** ×1을(를) 팔고 🍬 10을 받았어요.")
+        self.assertEqual(embed.description, "🕯️ **호박 초** ×1을(를) 팔고 💾 10을 받았어요.")
         self.assertEqual((self.store.wallet(100, 7), self.store.qty(100, 7, self.candle["id"])), (50, 1))
 
     async def test_failures_show_a_red_notice(self):
         embed, _ = await self.submit("buy", "5")
-        self.assertEqual((embed.title, embed.color.value), ("👻 앗!", 0xC0392B))
+        self.assertEqual((embed.title, embed.color.value), ("⚠️ 오류 발생", 0xE74C3C))
         self.assertIn("부족해요", embed.description)
         self.assertIn("모자라요", (await self.submit("sell", "1"))[0].description)
 
     async def test_bad_input(self):
         for text in ("", "abc", "-1", "1.5", "１", "٣", "0", "1000"):
             embed, _ = await self.submit("buy", text)
-            self.assertEqual(embed.title, "👻 앗!", text)
+            self.assertEqual(embed.title, "⚠️ 오류 발생", text)
             self.assertTrue("수량" in embed.description, text)
         self.assertEqual(self.store.wallet(100, 7), 0)
 
@@ -288,8 +288,8 @@ class BagTests(UiFixture):
         embed = bag_for(self.w.bot, self.w.member)
         fields = {f.name: f.value for f in embed.fields}
         self.assertEqual(embed.title, "🎒 user7의 가방")
-        self.assertIn("**12,345** / 99,999", fields["🍬 할로윈 재화"])
-        self.assertTrue(fields["🍬 할로윈 재화"].endswith("🟧" + "⬛" * 9))          # 12% → 10칸 중 1칸
+        self.assertIn("**12,345** / 99,999", fields["💾 RAM"])
+        self.assertTrue(fields["💾 RAM"].endswith("🟦" + "⬛" * 9))          # 12% → 10칸 중 1칸
         self.assertNotIn("✨ 경험치", fields)                                      # 경험치 기능은 없다.
         self.assertEqual(fields["🎒 물품"], "🗝️ 열쇠 ×2\n🕯️ 호박 초 ×5")
         self.assertEqual(fields["👑 역할"], "👑 유령 손님")
@@ -298,18 +298,18 @@ class BagTests(UiFixture):
         embed = bag_for(self.w.bot, self.w.new_member(9, name="새내기"))
         fields = {f.name: f.value for f in embed.fields}
         self.assertEqual(embed.title, "🎒 새내기의 가방")
-        self.assertIn("**0** / 99,999", fields["🍬 할로윈 재화"])
-        self.assertEqual(fields["🎒 물품"], "비어 있어요 🕸️")
+        self.assertIn("**0** / 99,999", fields["💾 RAM"])
+        self.assertEqual(fields["🎒 물품"], "비어 있어요 📭")
         self.assertNotIn("👑 역할", fields)
         self.assertNotIn("✨ 경험치", fields)
 
     async def test_candy_bar_scales_with_the_cap(self):
         from theme import candy_bar
         self.assertEqual(candy_bar(0, CANDY_MAX), "⬛" * 10)
-        self.assertEqual(candy_bar(CANDY_MAX, CANDY_MAX), "🟧" * 10)
-        self.assertEqual(candy_bar(CANDY_MAX // 2, CANDY_MAX), "🟧" * 5 + "⬛" * 5)
-        self.assertEqual(candy_bar(50, 100), "🟧" * 5 + "⬛" * 5)
-        self.assertEqual(candy_bar(500, 100), "🟧" * 10)                                # 최대를 낮춰도 칸이 넘치지 않는다.
+        self.assertEqual(candy_bar(CANDY_MAX, CANDY_MAX), "🟦" * 10)
+        self.assertEqual(candy_bar(CANDY_MAX // 2, CANDY_MAX), "🟦" * 5 + "⬛" * 5)
+        self.assertEqual(candy_bar(50, 100), "🟦" * 5 + "⬛" * 5)
+        self.assertEqual(candy_bar(500, 100), "🟦" * 10)                                # 최대를 낮춰도 칸이 넘치지 않는다.
 
     async def test_the_bag_command_is_public_and_the_panel_button_is_private(self):
         interaction = self.w.interaction()
@@ -328,7 +328,7 @@ class BagTests(UiFixture):
         self.store.add_candy(100, 7, 60)
         fields = {f.name: f.value for f in bag_for(self.w.bot, self.w.member).fields}
         self.assertIn("**60** / 200", fields["💎 젬"])
-        self.assertTrue(fields["💎 젬"].endswith("🟧" * 3 + "⬛" * 7))                  # 30% → 3칸
+        self.assertTrue(fields["💎 젬"].endswith("🟦" * 3 + "⬛" * 7))                  # 30% → 3칸
 
 
 if __name__ == "__main__":

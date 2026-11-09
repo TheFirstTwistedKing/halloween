@@ -21,7 +21,7 @@ def gear(key, name, **kw):
 
 
 def item(key, name, **kw):
-    data = dict(key=key, name=name, emoji="🍬", tier="일반", weight=1, heal=10)
+    data = dict(key=key, name=name, emoji="💾", tier="일반", weight=1, heal=10)
     data.update(kw)
     return data
 
@@ -123,35 +123,35 @@ class ValidationTests(unittest.IsolatedAsyncioTestCase):
                 content.edit(self.store, G, (section,), e["name"], {"floors": floors})
 
     def test_restricting_every_gear_is_refused_naming_the_empty_floor(self):
-        self.everything_but("gear", "총", [1, 2, 3])
+        self.everything_but("gear", "레일건", [1, 2, 3])
         with self.assertRaises(content.ContentError) as ctx:
-            content.edit(self.store, G, ("gear",), "총", {"floors": [1, 2, 3]})
+            content.edit(self.store, G, ("gear",), "레일건", {"floors": [1, 2, 3]})
         self.assertIn("4층 상자에서 나올 수 있는 장비가 하나도 없어요", str(ctx.exception))
 
     def test_restricting_every_item_is_refused_naming_the_empty_floor(self):
-        self.everything_but("consumables", "사탕", [1, 2, 3])
+        self.everything_but("consumables", "소형 배터리", [1, 2, 3])
         with self.assertRaises(content.ContentError) as ctx:
-            content.edit(self.store, G, ("consumables",), "사탕", {"floors": [1, 2, 3]})
+            content.edit(self.store, G, ("consumables",), "소형 배터리", {"floors": [1, 2, 3]})
         self.assertIn("4층 상자에서 나올 수 있는 소모품이 하나도 없어요", str(ctx.exception))
 
     def test_one_unrestricted_entry_is_enough(self):
-        self.everything_but("gear", "총", [1])
-        entry = next(g for g in self.store.balance(G).gear if g.name == "총")
+        self.everything_but("gear", "레일건", [1])
+        entry = next(g for g in self.store.balance(G).gear if g.name == "레일건")
         self.assertEqual(entry.floors, ())
 
     def test_a_zero_weight_entry_does_not_count_as_a_candidate(self):
         for e in content.current(self.store, G, "consumables"):
-            if e["name"] not in ("사탕", "달콤한 쿠키"):
+            if e["name"] not in ("소형 배터리", "납땜 키트"):
                 content.edit(self.store, G, ("consumables",), e["name"], {"floors": [1, 2, 3]})
-        content.edit(self.store, G, ("consumables",), "달콤한 쿠키", {"weight": 0})                      # 쿠키는 제한이 없어도 비율 0이라 후보가 아니다
+        content.edit(self.store, G, ("consumables",), "납땜 키트", {"weight": 0})                      # 쿠키는 제한이 없어도 비율 0이라 후보가 아니다
         with self.assertRaises(content.ContentError) as ctx:
-            content.edit(self.store, G, ("consumables",), "사탕", {"floors": [1, 2, 3]})
+            content.edit(self.store, G, ("consumables",), "소형 배터리", {"floors": [1, 2, 3]})
         self.assertIn("4층 상자", str(ctx.exception))
 
     async def test_raising_the_floor_count_is_checked_against_gear_restrictions(self):
         self.store.update_settings(G, dungeon={"일반.층수": 3})
-        self.everything_but("gear", "총", [1, 2, 3])
-        content.edit(self.store, G, ("gear",), "총", {"floors": [1, 2, 3]})
+        self.everything_but("gear", "레일건", [1, 2, 3])
+        content.edit(self.store, G, ("gear",), "레일건", {"floors": [1, 2, 3]})
         admin = DungeonAdmin(self.w.bot)
         i = self.w.interaction(admin=True)
         await DungeonAdmin.set_param.callback(admin, i, "일반.층수", 5)
@@ -178,7 +178,7 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         return next(x.floors for x in getattr(self.store.balance(G), attr) if x.name == name)
 
     async def test_set_view_and_clear_for_gear_and_items(self):
-        for command, attr, name in ((ContentAdmin.gear_floors, "gear", "단검"), (ContentAdmin.potion_floors, "consumables", "사탕")):
+        for command, attr, name in ((ContentAdmin.gear_floors, "gear", "레이저 커터"), (ContentAdmin.potion_floors, "consumables", "소형 배터리")):
             self.assertIn("1~3층, 5층", await self.run_cmd(command, name, "1-3,5"))
             self.assertEqual(self.floors(attr, name), (1, 2, 3, 5))
             self.assertIn("1~3층, 5층", await self.run_cmd(command, name))
@@ -186,29 +186,29 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.floors(attr, name), ())
 
     async def test_each_command_only_finds_its_own_kind(self):
-        self.assertIn("그런 장비가 없어요", await self.run_cmd(ContentAdmin.gear_floors, "사탕", "3"))
-        self.assertIn("그런 소모품이 없어요", await self.run_cmd(ContentAdmin.potion_floors, "단검", "3"))
-        self.assertIn("층 번호가 아니에요", await self.run_cmd(ContentAdmin.gear_floors, "단검", "abc"))
+        self.assertIn("그런 장비가 없어요", await self.run_cmd(ContentAdmin.gear_floors, "소형 배터리", "3"))
+        self.assertIn("그런 소모품이 없어요", await self.run_cmd(ContentAdmin.potion_floors, "레이저 커터", "3"))
+        self.assertIn("층 번호가 아니에요", await self.run_cmd(ContentAdmin.gear_floors, "레이저 커터", "abc"))
 
     async def test_warnings_for_floors_nobody_can_reach(self):
-        self.assertIn("무한모드를 골라야", await self.run_cmd(ContentAdmin.gear_floors, "단검", "11"))
+        self.assertIn("무한모드를 골라야", await self.run_cmd(ContentAdmin.gear_floors, "레이저 커터", "11"))
         self.store.update_settings(G, dungeon={"일반.무한모드": 0})
-        self.assertIn("나올 수 없어요", await self.run_cmd(ContentAdmin.potion_floors, "사탕", "12"))
+        self.assertIn("나올 수 없어요", await self.run_cmd(ContentAdmin.potion_floors, "소형 배터리", "12"))
 
     async def test_the_list_shows_floors_only_when_restricted(self):
-        for section, name, command in (("gear", "단검", ContentAdmin.gear_floors), ("consumables", "사탕", ContentAdmin.potion_floors)):
+        for section, name, command in (("gear", "레이저 커터", ContentAdmin.gear_floors), ("consumables", "소형 배터리", ContentAdmin.potion_floors)):
             find = lambda: next(d for d in content.current(self.store, G, section) if d["name"] == name)
             self.assertNotIn("나오는 층", content.describe(section, find()))
             await self.run_cmd(command, name, "2,4")
             self.assertIn("나오는 층 2층, 4층", content.describe(section, find()))
 
     async def test_admin_only_and_autocomplete(self):
-        self.assertIn("관리자만", await self.run_cmd(ContentAdmin.gear_floors, "단검", "3", admin=False))
-        self.assertIn("관리자만", await self.run_cmd(ContentAdmin.potion_floors, "사탕", "3", admin=False))
-        self.assertEqual(self.floors("gear", "단검"), ())
+        self.assertIn("관리자만", await self.run_cmd(ContentAdmin.gear_floors, "레이저 커터", "3", admin=False))
+        self.assertIn("관리자만", await self.run_cmd(ContentAdmin.potion_floors, "소형 배터리", "3", admin=False))
+        self.assertEqual(self.floors("gear", "레이저 커터"), ())
         i = self.w.interaction(admin=True)
-        self.assertIn("단검", [c.value for c in await self.cog.gear_names(i, "")])
-        self.assertIn("사탕", [c.value for c in await self.cog.potion_names(i, "")])
+        self.assertIn("레이저 커터", [c.value for c in await self.cog.gear_names(i, "")])
+        self.assertIn("소형 배터리", [c.value for c in await self.cog.potion_names(i, "")])
 
     def test_options_are_text_so_many_floors_fit(self):
         for command in (ContentAdmin.gear_floors, ContentAdmin.potion_floors):

@@ -206,41 +206,56 @@ def _item(*args, **kwargs) -> Consumable:
 
 # 장비 — 좋은 장비일수록 가중치가 낮다(기본값은 합계 100).
 GEAR = (
-    _gear("club", "낡은 몽둥이", "🏏", "weapon", "일반", 25, attack=30),
-    _gear("wooden_shield", "나무 방패", "🪵", "shield", "일반", 20, guard=80, reflect=40),
-    _gear("dagger", "단검", "🗡️", "weapon", "일반", 18, attack=35, crit=50),
-    _gear("longsword", "롱소드", "⚔️", "weapon", "희귀", 12, attack=100),
-    _gear("shield", "방패", "🛡️", "shield", "희귀", 10, guard=90, reflect=50),
-    _gear("crossbow", "석궁", "🏹", "weapon", "희귀", 8, attack=180, dodge=35),
-    _gear("gun", "총", "🔫", "weapon", "전설", 4, attack=300, dodge=50),
-    _gear("pumpkin_blade", "호박 대검", "🎃", "weapon", "전설", 3, attack=200, crit=25),
-    _gear("cloth_armor", "천 갑옷", "👘", "armor", "일반", 5, reduction=5),
-    _gear("chain_armor", "사슬 갑옷", "⛓️", "armor", "희귀", 3, reduction=8),
-    _gear("pumpkin_armor", "호박 판금갑옷", "🎃", "armor", "전설", 1, reduction=12),
+    _gear("club", "낡은 스패너", "🔧", "weapon", "일반", 25, attack=30),
+    _gear("wooden_shield", "구리 방열판", "🟫", "shield", "일반", 20, guard=80, reflect=40),
+    _gear("dagger", "레이저 커터", "🔪", "weapon", "일반", 18, attack=35, crit=50),
+    _gear("longsword", "플라즈마 블레이드", "⚡", "weapon", "희귀", 12, attack=100),
+    _gear("shield", "에너지 실드", "🛡️", "shield", "희귀", 10, guard=90, reflect=50),
+    _gear("crossbow", "리벳 건", "🔩", "weapon", "희귀", 8, attack=180, dodge=35),
+    _gear("gun", "레일건", "🔫", "weapon", "전설", 4, attack=300, dodge=50),
+    _gear("pumpkin_blade", "고주파 대검", "🗡️", "weapon", "전설", 3, attack=200, crit=25),
+    _gear("cloth_armor", "방진 커버", "🧥", "armor", "일반", 5, reduction=5),
+    _gear("chain_armor", "합금 장갑", "⛓️", "armor", "희귀", 3, reduction=8),
+    _gear("pumpkin_armor", "나노 복합 장갑", "🦾", "armor", "전설", 1, reduction=12),
 )
 CONSUMABLES = (
-    _item("candy", "사탕", "🍭", "일반", 38, heal=50),
-    _item("cookie", "달콤한 쿠키", "🍪", "일반", 24, heal=100),
-    _item("pumpkin_soup", "호박죽", "🍲", "희귀", 18, heal=200),
-    _item("soul_essence", "영혼 에센스", "👻", "희귀", 10, regen=70, regen_turns=10),
-    _item("witch_elixir", "마녀의 비약", "🧪", "희귀", 7, heal=400),
-    _item("golden_soup", "황금 호박죽", "🥣", "전설", 3, full=True),
+    _item("candy", "소형 배터리", "🔋", "일반", 38, heal=50),
+    _item("cookie", "납땜 키트", "🛠️", "일반", 24, heal=100),
+    _item("pumpkin_soup", "정비 모듈", "🧩", "희귀", 18, heal=200),
+    _item("soul_essence", "나노봇 주입제", "🧬", "희귀", 10, regen=70, regen_turns=10),
+    _item("witch_elixir", "정밀 나노 겔", "💉", "희귀", 7, heal=400),
+    _item("golden_soup", "마스터 리부트 칩", "💽", "전설", 3, full=True),
 )
 MONSTERS = (                                                    # 원래 수치의 약 90%로 너프
-    Monster("giant_bat", "거대 박쥐", "🦇", 225, 65),
-    Monster("slime", "슬라임", "🟢", 270, 45),
-    Monster("witch", "마녀", "🧙", 135, 135),
-    Monster("giant_rat", "거대 쥐", "🐀", 90, 45, dodge=30),        # 특수: 회피 확률 30%
+    Monster("giant_bat", "정찰 드론", "🛸", 225, 65),
+    Monster("slime", "오일 슬러지", "🛢️", 270, 45),
+    Monster("witch", "악성 AI", "🤖", 135, 135),
+    Monster("giant_rat", "고장 난 마우스", "🖱️", 90, 45, dodge=30),        # 특수: 회피 확률 30%
 )
 SECRET_BOSSES = (
-    SecretBoss("void_lord", "공허의 군주", "🌌", 1200, 150, drop_gear="gun", drop_gear_chance=50, drop_item="golden_soup", drop_item_chance=60,
-               intro="어둠 속에서 거대한 눈동자가 천천히 떠오른다…"),
+    SecretBoss("void_lord", "NULL 군주", "🕳️", 1200, 150, drop_gear="gun", drop_gear_chance=50, drop_item="golden_soup", drop_item_chance=60,
+               intro="정적 속에서 거대한 센서 렌즈가 천천히 점등한다…"),
 )
 BOSSES = (                                                      # 보스는 회피 불가(dodge=0)
-    Monster("skeleton_king", "해골 왕", "💀", 900, 135, dodge=0, boss=True),
-    Monster("giant_slime", "거대 슬라임", "🟩", 1125, 90, dodge=0, boss=True),
-    Monster("goblin_king", "고블린 왕", "👺", 810, 180, dodge=0, boss=True),
+    Monster("skeleton_king", "메인프레임 군주", "🖥️", 900, 135, dodge=0, boss=True),
+    Monster("giant_slime", "슬러지 코어", "🧫", 1125, 90, dodge=0, boss=True),
+    Monster("goblin_king", "스크랩 봇 왕", "👾", 810, 180, dodge=0, boss=True),
 )
+
+# ---------------------------------------------------------------- 예전(할로윈 판) 기본 이름: 이전 판 서버가 저장해 둔 값을 새 이름으로 옮길 때만 쓴다(store._upgrade_seed_v3)
+# {구역: {key: (예전 이름, 예전 이모지)}}. 새 이름은 위 기본 표에 있다. key는 그대로다.
+LEGACY_NAMES = {
+    "monsters": {"giant_bat": ("거대 박쥐", "🦇"), "slime": ("슬라임", "🟢"), "witch": ("마녀", "🧙"), "giant_rat": ("거대 쥐", "🐀")},
+    "bosses": {"skeleton_king": ("해골 왕", "💀"), "giant_slime": ("거대 슬라임", "🟩"), "goblin_king": ("고블린 왕", "👺")},
+    "secrets": {"void_lord": ("공허의 군주", "🌌")},
+    "gear": {"club": ("낡은 몽둥이", "🏏"), "wooden_shield": ("나무 방패", "🪵"), "dagger": ("단검", "🗡️"), "longsword": ("롱소드", "⚔️"),
+             "shield": ("방패", "🛡️"), "crossbow": ("석궁", "🏹"), "gun": ("총", "🔫"), "pumpkin_blade": ("호박 대검", "🎃"),
+             "cloth_armor": ("천 갑옷", "👘"), "chain_armor": ("사슬 갑옷", "⛓️"), "pumpkin_armor": ("호박 판금갑옷", "🎃")},
+    "consumables": {"candy": ("사탕", "🍭"), "cookie": ("달콤한 쿠키", "🍪"), "pumpkin_soup": ("호박죽", "🍲"), "soul_essence": ("영혼 에센스", "👻"),
+                    "witch_elixir": ("마녀의 비약", "🧪"), "golden_soup": ("황금 호박죽", "🥣")},
+}
+LEGACY_SECRET_INTRO = "어둠 속에서 거대한 눈동자가 천천히 떠오른다…"
+PARAM_PREFIX = {"monsters": "몬스터.", "bosses": "보스.", "gear": "장비.", "consumables": "아이템."}
 
 
 # ---------------------------------------------------------------- 던전 콘텐츠(몬스터·보스·장비·소모품을 관리자가 더하고 빼고 바꾼다)
@@ -248,6 +263,58 @@ SECTIONS = ("monsters", "bosses", "gear", "consumables", "secrets", "rooms")
 SECTION_LABELS = {"monsters": "몬스터", "bosses": "보스", "gear": "장비", "consumables": "소모품", "secrets": "시크릿 보스", "rooms": "커스텀 방"}
 SECTION_LIMITS = {"monsters": 25, "bosses": 25, "gear": 50, "consumables": 50, "secrets": 10, "rooms": 30}
 NAME_MAX = 30
+
+
+def _current_defaults(section: str) -> dict:
+    return {e.key: e for e in {"monsters": MONSTERS, "bosses": BOSSES, "gear": GEAR, "consumables": CONSUMABLES, "secrets": SECRET_BOSSES}[section]}
+
+
+def migrate_content_names(content) -> dict:
+    """저장된 던전 콘텐츠에서 **예전 기본 이름·이모지 그대로인** 기본 개체(key가 기본 표의 것)를 새 이름으로 바꾼 사본을 돌려준다.
+    관리자가 이름이나 이모지를 직접 바꾼 개체, 직접 만든 개체는 건드리지 않는다(이름과 이모지는 따로 비교해서 하나만 바꿨어도 바꾼 쪽은 그대로 둔다)."""
+    if not isinstance(content, dict):
+        return {}
+    out = {}
+    for section, items in content.items():
+        legacy = LEGACY_NAMES.get(section)
+        if not legacy or not isinstance(items, list):
+            out[section] = items
+            continue
+        new = _current_defaults(section)
+        fixed = []
+        for data in items:
+            if isinstance(data, dict) and data.get("key") in legacy and data["key"] in new:
+                old_name, old_emoji = legacy[data["key"]]
+                data = dict(data)
+                if data.get("name") == old_name:
+                    data["name"] = new[data["key"]].name
+                if data.get("emoji") == old_emoji:
+                    data["emoji"] = new[data["key"]].emoji
+                if section == "secrets" and data.get("intro") == LEGACY_SECRET_INTRO:
+                    data["intro"] = new[data["key"]].intro
+            fixed.append(data)
+        out[section] = fixed
+    return out
+
+
+def migrate_override_keys(overrides) -> dict:
+    """/던전설정으로 정해 둔 숫자(항목 이름 → 값)에서 예전 기본 이름이 든 항목 이름을 새 이름으로 바꾼 사본을 돌려준다
+    (예: 몬스터 항목의 이름 부분이 예전 기본 이름이면 새 이름으로). 그 밖의 항목은 그대로다."""
+    if not isinstance(overrides, dict):
+        return {}
+    rename = {}
+    for section, prefix in PARAM_PREFIX.items():
+        new = _current_defaults(section)
+        for key, (old_name, _emoji) in LEGACY_NAMES[section].items():
+            rename[f"{prefix}{old_name}."] = f"{prefix}{new[key].name}."
+    out = {}
+    for param, value in overrides.items():
+        for old, new_prefix in rename.items():
+            if isinstance(param, str) and param.startswith(old):
+                param = new_prefix + param[len(old):]
+                break
+        out[param] = value
+    return out
 
 
 def entity_dict(entity) -> dict:

@@ -144,9 +144,9 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         saved = json.loads(self.store.dungeon_run(G, U))
         self.assertEqual((saved["items"], saved["pending_gear"], saved["rev"]), ({}, None, run.rev + 1))
         text = "\n".join(out.run.events)
-        self.assertIn("사탕", text)
+        self.assertIn("소형 배터리", text)
         self.assertIn("×3", text)
-        self.assertIn("합계 🍬 30", text)
+        self.assertIn("합계 💾 30", text)
 
     async def test_an_old_screen_or_a_missing_run_pays_nothing(self):
         run = self.start(items={"candy": 1})
@@ -195,12 +195,12 @@ class ContentTests(unittest.TestCase):
 
     def test_bulk_price_by_tier_and_section(self):
         changed = content.set_sell_price(self.store, G, ("gear", "consumables"), 99, "전설")
-        self.assertEqual(changed, {"gear": 3, "consumables": 1})                  # 전설: 총·호박 대검·호박 판금갑옷 / 황금 호박죽
-        self.assertEqual((self.price("gear", "총"), self.price("gear", "호박 대검"), self.price("consumables", "황금 호박죽")), (99, 99, 99))
-        self.assertEqual((self.price("gear", "롱소드"), self.price("consumables", "사탕")), (15, 5))      # 다른 등급은 그대로
+        self.assertEqual(changed, {"gear": 3, "consumables": 1})                  # 전설: 총·고주파 대검·나노 복합 장갑 / 마스터 리부트 칩
+        self.assertEqual((self.price("gear", "레일건"), self.price("gear", "고주파 대검"), self.price("consumables", "마스터 리부트 칩")), (99, 99, 99))
+        self.assertEqual((self.price("gear", "플라즈마 블레이드"), self.price("consumables", "소형 배터리")), (15, 5))      # 다른 등급은 그대로
         content.set_sell_price(self.store, G, ("gear",), 0)
         self.assertTrue(all(g.sell_price == 0 for g in self.store.balance(G).gear))
-        self.assertEqual(self.price("consumables", "사탕"), 5)
+        self.assertEqual(self.price("consumables", "소형 배터리"), 5)
 
     def test_bulk_price_errors(self):
         with self.assertRaises(content.ContentError):
@@ -214,15 +214,15 @@ class ContentTests(unittest.TestCase):
         self.assertIn("전설", str(caught.exception))
 
     def test_edit_and_add_keep_or_default_the_price(self):
-        content.edit(self.store, G, ("gear",), "단검", {"sell_price": 12})
-        self.assertEqual(self.price("gear", "단검"), 12)
-        content.edit(self.store, G, ("gear",), "단검", {"attack": 40})
-        self.assertEqual(self.price("gear", "단검"), 12)                      # 다른 값을 고쳐도 판매가는 그대로
-        content.edit(self.store, G, ("gear",), "단검", {"tier": "전설"})
-        self.assertEqual(self.price("gear", "단검"), 12)                      # 등급을 바꿔도 직접 정한 값은 유지
+        content.edit(self.store, G, ("gear",), "레이저 커터", {"sell_price": 12})
+        self.assertEqual(self.price("gear", "레이저 커터"), 12)
+        content.edit(self.store, G, ("gear",), "레이저 커터", {"attack": 40})
+        self.assertEqual(self.price("gear", "레이저 커터"), 12)                      # 다른 값을 고쳐도 판매가는 그대로
+        content.edit(self.store, G, ("gear",), "레이저 커터", {"tier": "전설"})
+        self.assertEqual(self.price("gear", "레이저 커터"), 12)                      # 등급을 바꿔도 직접 정한 값은 유지
         content.add(self.store, G, "consumables", dict(name="엘릭서", emoji="💊", tier="희귀", weight=1, heal=10))
         self.assertEqual(self.price("consumables", "엘릭서"), 15)             # 안 정하면 등급별 기본값
-        content.add(self.store, G, "consumables", dict(name="독약", emoji="☠️", tier="일반", weight=1, heal=10, sell_price=0))
+        content.add(self.store, G, "consumables", dict(name="독약", emoji="🌡️", tier="일반", weight=1, heal=10, sell_price=0))
         self.assertEqual(self.price("consumables", "독약"), 0)
 
     def test_describe_shows_the_price_or_that_it_cannot_be_sold(self):
@@ -234,8 +234,8 @@ class ContentTests(unittest.TestCase):
         for data in legacy:
             data.pop("sell_price")
         self.store.update_settings(G, dungeon_content={"gear": legacy})
-        self.assertEqual(self.price("gear", "롱소드"), 15)
-        self.assertEqual(self.price("gear", "총"), 50)
+        self.assertEqual(self.price("gear", "플라즈마 블레이드"), 15)
+        self.assertEqual(self.price("gear", "레일건"), 50)
 
 
 class CommandTests(unittest.IsolatedAsyncioTestCase):
@@ -264,11 +264,11 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         return next(e for e in getattr(self.store.balance(G), section) if e.name == name).sell_price
 
     async def test_edit_commands_change_the_price_and_zero_turns_selling_off(self):
-        i = await self.run_cmd(ContentAdmin.gear_edit, self.ask(), "롱소드", sell_price=77)
+        i = await self.run_cmd(ContentAdmin.gear_edit, self.ask(), "플라즈마 블레이드", sell_price=77)
         self.assertIn("판매 77", self.text(i))
-        i = await self.run_cmd(ContentAdmin.potion_edit, self.ask(), "사탕", sell_price=0)
+        i = await self.run_cmd(ContentAdmin.potion_edit, self.ask(), "소형 배터리", sell_price=0)
         self.assertIn("판매 불가", self.text(i))
-        self.assertEqual((self.price("gear", "롱소드"), self.price("consumables", "사탕")), (77, 0))
+        self.assertEqual((self.price("gear", "플라즈마 블레이드"), self.price("consumables", "소형 배터리")), (77, 0))
         run = run_with(items={"candy": 2}, weapon="longsword")
         self.assertEqual([e["id"] for e in dungeon.sellable(run, self.store.balance(G))], ["weapon"])
 
@@ -279,15 +279,15 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_bulk_command_reports_what_changed_and_checks_for_admin(self):
         i = await self.run_cmd(ContentAdmin.sell_price_bulk, self.ask(), 20, Choice("gear"), Choice("일반"))
-        self.assertIn("일반 등급 장비 4개", self.text(i))                              # 몽둥이·나무 방패·단검·천 갑옷
+        self.assertIn("일반 등급 장비 4개", self.text(i))                              # 몽둥이·구리 방열판·단검·방진 커버
         self.assertIn("20", self.text(i))
-        self.assertEqual((self.price("gear", "단검"), self.price("gear", "롱소드"), self.price("consumables", "사탕")), (20, 15, 5))
+        self.assertEqual((self.price("gear", "레이저 커터"), self.price("gear", "플라즈마 블레이드"), self.price("consumables", "소형 배터리")), (20, 15, 5))
         i = await self.run_cmd(ContentAdmin.sell_price_bulk, self.ask(), 0)
         self.assertIn("팔 수 없어요", self.text(i))
         self.assertTrue(all(e.sell_price == 0 for e in self.store.balance(G).gear + self.store.balance(G).consumables))
         i = await self.run_cmd(ContentAdmin.sell_price_bulk, self.ask(admin=False), 999)
         self.assertIn("관리자만", self.text(i))
-        self.assertEqual(self.price("gear", "총"), 0)
+        self.assertEqual(self.price("gear", "레일건"), 0)
 
 
 class ScreenTests(unittest.IsolatedAsyncioTestCase):
@@ -354,7 +354,7 @@ class ScreenTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.store.wallet(G, U), 3 * 5 + 2 * 5 + 5)
         embed, new_view = self.edited(buy)
         self.assertIsInstance(new_view, SellView)                          # 남은 게 있으면 판매 화면에 머문다
-        self.assertIn("합계 🍬 30", embed.description)
+        self.assertIn("합계 💾 30", embed.description)
         remaining = next(c for c in new_view.children if hasattr(c, "options")).options
         self.assertEqual([o.value for o in remaining], ["item:pumpkin_soup"])
 

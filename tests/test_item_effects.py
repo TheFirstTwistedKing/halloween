@@ -93,7 +93,7 @@ class DamageTests(unittest.TestCase):
         run = battle(bal, p=1)
         events = dungeon.use_consumable(run, "p", bal)
         self.assertEqual((run.phase, run.hp), ("cleared", MAX))
-        self.assertTrue(any("쓰러뜨렸어요" in e for e in events))
+        self.assertTrue(any("무력화했어요" in e for e in events))
         self.assertFalse(any("공격!" in e for e in events))
 
     def test_a_killing_blow_on_a_secret_boss_gives_its_drops(self):
@@ -140,7 +140,7 @@ class DotTests(unittest.TestCase):
         run = battle(bal, enemy_hp=300, p=1)
         events = dungeon.use_consumable(run, "p", bal)
         self.assertEqual((run.phase, run.enemy["hp"]), ("cleared", 0))
-        self.assertTrue(any("쓰러뜨렸어요" in e for e in events))
+        self.assertTrue(any("무력화했어요" in e for e in events))
         self.assertEqual(run.enemy["dot_turns"], 4)                                     # 한 번만 들어갔다
 
     def test_using_it_again_restarts_instead_of_stacking(self):
@@ -325,7 +325,7 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         return next(c for c in self.store.balance(G).consumables if c.name == name)
 
     async def test_add_with_every_new_option(self):
-        text = await self.run_cmd(ContentAdmin.potion_add, "저주약", "☠️", Choice("전설"), 1, damage=300, dot=40, dot_turns=3, self_damage=80,
+        text = await self.run_cmd(ContentAdmin.potion_add, "저주약", "🌡️", Choice("전설"), 1, damage=300, dot=40, dot_turns=3, self_damage=80,
                                   self_turns=2, invuln_turns=1, reduce=25, reduce_turns=2)
         self.assertIn("저주약", text)
         item = self.item("저주약")
@@ -336,21 +336,21 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("지속 턴", await self.run_cmd(ContentAdmin.potion_add, "독약", "🧪", Choice("일반"), 1, dot=10))
         self.assertIn("효과가 하나는", await self.run_cmd(ContentAdmin.potion_add, "물", "🧪", Choice("일반"), 1))
         self.assertIn("함께 쓸 수 없어요", await self.run_cmd(ContentAdmin.potion_add, "재료약", "🧪", Choice("일반"), 1, material=True, damage=5))
-        self.assertIn("함께 쓸 수 없어요", await self.run_cmd(ContentAdmin.potion_add, "개조약", "🧪", Choice("일반"), 1, modify="롱소드", invuln_turns=1))
+        self.assertIn("함께 쓸 수 없어요", await self.run_cmd(ContentAdmin.potion_add, "개조약", "🧪", Choice("일반"), 1, modify="플라즈마 블레이드", invuln_turns=1))
         self.assertFalse(any(c.name in ("독약", "물", "재료약", "개조약") for c in self.store.balance(G).consumables))
 
     async def test_edit_adds_changes_and_clears_effects_without_touching_healing(self):
-        await self.run_cmd(ContentAdmin.potion_edit, "사탕", invuln_turns=2, reduce=40, reduce_turns=3)
-        item = self.item("사탕")
+        await self.run_cmd(ContentAdmin.potion_edit, "소형 배터리", invuln_turns=2, reduce=40, reduce_turns=3)
+        item = self.item("소형 배터리")
         self.assertEqual((item.heal, item.invuln_turns, item.reduce, item.reduce_turns), (50, 2, 40, 3))
-        await self.run_cmd(ContentAdmin.potion_edit, "사탕", invuln_turns=0, reduce=0)
-        item = self.item("사탕")
+        await self.run_cmd(ContentAdmin.potion_edit, "소형 배터리", invuln_turns=0, reduce=0)
+        item = self.item("소형 배터리")
         self.assertEqual((item.heal, item.invuln_turns, item.reduce, item.reduce_turns), (50, 0, 0, 0))
 
     async def test_edit_with_a_new_effect_turns_a_modify_item_into_a_normal_one(self):
-        await self.run_cmd(ContentAdmin.potion_edit, "사탕", modify="단검")
-        await self.run_cmd(ContentAdmin.potion_edit, "사탕", damage=77)
-        item = self.item("사탕")
+        await self.run_cmd(ContentAdmin.potion_edit, "소형 배터리", modify="레이저 커터")
+        await self.run_cmd(ContentAdmin.potion_edit, "소형 배터리", damage=77)
+        item = self.item("소형 배터리")
         self.assertEqual((item.modify, item.damage), (None, 77))
 
     async def test_the_list_describes_the_effects_and_admin_only(self):

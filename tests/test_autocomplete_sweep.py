@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 import discord
 from discord import app_commands
 
-from main import HalloweenBot
+from main import EventBot
 from store import Store
 
 ADMIN = str(discord.Permissions(administrator=True).value)
@@ -24,7 +24,7 @@ class SweepBase(unittest.IsolatedAsyncioTestCase):
         # 확장을 불러오고 내리면 sys.modules의 cogs.* 모듈이 새 객체로 바뀐다. 다른 시험 파일이 먼저 가져온 모듈과 어긋나지 않게 끝나면 되돌린다.
         self._modules = {k: v for k, v in sys.modules.items() if k == "cogs" or k.startswith("cogs.")}
         self.store = Store(":memory:")
-        self.bot = HalloweenBot(self.store)
+        self.bot = EventBot(self.store)
         self.state = self.bot._connection
         self.state.user = discord.ClientUser(state=self.state, data={"id": "999", "username": "bot", "discriminator": "0", "avatar": None, "bot": True})
         self.bot._ready = asyncio.Event()
@@ -110,7 +110,7 @@ class BusyServerTests(SweepBase):
         store = self.store
         store.ensure_defaults(G)
         for n in range(40):                                                  # 25개를 넘는 물품, 가장 긴 이름과 이모지
-            store.create_item(G, f"{n:02}" + "가" * 28, emoji=LONG_EMOJI if n % 2 else "🎃", sell_price=5 if n < 10 else 0, sellable=n < 10)
+            store.create_item(G, f"{n:02}" + "가" * 28, emoji=LONG_EMOJI if n % 2 else "⚙️", sell_price=5 if n < 10 else 0, sellable=n < 10)
         ids = [r["id"] for r in store.items(G)]
         table = [{"id": f"t{n}", "kind": "item", "item": ids[n], "weight": 1, "amount": 1, "emoji": LONG_EMOJI, "title": "나" * 30} for n in range(20)]
         store.update_settings(G, package_table=table,

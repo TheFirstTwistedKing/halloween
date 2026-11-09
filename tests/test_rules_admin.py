@@ -63,7 +63,7 @@ class AdminOnlyTests(RulesFixture):
 class CurrencyCommandTests(RulesFixture):
     async def test_show_then_change(self):
         i = await self.run_cmd(RulesAdmin.currency, self.ask())
-        self.assertIn("🍬 **할로윈 재화** · 최대 99,999개", self.text(i))
+        self.assertIn("💾 **RAM** · 최대 99,999개", self.text(i))
         i = await self.run_cmd(RulesAdmin.currency, self.ask(), "💎", "젬", 5000)
         self.assertIn("💎 **젬** · 최대 5,000개", self.text(i))
         self.assertEqual(tuple(self.store.currency(G)), ("💎", "젬", 5000))
@@ -72,8 +72,8 @@ class CurrencyCommandTests(RulesFixture):
     async def test_bad_emoji_or_name_changes_nothing(self):
         for kwargs in (dict(emoji="abc"), dict(emoji="😀😀😀😀😀😀😀😀😀"), dict(name="가" * 21), dict(name="  ")):
             i = await self.run_cmd(RulesAdmin.currency, self.ask(), **kwargs)
-            self.assertIn("앗", sent_embed(i)[0].title, kwargs)
-        self.assertEqual(tuple(self.store.currency(G)), ("🍬", "할로윈 재화", 99999))
+            self.assertIn("오류", sent_embed(i)[0].title, kwargs)
+        self.assertEqual(tuple(self.store.currency(G)), ("💾", "RAM", 99999))
 
     async def test_lowering_the_max_asks_first_and_names_the_count(self):
         self.store.add_candy(G, 1, 900)
@@ -174,7 +174,7 @@ class PackageCommandTests(RulesFixture):
     async def test_list_shows_normalized_percentages(self):
         i = await self.run_cmd(RulesAdmin.package_list, self.ask())
         text = self.text(i)
-        for needle in ("👻 **꽝** — 60%", "🗝️ **열쇠** — 20%", "🍬 **할로윈 재화 50** — 10%", "🗑️ **쓰레기** — 10%", "비율 합계 100"):
+        for needle in ("👻 **꽝** — 60%", "🗝️ **열쇠** — 20%", "💾 **RAM 50** — 10%", "🗑️ **쓰레기** — 10%", "비율 합계 100"):
             self.assertIn(needle, text)
 
     async def test_add_each_kind(self):
@@ -261,7 +261,7 @@ class PackageCommandTests(RulesFixture):
         choices = await self.cog.ident_autocomplete(self.ask(), "열쇠")
         self.assertEqual([(c.name, c.value) for c in choices], [("🗝️ 열쇠 (물품, 비율 20)", "key")])
         self.assertEqual(len(await self.cog.ident_autocomplete(self.ask(), "")), 4)
-        items = await self.cog.pkg_item_autocomplete(self.ask(), "열")
+        items = await self.cog.pkg_item_autocomplete(self.ask(), "열쇠")
         self.assertEqual([c.value for c in items], ["열쇠"])
         entry = await self.cog.entry_autocomplete(self.ask(), "")
         self.assertEqual({c.value for c in entry}, {"열쇠", "쓰레기", "부활권", *(item[1] for item in NEW_ITEMS)})
@@ -428,7 +428,7 @@ class ClearRewardTests(RulesFixture):
 
 class JosaTests(unittest.TestCase):
     def test_particles_follow_the_last_syllable(self):
-        self.assertEqual((i_ga("젬"), i_ga("골드"), i_ga("할로윈 재화")), ("젬이", "골드가", "할로윈 재화가"))
+        self.assertEqual((i_ga("젬"), i_ga("골드"), i_ga("RAM")), ("젬이", "골드가", "RAM이"))
         self.assertEqual((eun_neun("젬"), eun_neun("재화")), ("젬은", "재화는"))
         self.assertEqual((eul_reul("젬"), eul_reul("재화")), ("젬을", "재화를"))
 

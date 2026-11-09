@@ -68,7 +68,7 @@ class RunTests(unittest.TestCase):
 class ViewTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.w = World()
-        self.entries = [BulkEntry(str(i), f"항목 {i:02d}", "🎃", f"설명 {i}") for i in range(60)]
+        self.entries = [BulkEntry(str(i), f"항목 {i:02d}", "⚙️", f"설명 {i}") for i in range(60)]
         self.deleted = []
 
     async def asyncTearDown(self):
@@ -241,41 +241,41 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         return done.response.edit_message.await_args.kwargs["embed"]
 
     async def test_gear_are_deleted_in_bulk(self):
-        embed = await self.delete_labels(self.content, ContentAdmin.gear_bulk, "낡은 몽둥이", "나무 방패", "석궁")
+        embed = await self.delete_labels(self.content, ContentAdmin.gear_bulk, "낡은 스패너", "구리 방열판", "리벳 건")
         self.assertIn("3개", embed.description)
         names = {g.name for g in self.store.balance(G).gear}
-        self.assertTrue({"낡은 몽둥이", "나무 방패", "석궁"}.isdisjoint(names))
-        self.assertIn("단검", names)
+        self.assertTrue({"낡은 스패너", "구리 방열판", "리벳 건"}.isdisjoint(names))
+        self.assertIn("레이저 커터", names)
 
     async def test_monsters_and_bosses_share_one_screen_and_the_last_boss_is_protected(self):
-        embed = await self.delete_labels(self.content, ContentAdmin.monster_bulk, "해골 왕", "거대 슬라임", "고블린 왕", "마녀")
+        embed = await self.delete_labels(self.content, ContentAdmin.monster_bulk, "메인프레임 군주", "슬러지 코어", "스크랩 봇 왕", "악성 AI")
         fields = {f.name: f.value for f in embed.fields}
         self.assertEqual(len(self.store.balance(G).bosses), 1)                                         # 마지막 보스 하나는 남는다
         self.assertIn("보스가 하나도 없어요", fields["못 지운 것과 이유"])
-        self.assertNotIn("마녀", [m.name for m in self.store.balance(G).monsters])
+        self.assertNotIn("악성 AI", [m.name for m in self.store.balance(G).monsters])
 
     async def test_consumables_are_deleted_and_secret_bosses_can_all_go(self):
-        await self.delete_labels(self.content, ContentAdmin.secret_bulk, "공허의 군주")
+        await self.delete_labels(self.content, ContentAdmin.secret_bulk, "NULL 군주")
         self.assertEqual(self.store.balance(G).secrets, ())
-        embed = await self.delete_labels(self.content, ContentAdmin.potion_bulk, "사탕", "마녀의 비약")
+        embed = await self.delete_labels(self.content, ContentAdmin.potion_bulk, "소형 배터리", "정밀 나노 겔")
         self.assertIn("2개", embed.description)
-        self.assertTrue({"사탕", "마녀의 비약"}.isdisjoint({c.name for c in self.store.balance(G).consumables}))
+        self.assertTrue({"소형 배터리", "정밀 나노 겔"}.isdisjoint({c.name for c in self.store.balance(G).consumables}))
 
     async def test_something_a_recipe_uses_is_skipped_unless_the_recipe_goes_too(self):
         content.add(self.store, G, "consumables", dict(name="숫돌", emoji="🪨", tier="희귀", weight=1, material=True))
-        content.add_mod(self.store, G, "낡은 몽둥이", "숫돌", "단검")
-        embed = await self.delete_labels(self.content, ContentAdmin.gear_bulk, "낡은 몽둥이", "나무 방패")
+        content.add_mod(self.store, G, "낡은 스패너", "숫돌", "레이저 커터")
+        embed = await self.delete_labels(self.content, ContentAdmin.gear_bulk, "낡은 스패너", "구리 방열판")
         self.assertIn("1개", embed.description)
         self.assertIn("개조 레시피", {f.name: f.value for f in embed.fields}["못 지운 것과 이유"])
-        self.assertIn("낡은 몽둥이", {g.name for g in self.store.balance(G).gear})
-        await self.delete_labels(self.content, ContentAdmin.mod_bulk, "낡은 몽둥이")                    # 레시피를 지우면
-        embed = await self.delete_labels(self.content, ContentAdmin.gear_bulk, "낡은 몽둥이")           # 장비도 지워진다
+        self.assertIn("낡은 스패너", {g.name for g in self.store.balance(G).gear})
+        await self.delete_labels(self.content, ContentAdmin.mod_bulk, "낡은 스패너")                    # 레시피를 지우면
+        embed = await self.delete_labels(self.content, ContentAdmin.gear_bulk, "낡은 스패너")           # 장비도 지워진다
         self.assertIn("1개", embed.description)
 
     async def test_package_results_and_clear_rewards(self):
         table = self.store.package_table(G)
         n = len(table)
-        embed = await self.delete_labels(self.rules, RulesAdmin.package_bulk, "쓰레기", "꽝")
+        embed = await self.delete_labels(self.rules, RulesAdmin.package_bulk, "쓰레기", "빈 패킷")
         self.assertEqual(len(self.store.package_table(G)), n - 2)
         self.assertIn("2개", embed.description)
         gem = self.store.create_item(G, "보석", emoji="💎")

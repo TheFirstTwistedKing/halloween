@@ -46,8 +46,8 @@ class ShelveTests(unittest.IsolatedAsyncioTestCase):
         key = self.row("열쇠")
         self.assertEqual((key["buyable"], key["buy_price"], key["sellable"], key["sell_price"], key["sell_max"]), (1, 50, 1, 20, None))
         self.assertIn("🗝️ **열쇠**을(를) 상점에 올렸어요", self.text(i))
-        self.assertIn("구입 ✅ 🍬 50", self.text(i))
-        self.assertIn("판매 ✅ 🍬 20", self.text(i))
+        self.assertIn("구입 ✅ 💾 50", self.text(i))
+        self.assertIn("판매 ✅ 💾 20", self.text(i))
         self.assertIn("열쇠", [r["name"] for r in self.store.items(G, shop_only=True)])
         self.refresh.assert_awaited_once()                                               # 상점 메시지가 새 목록으로 바뀐다
 
@@ -64,10 +64,10 @@ class ShelveTests(unittest.IsolatedAsyncioTestCase):
         self.store.create_item(G, "유리병")
         self.store.create_item(G, "복불복")
         i = await self.shelve("유리병", None, -40)
-        self.assertIn("판매 ✅ 🍬 -40", self.text(i))
+        self.assertIn("판매 ✅ 💾 -40", self.text(i))
         self.assertEqual(self.row("유리병")["sell_price"], -40)
         i = await self.shelve("복불복", None, -10, 30)
-        self.assertIn("🍬 -10 ~ 30", self.text(i))
+        self.assertIn("💾 -10 ~ 30", self.text(i))
         bottle = self.row("복불복")
         self.assertEqual((bottle["sell_price"], bottle["sell_max"]), (-10, 30))
 
@@ -98,7 +98,7 @@ class ShelveTests(unittest.IsolatedAsyncioTestCase):
         listed = len(self.store.items(G, shop_only=True))
         with self.store.db:                                                              # 상점 25칸을 채운다.
             for n in range(MAX_SHOP_ITEMS - listed):
-                self.store.db.execute("INSERT INTO items(guild,name,emoji,kind,buyable,buy_price) VALUES(?,?,?,?,?,?)", (G, f"자리{n}", "🎃", "item", 1, 1))
+                self.store.db.execute("INSERT INTO items(guild,name,emoji,kind,buyable,buy_price) VALUES(?,?,?,?,?,?)", (G, f"자리{n}", "⚙️", "item", 1, 1))
         self.assertEqual(len(self.store.items(G, shop_only=True)), MAX_SHOP_ITEMS)
         i = await self.shelve("남는 물품", 5)
         self.assertIn("최대 25개", self.text(i))
@@ -126,7 +126,7 @@ class ShelveTests(unittest.IsolatedAsyncioTestCase):
         self.store.create_item(G, "창고품")
         choices = await self.cog.shelve_autocomplete(self.ask(), "")
         names = [c.name for c in choices]
-        self.assertLess(names.index("🎃 창고품"), names.index("🎃 진열품 · 진열 중"))        # 상점에 없는 것이 먼저
+        self.assertLess(names.index("⚙️ 창고품"), names.index("⚙️ 진열품 · 진열 중"))        # 상점에 없는 것이 먼저
         self.assertIn("🗝️ 열쇠", names)
         self.assertEqual([c.value for c in await self.cog.shelve_autocomplete(self.ask(), "창고")], ["창고품"])
         roles = [r["name"] for r in self.store.items(G) if r["kind"] == "role"]
@@ -145,7 +145,7 @@ class ShelveTests(unittest.IsolatedAsyncioTestCase):
     async def test_the_new_items_are_all_reachable(self):
         """패키지 물품 7종 같은 새 물품도 자동완성에 나온다."""
         names = [c.value for c in await self.cog.shelve_autocomplete(self.ask(), "")]
-        for needle in ("마녀 모자", "쓰레기", "열쇠"):
+        for needle in ("구형 CPU", "쓰레기", "열쇠"):
             self.assertIn(needle, names)
 
 

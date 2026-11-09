@@ -157,9 +157,9 @@ class DungeonAdmin(commands.Cog):
             else:
                 body = "바꾼 항목이 없어요. 모두 기본값이에요."
             body += "\n\n분류를 고르면 전체 값을 볼 수 있어요: " + ", ".join(balance.SCALAR_GROUPS) + "\n몬스터·장비·소모품은 `/던전목록`"
-            title = "🏚️ 던전 밸런스 — 바꾼 항목"
+            title = "🏭 던전 밸런스 — 바꾼 항목"
         else:
-            title, body = f"🏚️ 던전 밸런스 — {group.value}", "\n".join(settings_lines(group.value, changed))
+            title, body = f"🏭 던전 밸런스 — {group.value}", "\n".join(settings_lines(group.value, changed))
             body += "\n\n✏️ = 기본값에서 바꾼 항목. 바꾸려면 `/던전설정`"
         embed = theme.make_embed(title, body[:4000], color=theme.PURPLE)
         for warning in balance.warnings(self.bot.store.balance(interaction.guild_id)):
@@ -213,7 +213,7 @@ class DungeonAdmin(commands.Cog):
             deaths = sorted(entry["deaths"].items(), key=lambda kv: -kv[1])[:3]
             where = " · ".join(f"{where_text(room)} {rate * 100:.0f}%" for room, rate in deaths if rate >= 0.005) or "거의 없음"
             embed.add_field(name=entry["label"], inline=False,
-                            value=f"**클리어 {entry['clear'] * 100:.1f}%** · 평균 도달 {where_text(round(entry['avg_room']))}\n쓰러진 곳: {where}")
+                            value=f"**클리어 {entry['clear'] * 100:.1f}%** · 평균 도달 {where_text(round(entry['avg_room']))}\n다운된 곳: {where}")
         for warning in balance.warnings(bal):
             embed.add_field(name="주의", value=warning, inline=False)
         embed.add_field(name="참고", inline=False,

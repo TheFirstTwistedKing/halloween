@@ -35,7 +35,7 @@ class PriceTests(unittest.TestCase):
         self.assertEqual(shop_price(common, 1), 1)                                       # 최소 1
 
     def test_an_unsellable_item_is_priced_by_its_tier(self):
-        item = check_entity("consumables", dict(key="x", name="안 팔림", emoji="🍬", tier="전설", weight=1, heal=5, sell_price=0))[0]
+        item = check_entity("consumables", dict(key="x", name="안 팔림", emoji="💾", tier="전설", weight=1, heal=5, sell_price=0))[0]
         self.assertEqual((item.sell_price, shop_price(item, 400)), (0, 200))
         gear = check_entity("gear", dict(key="g", name="안 팔림", emoji="⚔️", slot="weapon", tier="희귀", weight=1, attack=5, sell_price=0))[0]
         self.assertEqual(shop_price(gear, 400), 60)
@@ -143,19 +143,19 @@ class OpenTests(unittest.TestCase):
 
     def test_fewer_things_than_slots_gives_a_smaller_shop_and_nothing_gives_none(self):
         raw = {"gear": [entity_dict(check_entity("gear", dict(key="a", name="a", emoji="⚔️", slot="weapon", tier="일반", weight=1, attack=5))[0])],
-               "consumables": [entity_dict(check_entity("consumables", dict(key="p", name="p", emoji="🍬", tier="일반", weight=1, heal=5))[0])]}
+               "consumables": [entity_dict(check_entity("consumables", dict(key="p", name="p", emoji="💾", tier="일반", weight=1, heal=5))[0])]}
         run = cleared_boss(Balance.build({}, raw))
         dungeon.open_shop(run, random.Random(1), Balance.build({}, raw))
         self.assertEqual(sorted(o["key"] for o in run.shop), ["a", "p"])
         gone = Balance.build({}, {"gear": [entity_dict(check_entity("gear", dict(key="a", name="a", emoji="⚔️", slot="weapon", tier="일반", weight=0, attack=5))[0])],
-                                   "consumables": [entity_dict(check_entity("consumables", dict(key="p", name="p", emoji="🍬", tier="일반", weight=0, heal=5))[0])]})
+                                   "consumables": [entity_dict(check_entity("consumables", dict(key="p", name="p", emoji="💾", tier="일반", weight=0, heal=5))[0])]})
         run = cleared_boss(gone)
         self.assertEqual(dungeon.open_shop(run, random.Random(1), gone), [])
         self.assertEqual((run.phase, run.shop), ("cleared", []))
 
     def test_an_empty_shop_does_not_block_the_climb_nor_roll_the_secret_room_twice(self):
         gone = Balance.build({}, {"gear": [entity_dict(check_entity("gear", dict(key="a", name="a", emoji="⚔️", slot="weapon", tier="일반", weight=0, attack=5))[0])],
-                                  "consumables": [entity_dict(check_entity("consumables", dict(key="p", name="p", emoji="🍬", tier="일반", weight=0, heal=5))[0])]})
+                                  "consumables": [entity_dict(check_entity("consumables", dict(key="p", name="p", emoji="💾", tier="일반", weight=0, heal=5))[0])]})
         run = cleared_boss(gone)
         dungeon.advance(run, Scripted(randoms=[NO_SECRET]), gone)                       # 난수는 시크릿 추첨 하나뿐
         self.assertEqual((run.floor, run.room), (6, 1))

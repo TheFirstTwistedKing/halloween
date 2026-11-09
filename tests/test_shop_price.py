@@ -26,7 +26,7 @@ def gear(**kw):
 
 
 def item(**kw):
-    data = dict(key="p", name="약", emoji="🍬", tier="일반", weight=1, heal=10)
+    data = dict(key="p", name="약", emoji="💾", tier="일반", weight=1, heal=10)
     data.update(kw)
     return data
 
@@ -128,20 +128,20 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.find("consumables", "붕대").shop_price)
 
     async def test_default_items_can_get_a_price_too_and_zero_is_refused(self):
-        await self.run_cmd(ContentAdmin.potion_edit, "사탕", shop_price=3)
-        await self.run_cmd(ContentAdmin.gear_edit, "단검", shop_price=500)
-        self.assertEqual((self.find("consumables", "사탕").shop_price, self.find("gear", "단검").shop_price), (3, 500))
-        for command, name in ((ContentAdmin.potion_edit, "사탕"), (ContentAdmin.gear_edit, "단검")):
+        await self.run_cmd(ContentAdmin.potion_edit, "소형 배터리", shop_price=3)
+        await self.run_cmd(ContentAdmin.gear_edit, "레이저 커터", shop_price=500)
+        self.assertEqual((self.find("consumables", "소형 배터리").shop_price, self.find("gear", "레이저 커터").shop_price), (3, 500))
+        for command, name in ((ContentAdmin.potion_edit, "소형 배터리"), (ContentAdmin.gear_edit, "레이저 커터")):
             text = await self.run_cmd(command, name, shop_price=0)
             self.assertIn("shop_price", text)
-        self.assertEqual(self.find("consumables", "사탕").shop_price, 3)
+        self.assertEqual(self.find("consumables", "소형 배터리").shop_price, 3)
 
     async def test_the_list_shows_the_price_only_when_set_and_admin_only(self):
-        plain = content.describe("consumables", next(d for d in content.current(self.store, G, "consumables") if d["name"] == "사탕"))
+        plain = content.describe("consumables", next(d for d in content.current(self.store, G, "consumables") if d["name"] == "소형 배터리"))
         self.assertNotIn("상점가", plain)
-        self.assertIn("관리자만", await self.run_cmd(ContentAdmin.gear_edit, "단검", shop_price=5, admin=False))
-        self.assertIn("관리자만", await self.run_cmd(ContentAdmin.potion_edit, "사탕", shop_price=5, admin=False))
-        self.assertIsNone(self.find("gear", "단검").shop_price)
+        self.assertIn("관리자만", await self.run_cmd(ContentAdmin.gear_edit, "레이저 커터", shop_price=5, admin=False))
+        self.assertIn("관리자만", await self.run_cmd(ContentAdmin.potion_edit, "소형 배터리", shop_price=5, admin=False))
+        self.assertIsNone(self.find("gear", "레이저 커터").shop_price)
 
     def test_option_names_and_counts(self):
         for command in (ContentAdmin.gear_add, ContentAdmin.gear_edit, ContentAdmin.potion_add, ContentAdmin.potion_edit):
@@ -153,8 +153,8 @@ class EndToEndTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.store, self.locks = Store(":memory:"), Locks()
         self.store.add_item(G, U, self.store.ensure_system_items(G)["key"], 1)
-        content.edit(self.store, G, ("consumables",), "사탕", {"shop_price": 3})
-        content.edit(self.store, G, ("consumables",), "달콤한 쿠키", {"shop_price": 4000})
+        content.edit(self.store, G, ("consumables",), "소형 배터리", {"shop_price": 3})
+        content.edit(self.store, G, ("consumables",), "납땜 키트", {"shop_price": 4000})
 
     def tearDown(self):
         self.store.close()

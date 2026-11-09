@@ -228,7 +228,7 @@ class ModTests(unittest.IsolatedAsyncioTestCase):
         await self.w.close()
 
     def test_an_armor_recipe_changes_the_armor_only(self):
-        content.add_mod(self.store, G, "천 갑옷", "수선 도구", "강철 갑옷")
+        content.add_mod(self.store, G, "방진 커버", "수선 도구", "강철 갑옷")
         bal = self.store.balance(G)
         item = next(c.key for c in bal.consumables if c.name == "수선 도구")
         run = idle(armor="cloth_armor", weapon="club", items={item: 1})
@@ -236,18 +236,18 @@ class ModTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((before.key, after.name), ("cloth_armor", "강철 갑옷"))
         events = dungeon.use_consumable(run, item, bal)
         self.assertEqual((run.armor, run.weapon), (after.key, "club"))
-        self.assertTrue(any("개조됐어요" in e and "천 갑옷" in e for e in events))
+        self.assertTrue(any("개조됐어요" in e and "방진 커버" in e for e in events))
         self.assertNotIn(item, run.items)
 
     def test_mixing_slots_is_refused(self):
-        for a, c in (("천 갑옷", "단검"), ("단검", "강철 갑옷"), ("나무 방패", "강철 갑옷")):
+        for a, c in (("방진 커버", "레이저 커터"), ("레이저 커터", "강철 갑옷"), ("구리 방열판", "강철 갑옷")):
             with self.assertRaises(content.ContentError) as ctx:
                 content.add_mod(self.store, G, a, "수선 도구", c)
             self.assertIn("갑옷은 갑옷으로만", str(ctx.exception))
 
     def test_the_weapon_is_changed_before_the_armor_when_both_have_a_recipe(self):
-        content.add_mod(self.store, G, "천 갑옷", "수선 도구", "강철 갑옷")
-        content.add_mod(self.store, G, "낡은 몽둥이", "수선 도구", "단검")
+        content.add_mod(self.store, G, "방진 커버", "수선 도구", "강철 갑옷")
+        content.add_mod(self.store, G, "낡은 스패너", "수선 도구", "레이저 커터")
         bal = self.store.balance(G)
         item = next(c.key for c in bal.consumables if c.name == "수선 도구")
         run = idle(armor="cloth_armor", weapon="club", items={item: 2})
@@ -301,18 +301,18 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(any(g.name == "빈 갑옷" for g in self.store.balance(G).gear))
 
     async def test_edit_the_reduction_and_the_floors(self):
-        await self.run_cmd(ContentAdmin.gear_edit, "천 갑옷", reduction=22)
-        self.assertEqual(self.gear("천 갑옷").reduction, 22)
-        text = await self.run_cmd(ContentAdmin.gear_floors, "천 갑옷", "2,4")
+        await self.run_cmd(ContentAdmin.gear_edit, "방진 커버", reduction=22)
+        self.assertEqual(self.gear("방진 커버").reduction, 22)
+        text = await self.run_cmd(ContentAdmin.gear_floors, "방진 커버", "2,4")
         self.assertIn("2층, 4층", text)
-        self.assertEqual(self.gear("천 갑옷").floors, (2, 4))
+        self.assertEqual(self.gear("방진 커버").floors, (2, 4))
 
     async def test_autocomplete_says_which_kind_and_lists_show_the_description(self):
         i = self.w.interaction(admin=True)
-        labels = {c.value: c.name for c in self.cog._gear_choices(G, "갑옷")}
-        self.assertIn("천 갑옷", labels)
-        self.assertTrue(labels["천 갑옷"].endswith("(갑옷)"))
-        line = content.describe("gear", next(d for d in content.current(self.store, G, "gear") if d["name"] == "천 갑옷"))
+        labels = {c.value: c.name for c in self.cog._gear_choices(G, "방진")}
+        self.assertIn("방진 커버", labels)
+        self.assertTrue(labels["방진 커버"].endswith("(갑옷)"))
+        line = content.describe("gear", next(d for d in content.current(self.store, G, "gear") if d["name"] == "방진 커버"))
         self.assertIn("받는 피해", line)
 
     async def test_admin_only_and_option_count(self):
@@ -336,16 +336,16 @@ class ScreenTests(unittest.IsolatedAsyncioTestCase):
 
     def test_the_run_screen_shows_the_worn_and_spare_armor(self):
         shown = {f.name: f.value for f in run_embed(idle(armor="cloth_armor", spare_armor="chain_armor"), None, self.bal).fields}
-        self.assertIn("천 갑옷", shown["🎒 장비"])
-        self.assertIn("사슬 갑옷", shown["📦 예비"])
+        self.assertIn("방진 커버", shown["🎒 장비"])
+        self.assertIn("합금 장갑", shown["📦 예비"])
         bare = {f.name: f.value for f in run_embed(idle(), None, self.bal).fields}
         self.assertIn("🧥 맨몸", bare["🎒 장비"])
 
     def test_the_equipment_screen_has_an_armor_row_and_button(self):
         run = idle(armor="cloth_armor", spare_armor="chain_armor")
         fields = {f.name: f.value for f in equip_embed(run, self.bal).fields}
-        self.assertIn("**장착**: 👘 **천 갑옷**", fields["🧥 갑옷"])
-        self.assertIn("**예비**: ⛓️ **사슬 갑옷**", fields["🧥 갑옷"])
+        self.assertIn("**장착**: 🧥 **방진 커버**", fields["🧥 갑옷"])
+        self.assertIn("**예비**: ⛓️ **합금 장갑**", fields["🧥 갑옷"])
         view = EquipView(self.w.bot, U, run, self.bal)
         self.assertEqual(self.labels(view), ["무기 교체", "방패 교체", "갑옷 교체", "돌아가기"])
         self.assertEqual([c.disabled for c in view.children], [True, True, False, False])

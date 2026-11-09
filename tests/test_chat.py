@@ -152,7 +152,7 @@ class ReactionTests(ChatFixture):
         self.roll(candy=0.1)
         message = self.w.message()
         await self.cog.on_message(message)
-        message.add_reaction.assert_awaited_once_with("🍬")
+        message.add_reaction.assert_awaited_once_with("💾")
 
     async def test_no_reaction_without_a_reward_or_when_disabled(self):
         self.roll(candy=0.9)

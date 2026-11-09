@@ -39,11 +39,11 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         out = await service.grant_gear(self.store, self.locks, G, U, "longsword")
         self.assertTrue(out.ok)
         run = self.saved()
-        self.assertEqual((run.pending_gear, run.loot), ("longsword", ["롱소드"]))
+        self.assertEqual((run.pending_gear, run.loot), ("longsword", ["플라즈마 블레이드"]))
         self.assertGreater(run.rev, before.rev)                                           # 예전 화면은 지난 화면이 된다
         self.assertFalse(run.can_advance)                                                 # 정하기 전에는 앞으로 못 간다
         self.assertIn("관리자가 장비를 줬어요", "\n".join(run.events))
-        self.assertIn("롱소드", "\n".join(run.events))
+        self.assertIn("플라즈마 블레이드", "\n".join(run.events))
 
     async def test_the_player_can_equip_stash_or_discard_it_like_a_chest_drop(self):
         for action, check in (("equip", lambda r: (r.weapon, r.pending_gear) == ("longsword", None)),
@@ -152,25 +152,25 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         return embed.description, kwargs
 
     async def test_giving_gear_tells_everyone_and_mentions_the_player(self):
-        text, kwargs = await self.call(self.w.member, "롱소드")
+        text, kwargs = await self.call(self.w.member, "플라즈마 블레이드")
         self.assertIn("<@7>", text)
-        self.assertIn("롱소드", text)
+        self.assertIn("플라즈마 블레이드", text)
         self.assertIn("/던전", text)
         self.assertFalse(kwargs["ephemeral"])
         self.assertEqual(self.store.dungeon_run(G, U) is not None and Run.from_json(self.store.dungeon_run(G, U)).pending_gear, "longsword")
 
     async def test_problems_are_explained_and_nothing_changes(self):
-        for member, gear, expect in ((self.w.new_member(OTHER), "롱소드", "던전에 들어가 있지 않아요"), (self.w.member, "없는장비", "그런 장비가 없어요")):
+        for member, gear, expect in ((self.w.new_member(OTHER), "플라즈마 블레이드", "던전에 들어가 있지 않아요"), (self.w.member, "없는장비", "그런 장비가 없어요")):
             text, _ = await self.call(member, gear)
             self.assertIn(expect, text)
         bot_member = self.w.new_member(9)
         bot_member.bot = True
-        text, _ = await self.call(bot_member, "롱소드")
+        text, _ = await self.call(bot_member, "플라즈마 블레이드")
         self.assertIn("봇에게는", text)
         self.assertIsNone(Run.from_json(self.store.dungeon_run(G, U)).pending_gear)
 
     async def test_admin_only(self):
-        text, _ = await self.call(self.w.member, "롱소드", admin=False)
+        text, _ = await self.call(self.w.member, "플라즈마 블레이드", admin=False)
         self.assertIn("관리자만", text)
         self.assertIsNone(Run.from_json(self.store.dungeon_run(G, U)).pending_gear)
 
@@ -182,8 +182,9 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         i = self.w.interaction(admin=True)
         names = [c.value for c in await self.cog.give_gear_autocomplete(i, "검")]
         self.assertIn("특별한 검", names)
-        self.assertNotIn("방패", names)
-        self.assertEqual([c.value for c in await self.cog.give_gear_autocomplete(i, "방패")], ["나무 방패", "방패"])
+        self.assertNotIn("에너지 실드", names)
+        self.assertEqual([c.value for c in await self.cog.give_gear_autocomplete(i, "실드")], ["에너지 실드"])
+        self.assertEqual([c.value for c in await self.cog.give_gear_autocomplete(i, "방열")], ["구리 방열판"])
 
     def test_options_are_declared(self):
         names = {p.name: p.type.name for p in Admin.give_gear.parameters}

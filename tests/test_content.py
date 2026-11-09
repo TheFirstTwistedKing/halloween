@@ -26,7 +26,7 @@ class EntityFormatTests(unittest.TestCase):
                 self.assertEqual(loaded, entity, (section, entity.name))
 
     def test_a_fully_custom_section_replaces_the_default_table(self):
-        raw = {"monsters": [dict(key="a", name="허수아비", emoji="🎃", hp=10, damage=1, dodge=0)]}
+        raw = {"monsters": [dict(key="a", name="허수아비", emoji="⚙️", hp=10, damage=1, dodge=0)]}
         bal = Balance.build({}, raw)
         self.assertEqual([m.name for m in bal.monsters], ["허수아비"])
         self.assertEqual(bal.bosses, balance.BOSSES)                  # 손대지 않은 구역은 기본값 그대로
@@ -46,7 +46,7 @@ class EntityFormatTests(unittest.TestCase):
             self.assertEqual(clean_content(junk), {})
 
     def test_check_entity_rules(self):
-        base = dict(key="k", name="이름", emoji="🎃")
+        base = dict(key="k", name="이름", emoji="⚙️")
         cases = [("monsters", dict(hp=0, damage=1), "hp"), ("monsters", dict(hp=10, damage=-1), "damage"),
                  ("monsters", dict(hp=10, damage=1, dodge=96), "dodge"), ("monsters", dict(hp=10.5, damage=1), "hp"),
                  ("monsters", dict(hp=True, damage=1), "hp"),
@@ -61,7 +61,7 @@ class EntityFormatTests(unittest.TestCase):
         boss, _ = check_entity("bosses", dict(key="b", name="보스", emoji="👑", hp=10, damage=1, dodge=50))
         self.assertEqual(boss.dodge, 0)
         self.assertTrue(boss.boss)
-        shield, _ = check_entity("gear", dict(key="s", name="방패", emoji="🛡️", slot="shield", tier="일반", weight=1, guard=70, attack=500, crit=90, dodge=40))
+        shield, _ = check_entity("gear", dict(key="s", name="에너지 실드", emoji="🛡️", slot="shield", tier="일반", weight=1, guard=70, attack=500, crit=90, dodge=40))
         self.assertEqual((shield.attack, shield.crit, shield.dodge, shield.guard), (0, 0, None, 70))
         weapon, _ = check_entity("gear", dict(key="w", name="칼", emoji="🗡️", slot="weapon", tier="일반", weight=1, attack=10, guard=70, reflect=9))
         self.assertEqual((weapon.guard, weapon.reflect), (None, None))
@@ -86,7 +86,7 @@ class ContentLogicTests(ContentFixture):
     def test_add_a_monster_and_it_joins_the_default_ones(self):
         entity = content.add(self.store, G, "monsters", self.monster())
         names = [m.name for m in self.store.balance(G).monsters]
-        self.assertEqual(names, ["거대 박쥐", "슬라임", "마녀", "거대 쥐", "드래곤"])
+        self.assertEqual(names, ["정찰 드론", "오일 슬러지", "악성 AI", "고장 난 마우스", "드래곤"])
         self.assertTrue(entity.key.startswith("x"))
         self.assertEqual(self.store.balance(G).bosses, balance.BOSSES)
 
@@ -97,77 +97,77 @@ class ContentLogicTests(ContentFixture):
     def test_keys_never_collide_even_after_deleting(self):
         keys = set()
         for i in range(30):
-            keys.add(content.add(self.store, G, "gear", dict(name=f"장비{i}", emoji="🎃", slot="weapon", tier="일반", weight=1, attack=i)).key)
+            keys.add(content.add(self.store, G, "gear", dict(name=f"장비{i}", emoji="⚙️", slot="weapon", tier="일반", weight=1, attack=i)).key)
             if i % 3 == 0:
                 content.delete(self.store, G, ("gear",), f"장비{i}")
         self.assertEqual(len(keys), 30)
 
     def test_names_are_unique_per_scope_ignoring_case_and_spaces_around(self):
         content.add(self.store, G, "monsters", self.monster())
-        for name in ("드래곤", " 드래곤 ", "슬라임", "거대 슬라임"):                 # 몬스터·보스는 서로의 이름도 쓸 수 없다.
+        for name in ("드래곤", " 드래곤 ", "오일 슬러지", "슬러지 코어"):                 # 몬스터·보스는 서로의 이름도 쓸 수 없다.
             with self.assertRaisesRegex(content.ContentError, "같은 이름"):
                 content.add(self.store, G, "monsters", {**self.monster(), "name": name})
         with self.assertRaisesRegex(content.ContentError, "같은 이름"):
-            content.add(self.store, G, "bosses", {**self.monster(), "name": "마녀"})
-        content.add(self.store, G, "gear", dict(name="마녀", emoji="🎃", slot="weapon", tier="일반", weight=1))   # 다른 구역이면 같은 이름 가능
+            content.add(self.store, G, "bosses", {**self.monster(), "name": "악성 AI"})
+        content.add(self.store, G, "gear", dict(name="악성 AI", emoji="⚙️", slot="weapon", tier="일반", weight=1))   # 다른 구역이면 같은 이름 가능
         with self.assertRaisesRegex(content.ContentError, "같은 이름"):
-            content.add(self.store, G, "gear", dict(name="단검", emoji="🎃", slot="weapon", tier="일반", weight=1))
+            content.add(self.store, G, "gear", dict(name="레이저 커터", emoji="⚙️", slot="weapon", tier="일반", weight=1))
 
     def test_edit_changes_only_what_is_given_and_keeps_the_key(self):
-        before = next(m for m in self.store.balance(G).monsters if m.name == "슬라임")
-        section, after = content.edit(self.store, G, ("monsters", "bosses"), "슬라임", {"hp": 999, "name": "초록 슬라임"})
+        before = next(m for m in self.store.balance(G).monsters if m.name == "오일 슬러지")
+        section, after = content.edit(self.store, G, ("monsters", "bosses"), "오일 슬러지", {"hp": 999, "name": "초록 슬라임"})
         self.assertEqual((section, after.key, after.hp, after.damage, after.dodge), ("monsters", before.key, 999, before.damage, before.dodge))
         self.assertEqual(self.store.balance(G).monster_by_key["slime"].name, "초록 슬라임")
         self.assertIsNotNone(content.find(self.store, G, ("monsters",), "초록 슬라임"))
-        self.assertIsNone(content.find(self.store, G, ("monsters",), "슬라임"))
+        self.assertIsNone(content.find(self.store, G, ("monsters",), "오일 슬러지"))
         with self.assertRaisesRegex(content.ContentError, "바꿀 내용"):
             content.edit(self.store, G, ("monsters",), "초록 슬라임", {})
         with self.assertRaisesRegex(content.ContentError, "그런 항목"):
             content.edit(self.store, G, ("monsters",), "없는 것", {"hp": 5})
         with self.assertRaisesRegex(content.ContentError, "같은 이름"):
-            content.edit(self.store, G, ("monsters",), "마녀", {"name": "초록 슬라임"})
-        content.edit(self.store, G, ("monsters",), "마녀", {"name": "마녀"})            # 자기 이름 그대로는 허용
+            content.edit(self.store, G, ("monsters",), "악성 AI", {"name": "초록 슬라임"})
+        content.edit(self.store, G, ("monsters",), "악성 AI", {"name": "악성 AI"})            # 자기 이름 그대로는 허용
 
     def test_a_failed_edit_changes_nothing(self):
         snapshot = self.store.settings(G)
         for bad in ({"hp": 0}, {"emoji": "abc"}, {"name": ""}, {"dodge": 200}):
             with self.assertRaises(content.ContentError, msg=str(bad)):
-                content.edit(self.store, G, ("monsters",), "슬라임", bad)
+                content.edit(self.store, G, ("monsters",), "오일 슬러지", bad)
         self.assertEqual(self.store.settings(G), snapshot)
 
     def test_boss_stays_a_boss_and_cannot_dodge_after_edits(self):
-        _, boss = content.edit(self.store, G, ("monsters", "bosses"), "해골 왕", {"dodge": 80, "hp": 5000})
+        _, boss = content.edit(self.store, G, ("monsters", "bosses"), "메인프레임 군주", {"dodge": 80, "hp": 5000})
         self.assertEqual((boss.boss, boss.dodge, boss.hp), (True, 0, 5000))
 
     def test_delete_removes_it_and_the_game_still_works(self):
-        for name in ("거대 박쥐", "슬라임", "마녀"):
+        for name in ("정찰 드론", "오일 슬러지", "악성 AI"):
             content.delete(self.store, G, ("monsters",), name)
-        self.assertEqual([m.name for m in self.store.balance(G).monsters], ["거대 쥐"])
+        self.assertEqual([m.name for m in self.store.balance(G).monsters], ["고장 난 마우스"])
         with self.assertRaisesRegex(content.ContentError, "그런 항목"):
-            content.delete(self.store, G, ("monsters",), "마녀")
+            content.delete(self.store, G, ("monsters",), "악성 AI")
 
     def test_the_last_monster_cannot_be_deleted_while_rooms_still_spawn_them(self):
-        for name in ("거대 박쥐", "슬라임", "마녀"):
+        for name in ("정찰 드론", "오일 슬러지", "악성 AI"):
             content.delete(self.store, G, ("monsters",), name)
         with self.assertRaisesRegex(content.ContentError, "잡몹이 하나도 없어요"):
-            content.delete(self.store, G, ("monsters",), "거대 쥐")
+            content.delete(self.store, G, ("monsters",), "고장 난 마우스")
         self.assertEqual(len(self.store.balance(G).monsters), 1)
         for room in (2, 4, 6, 8):                                                  # 방 배치에서 잡몹을 없애면 지울 수 있다.
             overrides = {**self.store.settings(G)["dungeon"], f"방{room}.잡몹": 0}
             self.store.update_settings(G, dungeon=overrides)
-        content.delete(self.store, G, ("monsters",), "거대 쥐")
+        content.delete(self.store, G, ("monsters",), "고장 난 마우스")
         self.assertEqual(self.store.balance(G).monsters, ())
 
     def test_the_last_boss_gear_or_consumable_cannot_be_deleted(self):
-        for name in ("해골 왕", "거대 슬라임"):
+        for name in ("메인프레임 군주", "슬러지 코어"):
             content.delete(self.store, G, ("bosses",), name)
         with self.assertRaisesRegex(content.ContentError, "보스가 하나도 없어요"):
-            content.delete(self.store, G, ("bosses",), "고블린 왕")
+            content.delete(self.store, G, ("bosses",), "스크랩 봇 왕")
         for g in list(balance.GEAR)[:-1]:
             content.delete(self.store, G, ("gear",), g.name)
         with self.assertRaisesRegex(content.ContentError, "장비"):
             content.delete(self.store, G, ("gear",), balance.GEAR[-1].name)
-        content.delete(self.store, G, ("secrets",), "공허의 군주")                                  # (기본 시크릿 보스의 드롭이 남아 있으면 다른 이유로 막힌다)
+        content.delete(self.store, G, ("secrets",), "NULL 군주")                                  # (기본 시크릿 보스의 드롭이 남아 있으면 다른 이유로 막힌다)
         for c in list(balance.CONSUMABLES)[:-1]:
             content.delete(self.store, G, ("consumables",), c.name)
         with self.assertRaisesRegex(content.ContentError, "아이템"):
@@ -204,22 +204,22 @@ class ContentLogicTests(ContentFixture):
         self.assertEqual(len(self.store.balance(1).monsters), 5)
 
     def test_numeric_overrides_are_baked_in_on_first_edit_and_then_dropped(self):
-        self.store.update_settings(G, dungeon={"몬스터.슬라임.체력": 111, "방어.회복률": 33, "장비.단검.공격력": 77})
+        self.store.update_settings(G, dungeon={"몬스터.오일 슬러지.체력": 111, "방어.회복률": 33, "장비.레이저 커터.공격력": 77})
         content.add(self.store, G, "monsters", self.monster())
         cfg = self.store.settings(G)
-        self.assertEqual(cfg["dungeon"], {"방어.회복률": 33, "장비.단검.공격력": 77})      # 몬스터 항목만 정리된다
+        self.assertEqual(cfg["dungeon"], {"방어.회복률": 33, "장비.레이저 커터.공격력": 77})      # 몬스터 항목만 정리된다
         self.assertEqual(next(m for m in self.store.balance(G).monsters if m.key == "slime").hp, 111)    # 값은 보존됐다
         self.assertEqual(next(g for g in self.store.balance(G).gear if g.key == "dagger").attack, 77)    # 장비는 아직 기본+덮어쓰기
         self.assertEqual(self.store.balance(G).guard_heal, 33)
 
     def test_legacy_entity_overrides_still_apply_to_untouched_sections(self):
-        self.store.update_settings(G, dungeon={"보스.해골 왕.체력": 1234})
+        self.store.update_settings(G, dungeon={"보스.메인프레임 군주.체력": 1234})
         self.assertEqual(next(b for b in self.store.balance(G).bosses if b.key == "skeleton_king").hp, 1234)
         content.add(self.store, G, "monsters", self.monster())            # 몬스터 구역을 손대도 보스 덮어쓰기는 그대로
         self.assertEqual(next(b for b in self.store.balance(G).bosses if b.key == "skeleton_king").hp, 1234)
 
     def test_reset_returns_to_defaults(self):
-        self.store.update_settings(G, dungeon={"몬스터.슬라임.체력": 111})
+        self.store.update_settings(G, dungeon={"몬스터.오일 슬러지.체력": 111})
         content.add(self.store, G, "monsters", self.monster())
         content.add(self.store, G, "gear", dict(name="활", emoji="🏹", slot="weapon", tier="일반", weight=1))
         self.assertEqual(content.reset(self.store, G, ("monsters",)), 1)
@@ -230,15 +230,15 @@ class ContentLogicTests(ContentFixture):
         self.assertEqual(content.reset(self.store, G), 0)
 
     def test_reset_also_clears_the_old_number_overrides_of_that_section_only(self):
-        self.store.update_settings(G, dungeon={"몬스터.슬라임.체력": 111, "보스.해골 왕.체력": 222, "방어.회복률": 33})
+        self.store.update_settings(G, dungeon={"몬스터.오일 슬러지.체력": 111, "보스.메인프레임 군주.체력": 222, "방어.회복률": 33})
         self.assertEqual(content.reset(self.store, G, ("monsters",)), 0)                    # 직접 만든 구역은 없었다
-        self.assertEqual(self.store.settings(G)["dungeon"], {"보스.해골 왕.체력": 222, "방어.회복률": 33})
+        self.assertEqual(self.store.settings(G)["dungeon"], {"보스.메인프레임 군주.체력": 222, "방어.회복률": 33})
         self.assertEqual(next(m for m in self.store.balance(G).monsters if m.key == "slime").hp, 270)
         self.assertEqual(next(b for b in self.store.balance(G).bosses if b.key == "skeleton_king").hp, 222)
 
     def test_describe_lines(self):
         line = content.describe("monsters", entity_dict(balance.MONSTERS[3]))
-        self.assertEqual(line, "🐀 **거대 쥐** — HP 90 · 공격 45 · 회피 30% · 등장 1")
+        self.assertEqual(line, "🖱️ **고장 난 마우스** — HP 90 · 공격 45 · 회피 30% · 등장 1")
         self.assertNotIn("회피", content.describe("bosses", entity_dict(balance.BOSSES[0])))
         self.assertIn("공격 피해량 +35", content.describe("gear", entity_dict(balance.GEAR[2])))
 
@@ -273,7 +273,7 @@ class RuntimeEffectTests(unittest.IsolatedAsyncioTestCase):
 
     def test_a_custom_monster_spawns_with_its_stats(self):
         content.add(self.store, G, "monsters", dict(name="드래곤", emoji="🐉", hp=321, damage=77, dodge=0))
-        for name in ("거대 박쥐", "슬라임", "마녀", "거대 쥐"):
+        for name in ("정찰 드론", "오일 슬러지", "악성 AI", "고장 난 마우스"):
             content.delete(self.store, G, ("monsters",), name)
         bal = self.store.balance(G)
         run = dungeon.new_run(bal=bal)
@@ -301,23 +301,23 @@ class RuntimeEffectTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((run.hp, run.items), (433, {}))
 
     def test_a_chest_only_gives_what_exists(self):
-        content.delete(self.store, G, ("secrets",), "공허의 군주")                                  # 기본 시크릿 보스의 드롭이 남아 있으면 지울 수 없다
+        content.delete(self.store, G, ("secrets",), "NULL 군주")                                  # 기본 시크릿 보스의 드롭이 남아 있으면 지울 수 없다
         for g in balance.GEAR:
-            if g.name != "단검":
+            if g.name != "레이저 커터":
                 content.delete(self.store, G, ("gear",), g.name)
         for c in balance.CONSUMABLES:
-            if c.name != "사탕":
+            if c.name != "소형 배터리":
                 content.delete(self.store, G, ("consumables",), c.name)
         bal = self.store.balance(G)
         run = dungeon.new_run(bal=bal)
         run.phase = "chest"
         gear, item, _ = dungeon.open_chest(run, Scripted(randoms=[0.9, 0.9]), bal)
-        self.assertEqual((gear.name, item.name), ("단검", "사탕"))
+        self.assertEqual((gear.name, item.name), ("레이저 커터", "소형 배터리"))
 
     async def test_a_gear_deleted_while_pending_does_not_trap_the_player(self):
         bal = self.store.balance(G)
         run = self.start(pending_gear="longsword", phase="chest_done", room=1)
-        content.delete(self.store, G, ("gear",), "롱소드")
+        content.delete(self.store, G, ("gear",), "플라즈마 블레이드")
         self.assertFalse(run.can_advance)
         for action in ("equip", "discard"):
             self.start(pending_gear="longsword", phase="chest_done", room=1)
@@ -354,7 +354,7 @@ class RuntimeEffectTests(unittest.IsolatedAsyncioTestCase):
         self.store.update_settings(G, dungeon={"일반.층수": 1})                  # 한 층으로 보면 잡몹의 영향이 또렷하다(보스가 벽인 100개 방에서는 묻힌다).
         base = balance_sim.simulate(self.store.balance(G), 300, seed=3)["attack"]["clear"]
         content.add(self.store, G, "monsters", dict(name="괴물", emoji="👹", hp=100000, damage=5000, dodge=0))
-        for name in ("거대 박쥐", "슬라임", "마녀", "거대 쥐"):
+        for name in ("정찰 드론", "오일 슬러지", "악성 AI", "고장 난 마우스"):
             content.delete(self.store, G, ("monsters",), name)
         hard = balance_sim.simulate(self.store.balance(G), 300, seed=3)["attack"]["clear"]
         self.assertLess(hard, base)                                            # 잡몹이 넘을 수 없는 괴물뿐이라 어려워진다
@@ -383,12 +383,12 @@ class ContentCommandTests(unittest.IsolatedAsyncioTestCase):
         return (embed.description or "") + "\n".join(f.value for f in embed.fields)
 
     async def test_everything_is_admin_only(self):
-        calls = [(ContentAdmin.monster_add, ("드래곤", "🐉", 100, 10)), (ContentAdmin.monster_edit, ("슬라임",), dict(hp=5)),
-                 (ContentAdmin.monster_delete, ("슬라임",)),
-                 (ContentAdmin.gear_add, ("활", "🏹", Choice("weapon"), Choice("일반"), 5)), (ContentAdmin.gear_edit, ("단검",), dict(attack=1)),
-                 (ContentAdmin.gear_delete, ("단검",)),
-                 (ContentAdmin.potion_add, ("약", "💊", Choice("일반"), 5), dict(heal=10)), (ContentAdmin.potion_edit, ("사탕",), dict(heal=5)),
-                 (ContentAdmin.potion_delete, ("사탕",)), (ContentAdmin.dungeon_list, ()), (ContentAdmin.content_reset, ())]
+        calls = [(ContentAdmin.monster_add, ("드래곤", "🐉", 100, 10)), (ContentAdmin.monster_edit, ("오일 슬러지",), dict(hp=5)),
+                 (ContentAdmin.monster_delete, ("오일 슬러지",)),
+                 (ContentAdmin.gear_add, ("활", "🏹", Choice("weapon"), Choice("일반"), 5)), (ContentAdmin.gear_edit, ("레이저 커터",), dict(attack=1)),
+                 (ContentAdmin.gear_delete, ("레이저 커터",)),
+                 (ContentAdmin.potion_add, ("약", "💊", Choice("일반"), 5), dict(heal=10)), (ContentAdmin.potion_edit, ("소형 배터리",), dict(heal=5)),
+                 (ContentAdmin.potion_delete, ("소형 배터리",)), (ContentAdmin.dungeon_list, ()), (ContentAdmin.content_reset, ())]
         for command, args, *rest in calls:
             interaction = self.ask(admin=False)
             await self.run_cmd(command, interaction, *args, **(rest[0] if rest else {}))
@@ -409,11 +409,11 @@ class ContentCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("그런 항목이 없어요", self.text(i))
 
     async def test_gear_edit_minus_one_clears_optional_fields(self):
-        i = await self.run_cmd(ContentAdmin.gear_edit, self.ask(), "석궁", dodge=-1)
+        i = await self.run_cmd(ContentAdmin.gear_edit, self.ask(), "리벳 건", dodge=-1)
         self.assertNotIn("회피 확률", self.text(i))
-        self.assertIsNone(next(g for g in self.store.balance(G).gear if g.name == "석궁").dodge)
-        await self.run_cmd(ContentAdmin.gear_edit, self.ask(), "방패", reflect=-1)
-        shield = next(g for g in self.store.balance(G).gear if g.name == "방패")
+        self.assertIsNone(next(g for g in self.store.balance(G).gear if g.name == "리벳 건").dodge)
+        await self.run_cmd(ContentAdmin.gear_edit, self.ask(), "에너지 실드", reflect=-1)
+        shield = next(g for g in self.store.balance(G).gear if g.name == "에너지 실드")
         self.assertIsNone(shield.reflect)
         self.assertEqual(dungeon.reflect_percent(dungeon.new_run(shield=shield.key, bal=self.store.balance(G)), self.store.balance(G)),
                          self.store.balance(G).reflect_base)                           # 해제하면 기본 반사로 돌아간다
@@ -427,17 +427,17 @@ class ContentCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("이모지", self.text(i))
 
     async def test_changing_a_consumables_effect_removes_the_old_one(self):
-        await self.run_cmd(ContentAdmin.potion_edit, self.ask(), "영혼 에센스", heal=300)
-        soul = next(c for c in self.store.balance(G).consumables if c.name == "영혼 에센스")
+        await self.run_cmd(ContentAdmin.potion_edit, self.ask(), "나노봇 주입제", heal=300)
+        soul = next(c for c in self.store.balance(G).consumables if c.name == "나노봇 주입제")
         self.assertEqual((soul.heal, soul.regen, soul.regen_turns, soul.full), (300, 0, 0, False))
-        await self.run_cmd(ContentAdmin.potion_edit, self.ask(), "영혼 에센스", regen=40, turns=5)
-        soul = next(c for c in self.store.balance(G).consumables if c.name == "영혼 에센스")
+        await self.run_cmd(ContentAdmin.potion_edit, self.ask(), "나노봇 주입제", regen=40, turns=5)
+        soul = next(c for c in self.store.balance(G).consumables if c.name == "나노봇 주입제")
         self.assertEqual((soul.heal, soul.regen, soul.regen_turns, soul.full), (0, 40, 5, False))
-        await self.run_cmd(ContentAdmin.potion_edit, self.ask(), "영혼 에센스", full=True)
-        soul = next(c for c in self.store.balance(G).consumables if c.name == "영혼 에센스")
+        await self.run_cmd(ContentAdmin.potion_edit, self.ask(), "나노봇 주입제", full=True)
+        soul = next(c for c in self.store.balance(G).consumables if c.name == "나노봇 주입제")
         self.assertEqual((soul.heal, soul.regen, soul.full), (0, 0, True))
-        await self.run_cmd(ContentAdmin.potion_edit, self.ask(), "황금 호박죽", heal=100)               # 전체 회복 → 고정 회복
-        self.assertEqual(next(c for c in self.store.balance(G).consumables if c.name == "황금 호박죽").full, False)
+        await self.run_cmd(ContentAdmin.potion_edit, self.ask(), "마스터 리부트 칩", heal=100)               # 전체 회복 → 고정 회복
+        self.assertEqual(next(c for c in self.store.balance(G).consumables if c.name == "마스터 리부트 칩").full, False)
 
     async def test_potion_add_requires_one_effect(self):
         i = await self.run_cmd(ContentAdmin.potion_add, self.ask(), "빈 약병", "🧴", Choice("일반"), 5)
@@ -482,10 +482,10 @@ class ContentCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("기본 목록", click.response.edit_message.await_args.kwargs["embed"].description)
 
     def test_name_autocomplete(self):
-        content.add(self.store, G, "monsters", dict(name="아주 센 슬라임", emoji="🟢", hp=5, damage=1))
-        found = names_for(self.store, G, ("monsters", "bosses"), "슬라임")
-        self.assertEqual([c.value for c in found], ["슬라임", "아주 센 슬라임", "거대 슬라임"])
-        self.assertEqual(found[0].name, "🟢 슬라임")
+        content.add(self.store, G, "monsters", dict(name="아주 센 슬러지", emoji="🟢", hp=5, damage=1))
+        found = names_for(self.store, G, ("monsters", "bosses"), "슬러지")
+        self.assertEqual([c.value for c in found], ["오일 슬러지", "아주 센 슬러지", "슬러지 코어"])
+        self.assertEqual(found[0].name, "🛢️ 오일 슬러지")
         self.assertEqual(len(names_for(self.store, G, ("gear",), "")), len(balance.GEAR))
 
 

@@ -167,8 +167,8 @@ class ConditionMeaningTests(unittest.TestCase):
         self.assertFalse(dungeon.condition_met(run, ("attack_hit", None), bal))
 
     def test_text_names_the_watched_item(self):
-        names = {"candy": "사탕"}
-        self.assertEqual(balance.condition_text(("item_gain", "candy"), names), "사탕 획득 직후")
+        names = {"candy": "소형 배터리"}
+        self.assertEqual(balance.condition_text(("item_gain", "candy"), names), "소형 배터리 획득 직후")
         self.assertEqual(balance.condition_text(("item_use", "gone"), names), "gone 사용 직후")
         self.assertEqual(balance.condition_text(("hp_le", 30)), "내 HP 30% 이하")
         self.assertEqual(balance.condition_text(("reflect_fail", None)), "반사 실패 직후")
@@ -274,7 +274,7 @@ class UseTests(unittest.TestCase):
         self.assertEqual(run.items, {})
         text = "\n".join(events)
         self.assertIn("개조", text)
-        self.assertIn("낡은 몽둥이", text)
+        self.assertIn("낡은 스패너", text)
         self.assertEqual(dungeon.player_damage(run, bal), bal.base_damage + bal.gear_by_key["longsword"].attack)
 
     def test_modifying_bare_hands_equips_the_target_and_the_spare_slot_is_untouched(self):
@@ -401,98 +401,98 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         return next(c for c in self.store.balance(G).consumables if c.name == name)
 
     async def test_potion_add_with_a_modify_weapon(self):
-        text = await self.run_cmd(ContentAdmin.potion_add, "개조약", "🔧", Choice("희귀"), 1, modify="롱소드")
+        text = await self.run_cmd(ContentAdmin.potion_add, "개조약", "🔧", Choice("희귀"), 1, modify="플라즈마 블레이드")
         self.assertIn("개조", text)
-        self.assertIn("롱소드", text)
+        self.assertIn("플라즈마 블레이드", text)
         item = self.item("개조약")
         self.assertEqual((item.modify, item.heal, item.full), ("longsword", 0, False))
 
     async def test_potion_add_refuses_modify_with_healing_and_bad_weapons(self):
-        text = await self.run_cmd(ContentAdmin.potion_add, "개조약", "🔧", Choice("희귀"), 1, heal=50, modify="롱소드")
+        text = await self.run_cmd(ContentAdmin.potion_add, "개조약", "🔧", Choice("희귀"), 1, heal=50, modify="플라즈마 블레이드")
         self.assertIn("함께 쓸 수 없어요", text)
-        text = await self.run_cmd(ContentAdmin.potion_add, "개조약", "🔧", Choice("희귀"), 1, modify="방패")      # 방패는 안 된다
+        text = await self.run_cmd(ContentAdmin.potion_add, "개조약", "🔧", Choice("희귀"), 1, modify="에너지 실드")      # 방패는 안 된다
         self.assertIn("무기 이름", text)
         text = await self.run_cmd(ContentAdmin.potion_add, "개조약", "🔧", Choice("희귀"), 1, modify="없는무기")
         self.assertIn("무기 이름", text)
         self.assertFalse(any(c.name == "개조약" for c in self.store.balance(G).consumables))
 
     async def test_potion_edit_swaps_between_modify_and_healing(self):
-        await self.run_cmd(ContentAdmin.potion_edit, "사탕", modify="단검")
-        item = self.item("사탕")
+        await self.run_cmd(ContentAdmin.potion_edit, "소형 배터리", modify="레이저 커터")
+        item = self.item("소형 배터리")
         self.assertEqual((item.modify, item.heal), ("dagger", 0))
-        await self.run_cmd(ContentAdmin.potion_edit, "사탕", heal=77)                              # 새 효과를 정하면 개조는 사라진다
-        item = self.item("사탕")
+        await self.run_cmd(ContentAdmin.potion_edit, "소형 배터리", heal=77)                              # 새 효과를 정하면 개조는 사라진다
+        item = self.item("소형 배터리")
         self.assertEqual((item.modify, item.heal), (None, 77))
-        await self.run_cmd(ContentAdmin.potion_edit, "사탕", modify="단검")
-        await self.run_cmd(ContentAdmin.potion_edit, "사탕", full=True)
-        self.assertEqual((self.item("사탕").modify, self.item("사탕").full), (None, True))
-        text = await self.run_cmd(ContentAdmin.potion_edit, "사탕", heal=5, modify="단검")
+        await self.run_cmd(ContentAdmin.potion_edit, "소형 배터리", modify="레이저 커터")
+        await self.run_cmd(ContentAdmin.potion_edit, "소형 배터리", full=True)
+        self.assertEqual((self.item("소형 배터리").modify, self.item("소형 배터리").full), (None, True))
+        text = await self.run_cmd(ContentAdmin.potion_edit, "소형 배터리", heal=5, modify="레이저 커터")
         self.assertIn("함께 쓸 수 없어요", text)
 
     async def test_condition_add_list_delete_and_clear(self):
-        text = await self.run_cmd(ContentAdmin.cond_add, "사탕", Choice("hp_le"), value=30)
+        text = await self.run_cmd(ContentAdmin.cond_add, "소형 배터리", Choice("hp_le"), value=30)
         self.assertIn("내 HP 30% 이하", text)
-        await self.run_cmd(ContentAdmin.cond_add, "사탕", Choice("enemy_hp_ge"), value=10)
-        await self.run_cmd(ContentAdmin.cond_add, "사탕", Choice("guard_success"))
-        self.assertEqual(self.item("사탕").conditions, (("hp_le", 30), ("enemy_hp_ge", 10), ("guard_success", None)))
+        await self.run_cmd(ContentAdmin.cond_add, "소형 배터리", Choice("enemy_hp_ge"), value=10)
+        await self.run_cmd(ContentAdmin.cond_add, "소형 배터리", Choice("guard_success"))
+        self.assertEqual(self.item("소형 배터리").conditions, (("hp_le", 30), ("enemy_hp_ge", 10), ("guard_success", None)))
         text = await self.run_cmd(ContentAdmin.cond_list)
         self.assertIn("1. 내 HP 30% 이하", text)
         self.assertIn("3. 방어 성공 직후", text)
-        text = await self.run_cmd(ContentAdmin.cond_delete, "사탕", 2)
-        self.assertEqual(self.item("사탕").conditions, (("hp_le", 30), ("guard_success", None)))
-        text = await self.run_cmd(ContentAdmin.cond_delete, "사탕", 5)
+        text = await self.run_cmd(ContentAdmin.cond_delete, "소형 배터리", 2)
+        self.assertEqual(self.item("소형 배터리").conditions, (("hp_le", 30), ("guard_success", None)))
+        text = await self.run_cmd(ContentAdmin.cond_delete, "소형 배터리", 5)
         self.assertIn("조건은 2개예요", text)
-        await self.run_cmd(ContentAdmin.cond_clear, "사탕")
-        self.assertEqual(self.item("사탕").conditions, ())
-        text = await self.run_cmd(ContentAdmin.cond_clear, "사탕")
+        await self.run_cmd(ContentAdmin.cond_clear, "소형 배터리")
+        self.assertEqual(self.item("소형 배터리").conditions, ())
+        text = await self.run_cmd(ContentAdmin.cond_clear, "소형 배터리")
         self.assertIn("사용 조건이 없어요", text)
 
     async def test_item_conditions_pick_the_watched_item_by_name(self):
-        await self.run_cmd(ContentAdmin.cond_add, "사탕", Choice("item_use"), other="호박죽")
-        self.assertEqual(self.item("사탕").conditions, (("item_use", self.item("호박죽").key),))
-        text = await self.run_cmd(ContentAdmin.cond_list, "사탕")
-        self.assertIn("호박죽 사용 직후", text)
+        await self.run_cmd(ContentAdmin.cond_add, "소형 배터리", Choice("item_use"), other="정비 모듈")
+        self.assertEqual(self.item("소형 배터리").conditions, (("item_use", self.item("정비 모듈").key),))
+        text = await self.run_cmd(ContentAdmin.cond_list, "소형 배터리")
+        self.assertIn("정비 모듈 사용 직후", text)
 
     async def test_wrong_arguments_and_impossible_combinations_are_explained(self):
-        cases = [((Choice("hp_le"),), {}, "필요해요"), ((Choice("hp_le"),), dict(value=5, other="호박죽"), "필요 없어요"),
+        cases = [((Choice("hp_le"),), {}, "필요해요"), ((Choice("hp_le"),), dict(value=5, other="정비 모듈"), "필요 없어요"),
                  ((Choice("item_use"),), {}, "필요해요"), ((Choice("item_use"),), dict(other="없는약"), "그런 소모품이 없어요"),
-                 ((Choice("item_use"),), dict(value=3, other="호박죽"), "필요 없어요"), ((Choice("guard_fail"),), dict(value=3), "필요 없어요")]
+                 ((Choice("item_use"),), dict(value=3, other="정비 모듈"), "필요 없어요"), ((Choice("guard_fail"),), dict(value=3), "필요 없어요")]
         for args, kwargs, expect in cases:
-            self.assertIn(expect, await self.run_cmd(ContentAdmin.cond_add, "사탕", *args, **kwargs), (args, kwargs))
-        await self.run_cmd(ContentAdmin.cond_add, "사탕", Choice("guard_success"))
-        self.assertIn("하나만", await self.run_cmd(ContentAdmin.cond_add, "사탕", Choice("attack_hit")))
-        await self.run_cmd(ContentAdmin.cond_add, "사탕", Choice("hp_le"), value=40)
-        self.assertIn("하나만", await self.run_cmd(ContentAdmin.cond_add, "사탕", Choice("hp_le"), value=20))
-        self.assertIn("조건을 만족할 수 없어요", await self.run_cmd(ContentAdmin.cond_add, "사탕", Choice("hp_ge"), value=90))
-        self.assertEqual(self.item("사탕").conditions, (("guard_success", None), ("hp_le", 40)))
+            self.assertIn(expect, await self.run_cmd(ContentAdmin.cond_add, "소형 배터리", *args, **kwargs), (args, kwargs))
+        await self.run_cmd(ContentAdmin.cond_add, "소형 배터리", Choice("guard_success"))
+        self.assertIn("하나만", await self.run_cmd(ContentAdmin.cond_add, "소형 배터리", Choice("attack_hit")))
+        await self.run_cmd(ContentAdmin.cond_add, "소형 배터리", Choice("hp_le"), value=40)
+        self.assertIn("하나만", await self.run_cmd(ContentAdmin.cond_add, "소형 배터리", Choice("hp_le"), value=20))
+        self.assertIn("조건을 만족할 수 없어요", await self.run_cmd(ContentAdmin.cond_add, "소형 배터리", Choice("hp_ge"), value=90))
+        self.assertEqual(self.item("소형 배터리").conditions, (("guard_success", None), ("hp_le", 40)))
         self.assertIn("그런 소모품이 없어요", await self.run_cmd(ContentAdmin.cond_clear, "없는약"))
 
     async def test_everything_is_admin_only(self):
-        for command, args, kwargs in ((ContentAdmin.cond_add, ("사탕", Choice("guard_fail")), {}), (ContentAdmin.cond_delete, ("사탕", 1), {}),
-                                      (ContentAdmin.cond_clear, ("사탕",), {}), (ContentAdmin.cond_list, (), {})):
+        for command, args, kwargs in ((ContentAdmin.cond_add, ("소형 배터리", Choice("guard_fail")), {}), (ContentAdmin.cond_delete, ("소형 배터리", 1), {}),
+                                      (ContentAdmin.cond_clear, ("소형 배터리",), {}), (ContentAdmin.cond_list, (), {})):
             self.assertIn("관리자만", await self.run_cmd(command, *args, admin=False, **kwargs))
-        self.assertEqual(self.item("사탕").conditions, ())
+        self.assertEqual(self.item("소형 배터리").conditions, ())
 
     async def test_a_weapon_or_item_in_use_by_a_consumable_cannot_be_deleted(self):
-        await self.run_cmd(ContentAdmin.potion_add, "개조약", "🔧", Choice("희귀"), 1, modify="롱소드")
-        text = await self.run_cmd(ContentAdmin.gear_delete, "롱소드")
+        await self.run_cmd(ContentAdmin.potion_add, "개조약", "🔧", Choice("희귀"), 1, modify="플라즈마 블레이드")
+        text = await self.run_cmd(ContentAdmin.gear_delete, "플라즈마 블레이드")
         self.assertIn("개조 목표", text)
-        self.assertTrue(any(g.name == "롱소드" for g in self.store.balance(G).gear))
-        await self.run_cmd(ContentAdmin.cond_add, "사탕", Choice("item_use"), other="호박죽")
-        text = await self.run_cmd(ContentAdmin.potion_delete, "호박죽")
+        self.assertTrue(any(g.name == "플라즈마 블레이드" for g in self.store.balance(G).gear))
+        await self.run_cmd(ContentAdmin.cond_add, "소형 배터리", Choice("item_use"), other="정비 모듈")
+        text = await self.run_cmd(ContentAdmin.potion_delete, "정비 모듈")
         self.assertIn("사용 조건", text)
         await self.run_cmd(ContentAdmin.potion_delete, "개조약")
-        await self.run_cmd(ContentAdmin.gear_delete, "롱소드")                                       # 쓰는 곳이 사라지면 지워진다
-        self.assertFalse(any(g.name == "롱소드" for g in self.store.balance(G).gear))
-        await self.run_cmd(ContentAdmin.cond_clear, "사탕")
-        await self.run_cmd(ContentAdmin.potion_delete, "호박죽")
-        self.assertFalse(any(c.name == "호박죽" for c in self.store.balance(G).consumables))
+        await self.run_cmd(ContentAdmin.gear_delete, "플라즈마 블레이드")                                       # 쓰는 곳이 사라지면 지워진다
+        self.assertFalse(any(g.name == "플라즈마 블레이드" for g in self.store.balance(G).gear))
+        await self.run_cmd(ContentAdmin.cond_clear, "소형 배터리")
+        await self.run_cmd(ContentAdmin.potion_delete, "정비 모듈")
+        self.assertFalse(any(c.name == "정비 모듈" for c in self.store.balance(G).consumables))
 
     async def test_the_dungeon_list_shows_conditions_and_the_modify_target(self):
-        await self.run_cmd(ContentAdmin.potion_add, "개조약", "🔧", Choice("희귀"), 1, modify="롱소드")
+        await self.run_cmd(ContentAdmin.potion_add, "개조약", "🔧", Choice("희귀"), 1, modify="플라즈마 블레이드")
         await self.run_cmd(ContentAdmin.cond_add, "개조약", Choice("hp_le"), value=25)
         text = await self.run_cmd(ContentAdmin.dungeon_list, Choice("consumables"))
-        self.assertIn("롱소드(으)로 개조", text)
+        self.assertIn("플라즈마 블레이드(으)로 개조", text)
         self.assertIn("조건: 내 HP 25% 이하", text)
 
     def test_the_new_options_are_declared_with_the_right_types(self):
@@ -522,7 +522,7 @@ class ScreenAndSimulatorTests(unittest.IsolatedAsyncioTestCase):
     def test_the_summary_names_the_target_weapon(self):
         bal = bal_with(potion(heal=0, modify="longsword", conditions=[["guard_fail", None]]))
         text = item_summary(bal.item_by_key["p"], bal)
-        self.assertIn("롱소드", text)
+        self.assertIn("플라즈마 블레이드", text)
         self.assertIn("개조", text)
         self.assertIn("방어 실패 직후", text)
 

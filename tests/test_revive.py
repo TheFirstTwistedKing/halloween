@@ -1,4 +1,4 @@
-"""부활권: 패키지에서 0.1%로 나오고, 던전에서 쓰러졌을 때 가방에 있으면 한 장 쓰여서 그 자리에서 되살아난다."""
+"""부활권: 패키지에서 0.1%로 나오고, 던전에서 다운됐을 때 가방에 있으면 한 장 쓰여서 그 자리에서 되살아난다."""
 import json
 import unittest
 
@@ -57,7 +57,7 @@ class SeedTests(unittest.TestCase):
         self.store.ensure_defaults(G)
         table = self.store.settings(G)["package_table"]
         revive = self.store.revive_item(G)
-        self.assertEqual(self.store.settings(G)["seed_version"], 2)
+        self.assertEqual(self.store.settings(G)["seed_version"], 3)
         self.assertEqual([e["id"] for e in table][-1], "revive")
         self.assertEqual(table[-1]["item"], revive["id"])
         self.assertEqual(table[0]["weight"], 39.9)
@@ -168,10 +168,10 @@ class DungeonTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(out.ok)
         self.assertIsNone(out.ended)                                                              # 던전은 끝나지 않았다
         self.assertEqual((out.run.phase, out.run.hp), ("battle", balance.DEFAULT.max_hp * 50 // 100))
-        self.assertEqual(out.run.enemy["name"], "슬라임")                                           # 싸우던 상대는 그대로
+        self.assertEqual(out.run.enemy["name"], "오일 슬러지")                                           # 싸우던 상대는 그대로
         self.assertEqual(self.store.qty(G, U, self.revive["id"]), 1)                              # 한 장만 썼다
         text = "\n".join(out.run.events)
-        self.assertIn("쓰러졌어요", text)
+        self.assertIn("다운됐어요", text)
         self.assertIn("부활권", text)
         self.assertIn("남은 부활권 1장", text)
         saved = Run_from(self.store)

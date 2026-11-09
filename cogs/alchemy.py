@@ -27,7 +27,7 @@ def label(row) -> str:
 
 
 def recipe_line(store, guild_id: int, recipe: dict) -> str:
-    """'🧙 마녀 모자 + 👻 유령의 천 → 🎃 결과물 (판매가 🍬 160)' 한 줄. 사라진 물품이 있어도 오류 없이 표시한다."""
+    """'🔲 구형 CPU + 🧊 방열 패드 → ⚙️ 결과물 (판매가 💾 160)' 한 줄. 사라진 물품이 있어도 오류 없이 표시한다."""
     def name(item_id):
         row = store.item(guild_id, item_id)
         return label(row) if row else "❔ 사라진 물품"
@@ -193,7 +193,7 @@ class Alchemy(commands.Cog):
             await self._deny(interaction, "그 결과물의 레시피가 없어요. 이름은 자동완성에서 골라 주세요.")
             return
         await interaction.response.send_message(embed=theme.notice(
-            f"🗑️ {label(row)}의 레시피를 지웠어요. 물품과 판매가(🍬 {row['sell_price']:,})는 그대로이고, 이제 판매가를 직접 바꿀 수 있어요."), ephemeral=False)
+            f"🗑️ {label(row)}의 레시피를 지웠어요. 물품과 판매가({theme.money(row['sell_price'], store.currency(gid))})는 그대로이고, 이제 판매가를 직접 바꿀 수 있어요."), ephemeral=False)
 
     @recipe.command(name="대량삭제", description="연금술 레시피를 여러 개 골라 한 번에 지워요. 결과물 물품은 그대로예요 (관리자)")
     async def recipe_bulk(self, interaction: discord.Interaction):

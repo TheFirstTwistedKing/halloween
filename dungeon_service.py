@@ -59,7 +59,7 @@ async def enter(store: Store, locks, guild_id: int, user_id: int, auto_running: 
             run.auto = False
         run.bump()                                   # 이전에 띄워 둔 화면은 이제 지난 화면이 된다.
         entry = entry_label(store, guild_id)
-        run.events = ([f"🏚️ {entry + '을(를) 내고 ' if entry else ''}던전에 들어왔어요! {bal.floors}층까지 올라가야 해요. (한 층에 방이 {dungeon.ROOMS}개)"] if started
+        run.events = ([f"🏭 {entry + '을(를) 내고 ' if entry else ''}던전에 들어왔어요! {bal.floors}층까지 올라가야 해요. (한 층에 방이 {dungeon.ROOMS}개)"] if started
                       else ["📖 진행 중이던 던전을 이어서 해요. (입장 물품은 쓰지 않아요)"])
         if was_auto:
             run.events.append("⏸ 빠른진행이 멈춰 있어요(봇이 다시 켜졌거나 중간에 끊겼어요). 다시 켜도 이 던전에서는 입장 물품을 더 내지 않아요.")
@@ -318,7 +318,7 @@ def _apply(run: Run, rng, action: str, arg: str | None, guard_ok: bool | None, b
 
 
 def _revive(store: Store, guild_id: int, user_id: int, run: Run, bal) -> bool:
-    """쓰러졌을 때 가방에 부활권이 있으면 한 장 쓰고 그 자리에서 다시 일어난다(HP는 최대의 bal.revive_heal %).
+    """다운됐을 때 가방에 부활권이 있으면 한 장 쓰고 그 자리에서 다시 일어난다(HP는 최대의 bal.revive_heal %).
     싸우던 상대는 그대로 남는다. 부활권이 없으면 아무것도 바꾸지 않고 False(그대로 던전이 끝난다)."""
     item = store.revive_item(guild_id)
     if item is None or store.qty(guild_id, user_id, item["id"]) < 1:
@@ -331,7 +331,7 @@ def _revive(store: Store, guild_id: int, user_id: int, run: Run, bal) -> bool:
                                + (f" (남은 {item['name']} {left}장)" if left else "")]
     if store.use_revive(guild_id, user_id, run.to_json()):
         return True
-    run.hp, run.phase, run.events = saved                 # 그 사이 부활권이 사라졌다면(겹친 요청 등) 쓰러진 채로 둔다.
+    run.hp, run.phase, run.events = saved                 # 그 사이 부활권이 사라졌다면(겹친 요청 등) 다운된 채로 둔다.
     return False
 
 

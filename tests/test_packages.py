@@ -49,7 +49,7 @@ class OpenTests(PackageFixture):
         b = await self.open(2, 0.65)                        # 열쇠
         c = await self.open(3, 0.85)                        # 재화 50
         d = await self.open(4, 0.95)                        # 쓰레기
-        self.assertEqual([e.title for e in (a, b, c, d)], ["👻 꽝!", "🗝️ 열쇠!", "🍬 할로윈 재화 50!", "🗑️ 쓰레기!"])
+        self.assertEqual([e.title for e in (a, b, c, d)], ["👻 꽝!", "🗝️ 열쇠!", "💾 RAM 50!", "🗑️ 쓰레기!"])
         self.assertEqual(self.store.wallet(100, 3), PACKAGE_CANDY)
         self.assertEqual((self.store.qty(100, 2, ids["key"]), self.store.qty(100, 4, ids["trash"])), (1, 1))
         self.assertEqual((self.store.qty(100, 1, ids["key"]), self.store.wallet(100, 1)), (0, 0))     # 꽝은 아무것도 없다.
@@ -142,7 +142,7 @@ class CustomTableTests(PackageFixture):
         self.package("all")
         first = await self.open(1, 0.1)                       # 0~0.25 → a
         second = await self.open(2, 0.3)                      # 0.25~1 → b
-        self.assertEqual((first.title, second.title), ("✨ 반짝 보석!", "🍬 할로윈 재화 7!"))
+        self.assertEqual((first.title, second.title), ("✨ 반짝 보석!", "💾 RAM 7!"))
         self.assertEqual((self.store.qty(100, 1, gem["id"]), self.store.wallet(100, 2)), (3, 7))
         self.assertEqual([r["result"] for r in self.store.package_openers(9001)], ["a", "b"])
 
@@ -166,7 +166,7 @@ class CustomTableTests(PackageFixture):
         self.store.update_settings(100, package_table=[])
         self.package("all")
         embed = await self.open(1, 0.5)
-        self.assertEqual(embed.title, "👻 꽝!")
+        self.assertEqual(embed.title, "📭 빈 패킷!")
 
 
 class FinalizeTests(PackageFixture):

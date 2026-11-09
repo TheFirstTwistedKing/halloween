@@ -51,7 +51,7 @@ def in_secret_fight(bal, **kw):
 
 class EntityTests(unittest.TestCase):
     def test_the_default_secret_boss_exists_and_always_has_a_drop(self):
-        self.assertEqual([b.name for b in balance.SECRET_BOSSES], ["공허의 군주"])
+        self.assertEqual([b.name for b in balance.SECRET_BOSSES], ["NULL 군주"])
         for boss in balance.SECRET_BOSSES:
             self.assertTrue(boss.drop_gear or boss.drop_item)
             self.assertIn(boss.drop_gear, [g.key for g in balance.GEAR])
@@ -115,7 +115,7 @@ class RoomTests(unittest.TestCase):
         dungeon.advance(run, Scripted(randoms=[0.0, 0.0]), bal)
         self.assertEqual((run.floor, run.room, run.kind, run.phase), (1, 11, "secret", "battle"))
         self.assertTrue(run.enemy["secret"] and run.enemy["boss"])
-        self.assertEqual(run.enemy["name"], "공허의 군주")
+        self.assertEqual(run.enemy["name"], "NULL 군주")
         self.assertIn("secret_intro", run.last)
         self.assertIn("시크릿 방", run.events[0])
 
@@ -192,7 +192,7 @@ class DropTests(unittest.TestCase):
         run.enemy["dodge"] = 0
         if how == "attack":
             dungeon.player_attack(run, Scripted(randoms=[0.99, *rolls]), bal)       # 맨 앞은 회피 굴림
-        else:                                                                       # 가드 성공의 반사 피해로 쓰러뜨린다
+        else:                                                                       # 가드 성공의 반사 피해로 무력화한다
             run.enemy["damage"] = 1000
             dungeon.player_defend(run, True, bal, Scripted(randoms=rolls))
         return run
@@ -204,12 +204,12 @@ class DropTests(unittest.TestCase):
         self.assertEqual((run.pending_gear, run.items), ("gun", {"golden_soup": 2}))
         text = "\n".join(run.events)
         self.assertIn("시크릿 보스의 드롭", text)
-        self.assertIn("총", text)
-        self.assertIn("황금 호박죽", text)
+        self.assertIn("레일건", text)
+        self.assertIn("마스터 리부트 칩", text)
         self.assertIn("×2", text)
         self.assertFalse(run.can_advance)                                          # 장비는 장착/예비/버리기를 정해야 앞으로 간다
         self.assertIn("item_gain:golden_soup", run.last)
-        self.assertEqual(run.loot, ["총", "황금 호박죽"])
+        self.assertEqual(run.loot, ["레일건", "마스터 리부트 칩"])
 
     def test_each_drop_has_its_own_chance(self):
         bal = bal_with(secret(drop_gear_chance=50, drop_item_chance=50), overrides={"일반.시크릿확률": 100})
@@ -326,7 +326,7 @@ class ScreenTests(unittest.IsolatedAsyncioTestCase):
         run = in_secret_fight(bal)
         embed = run_embed(run, None, bal)
         self.assertIn("시크릿 방", embed.title)
-        self.assertEqual(embed.color.value, 0xF1C40F)
+        self.assertEqual(embed.color.value, 0xF5B700)
         self.assertEqual(embed.image.url, "https://x.test/boss.gif")
         self.assertIn("SECRET", embed.fields[0].name)
         self.assertNotIn("11/10", embed.title)                                       # 11/10 같은 어색한 방 번호를 보이지 않는다
@@ -381,7 +381,7 @@ class ScreenTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_the_cinematic_also_plays_during_quick_play(self):
         self.w.bot.rng = random.Random(4)
-        self.store.update_settings(G, dungeon={"일반.시크릿확률": 100, "일반.층수": 1, "일반.맨손공격력": 100000, "일반.최대체력": 100000})   # 한 층, 한 방에 쓰러뜨린다
+        self.store.update_settings(G, dungeon={"일반.시크릿확률": 100, "일반.층수": 1, "일반.맨손공격력": 100000, "일반.최대체력": 100000})   # 한 층, 한 방에 무력화한다
         key = self.store.ensure_system_items(G)["key"]
         self.store.add_item(G, U, key, 2)
         out = await service.enter(self.store, self.bot.locks, G, U)
@@ -418,11 +418,11 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         return next(s for s in self.store.balance(G).secrets if s.name == name)
 
     async def test_add_a_secret_boss_with_both_drops_and_decimal_chances(self):
-        text = await self.run_cmd(ContentAdmin.secret_add, "심연의 왕", "🌌", 3000, 250, drop_gear="호박 대검", gear_chance=12.5,
-                                  drop_item="영혼 에센스", item_chance=40, amount=2, weight=0.5, intro="어둠이 숨을 쉰다", image="https://x.test/a.gif")
+        text = await self.run_cmd(ContentAdmin.secret_add, "심연의 왕", "🌌", 3000, 250, drop_gear="고주파 대검", gear_chance=12.5,
+                                  drop_item="나노봇 주입제", item_chance=40, amount=2, weight=0.5, intro="어둠이 숨을 쉰다", image="https://x.test/a.gif")
         self.assertIn("시크릿 보스를 만들었어요", text)
-        self.assertIn("호박 대검 12.5%", text)
-        self.assertIn("영혼 에센스 ×2 40%", text)
+        self.assertIn("고주파 대검 12.5%", text)
+        self.assertIn("나노봇 주입제 ×2 40%", text)
         boss = self.boss("심연의 왕")
         self.assertEqual((boss.hp, boss.damage, boss.drop_gear, boss.drop_gear_chance, boss.drop_item, boss.drop_item_amount, boss.weight, boss.intro, boss.image),
                          (3000, 250, "pumpkin_blade", 12.5, "soul_essence", 2, 0.5, "어둠이 숨을 쉰다", "https://x.test/a.gif"))
@@ -432,52 +432,52 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("하나는", await self.run_cmd(ContentAdmin.secret_add, "무드롭", "🌌", 10, 1))
         self.assertIn("드롭 장비가 없어요", await self.run_cmd(ContentAdmin.secret_add, "가짜", "🌌", 10, 1, drop_gear="없는장비"))
         self.assertIn("드롭 아이템이 없어요", await self.run_cmd(ContentAdmin.secret_add, "가짜", "🌌", 10, 1, drop_item="없는약"))
-        self.assertIn("그림은", await self.run_cmd(ContentAdmin.secret_add, "그림이상", "🌌", 10, 1, drop_item="사탕", image="notaurl"))
-        self.assertIn("이모지", await self.run_cmd(ContentAdmin.secret_add, "이모지이상", "ㅁ", 10, 1, drop_item="사탕"))
-        self.assertEqual([s.name for s in self.store.balance(G).secrets], ["공허의 군주"])
+        self.assertIn("그림은", await self.run_cmd(ContentAdmin.secret_add, "그림이상", "🌌", 10, 1, drop_item="소형 배터리", image="notaurl"))
+        self.assertIn("이모지", await self.run_cmd(ContentAdmin.secret_add, "이모지이상", "ㅁ", 10, 1, drop_item="소형 배터리"))
+        self.assertEqual([s.name for s in self.store.balance(G).secrets], ["NULL 군주"])
 
     async def test_names_cannot_collide_with_monsters_and_bosses(self):
-        self.assertIn("같은 이름", await self.run_cmd(ContentAdmin.secret_add, "해골 왕", "🌌", 10, 1, drop_item="사탕"))
-        await self.run_cmd(ContentAdmin.secret_add, "심연의 왕", "🌌", 10, 1, drop_item="사탕")
+        self.assertIn("같은 이름", await self.run_cmd(ContentAdmin.secret_add, "메인프레임 군주", "🌌", 10, 1, drop_item="소형 배터리"))
+        await self.run_cmd(ContentAdmin.secret_add, "심연의 왕", "🌌", 10, 1, drop_item="소형 배터리")
         self.assertIn("같은 이름", await self.run_cmd(ContentAdmin.monster_add, "심연의 왕", "🐉", 10, 1))
 
     async def test_edit_values_and_clear_with_a_dash(self):
-        await self.run_cmd(ContentAdmin.secret_edit, "공허의 군주", hp=5000, damage=300, gear_chance=7.5, item_chance=0.5, amount=4, weight=2)
-        boss = self.boss("공허의 군주")
+        await self.run_cmd(ContentAdmin.secret_edit, "NULL 군주", hp=5000, damage=300, gear_chance=7.5, item_chance=0.5, amount=4, weight=2)
+        boss = self.boss("NULL 군주")
         self.assertEqual((boss.hp, boss.damage, boss.drop_gear_chance, boss.drop_item_chance, boss.drop_item_amount, boss.weight), (5000, 300, 7.5, 0.5, 4, 2))
-        await self.run_cmd(ContentAdmin.secret_edit, "공허의 군주", intro="새 문구", image="https://x.test/b.gif")
-        self.assertEqual((self.boss("공허의 군주").intro, self.boss("공허의 군주").image), ("새 문구", "https://x.test/b.gif"))
-        await self.run_cmd(ContentAdmin.secret_edit, "공허의 군주", intro="-", image="-", drop_item="-")          # 지우기
-        boss = self.boss("공허의 군주")
+        await self.run_cmd(ContentAdmin.secret_edit, "NULL 군주", intro="새 문구", image="https://x.test/b.gif")
+        self.assertEqual((self.boss("NULL 군주").intro, self.boss("NULL 군주").image), ("새 문구", "https://x.test/b.gif"))
+        await self.run_cmd(ContentAdmin.secret_edit, "NULL 군주", intro="-", image="-", drop_item="-")          # 지우기
+        boss = self.boss("NULL 군주")
         self.assertEqual((boss.intro, boss.image, boss.drop_item, boss.drop_gear), ("", "", None, "gun"))
-        text = await self.run_cmd(ContentAdmin.secret_edit, "공허의 군주", drop_gear="-")                         # 마지막 드롭은 못 지운다
+        text = await self.run_cmd(ContentAdmin.secret_edit, "NULL 군주", drop_gear="-")                         # 마지막 드롭은 못 지운다
         self.assertIn("하나는", text)
-        self.assertEqual(self.boss("공허의 군주").drop_gear, "gun")
-        await self.run_cmd(ContentAdmin.secret_edit, "공허의 군주", drop_item="사탕")                              # 바꿔 넣기
-        self.assertEqual(self.boss("공허의 군주").drop_item, "candy")
-        self.assertIn("바꿀 내용", await self.run_cmd(ContentAdmin.secret_edit, "공허의 군주"))
+        self.assertEqual(self.boss("NULL 군주").drop_gear, "gun")
+        await self.run_cmd(ContentAdmin.secret_edit, "NULL 군주", drop_item="소형 배터리")                              # 바꿔 넣기
+        self.assertEqual(self.boss("NULL 군주").drop_item, "candy")
+        self.assertIn("바꿀 내용", await self.run_cmd(ContentAdmin.secret_edit, "NULL 군주"))
         self.assertIn("그런 항목이 없어요", await self.run_cmd(ContentAdmin.secret_edit, "없는왕", hp=5))
 
     async def test_delete_all_of_them_and_no_room_ever_opens(self):
-        text = await self.run_cmd(ContentAdmin.secret_delete, "공허의 군주")
+        text = await self.run_cmd(ContentAdmin.secret_delete, "NULL 군주")
         self.assertIn("지웠어요", text)
         self.assertEqual(self.store.balance(G).secrets, ())
         run = boss_cleared(self.store.balance(G))
         dungeon.advance(run, Scripted(), self.store.balance(G))                        # 난수를 뽑지 않고 그냥 올라간다
         self.assertEqual((run.floor, run.room), (2, 1))
-        self.assertIn("그런 항목이 없어요", await self.run_cmd(ContentAdmin.secret_delete, "공허의 군주"))
+        self.assertIn("그런 항목이 없어요", await self.run_cmd(ContentAdmin.secret_delete, "NULL 군주"))
 
     async def test_a_gear_or_item_that_is_a_bosss_last_drop_cannot_be_deleted(self):
-        await self.run_cmd(ContentAdmin.secret_edit, "공허의 군주", drop_item="-")
-        self.assertIn("마지막 드롭", await self.run_cmd(ContentAdmin.gear_delete, "총"))
-        await self.run_cmd(ContentAdmin.secret_edit, "공허의 군주", drop_item="사탕")                              # 아이템 드롭이 있으니 장비는 지워도 된다
-        self.assertIn("지웠어요", await self.run_cmd(ContentAdmin.gear_delete, "총"))
-        text = await self.run_cmd(ContentAdmin.potion_delete, "사탕")
+        await self.run_cmd(ContentAdmin.secret_edit, "NULL 군주", drop_item="-")
+        self.assertIn("마지막 드롭", await self.run_cmd(ContentAdmin.gear_delete, "레일건"))
+        await self.run_cmd(ContentAdmin.secret_edit, "NULL 군주", drop_item="소형 배터리")                              # 아이템 드롭이 있으니 장비는 지워도 된다
+        self.assertIn("지웠어요", await self.run_cmd(ContentAdmin.gear_delete, "레일건"))
+        text = await self.run_cmd(ContentAdmin.potion_delete, "소형 배터리")
         self.assertIn("마지막 드롭", text)
-        self.assertTrue(any(c.name == "사탕" for c in self.store.balance(G).consumables))
+        self.assertTrue(any(c.name == "소형 배터리" for c in self.store.balance(G).consumables))
 
     async def test_a_deleted_drop_is_skipped_in_the_fight_but_something_still_drops(self):
-        await self.run_cmd(ContentAdmin.gear_delete, "총")
+        await self.run_cmd(ContentAdmin.gear_delete, "레일건")
         bal = self.store.balance(G)
         run = boss_cleared(bal)
         dungeon.advance(run, Scripted(randoms=[0.0, 0.0]), bal)
@@ -491,7 +491,7 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         embed, _ = sent_embed(i)
         fields = {f.name: f.value for f in embed.fields}
         self.assertIn("시크릿 보스 1개", fields)
-        self.assertIn("공허의 군주", fields["시크릿 보스 1개"])
+        self.assertIn("NULL 군주", fields["시크릿 보스 1개"])
         self.assertIn("드롭(하나는 반드시)", fields["시크릿 보스 1개"])
 
     async def test_the_default_chance_is_ten_percent_and_the_command_shows_it(self):
@@ -541,23 +541,23 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((option.type.name, option.min_value, option.max_value, option.required), ("number", 0, 100, False))
 
     async def test_admin_only_and_autocomplete(self):
-        for command, args in ((ContentAdmin.secret_add, ("왕", "🌌", 10, 1)), (ContentAdmin.secret_edit, ("공허의 군주",)), (ContentAdmin.secret_delete, ("공허의 군주",))):
+        for command, args in ((ContentAdmin.secret_add, ("왕", "🌌", 10, 1)), (ContentAdmin.secret_edit, ("NULL 군주",)), (ContentAdmin.secret_delete, ("NULL 군주",))):
             self.assertIn("관리자만", await self.run_cmd(command, *args, admin=False))
-        self.assertEqual([s.name for s in self.store.balance(G).secrets], ["공허의 군주"])
+        self.assertEqual([s.name for s in self.store.balance(G).secrets], ["NULL 군주"])
         i = self.w.interaction(admin=True)
-        self.assertEqual([c.value for c in await self.cog.secret_names(i, "")], ["공허의 군주"])
-        self.assertIn("총", [c.value for c in await self.cog.secret_gear_names(i, "")])
-        self.assertIn("사탕", [c.value for c in await self.cog.secret_item_names(i, "")])
+        self.assertEqual([c.value for c in await self.cog.secret_names(i, "")], ["NULL 군주"])
+        self.assertIn("레일건", [c.value for c in await self.cog.secret_gear_names(i, "")])
+        self.assertIn("소형 배터리", [c.value for c in await self.cog.secret_item_names(i, "")])
 
     def test_options_are_declared(self):
         kinds = {p.name: p.type.name for p in ContentAdmin.secret_add.parameters}
         self.assertEqual((kinds["hp"], kinds["gear_chance"], kinds["item_chance"], kinds["amount"], kinds["image"]), ("integer", "number", "number", "integer", "string"))
 
     async def test_the_reset_command_brings_the_default_back(self):
-        await self.run_cmd(ContentAdmin.secret_delete, "공허의 군주")
+        await self.run_cmd(ContentAdmin.secret_delete, "NULL 군주")
         self.assertEqual(self.store.balance(G).secrets, ())
         i = self.w.interaction(admin=True)
         await ContentAdmin.content_reset.callback(self.cog, i, Choice("secrets"))
         view = i.response.send_message.await_args.kwargs["view"]
         await view.confirm(self.w.interaction(admin=True))
-        self.assertEqual([s.name for s in self.store.balance(G).secrets], ["공허의 군주"])
+        self.assertEqual([s.name for s in self.store.balance(G).secrets], ["NULL 군주"])

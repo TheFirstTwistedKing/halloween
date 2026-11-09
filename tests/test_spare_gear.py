@@ -40,7 +40,7 @@ class RuleTests(unittest.TestCase):
         dungeon.swap_spare(run, "weapon")
         self.assertEqual((run.weapon, run.spare_weapon), ("longsword", "club"))
         self.assertIn("🔄 무기를 교체했어요", run.events[0])
-        self.assertIn("낡은 몽둥이", run.events[1])
+        self.assertIn("낡은 스패너", run.events[1])
         dungeon.swap_spare(run, "weapon")                                      # 다시 바꾸면 원래대로
         self.assertEqual((run.weapon, run.spare_weapon), ("club", "longsword"))
 
@@ -266,15 +266,15 @@ class ScreenTests(unittest.IsolatedAsyncioTestCase):
         names = lambda run: [f.name for f in run_embed(run, None, bal).fields]
         self.assertNotIn("📦 예비", names(run_with(weapon="club")))
         embed = run_embed(run_with(weapon="club", spare_weapon="dagger"), None, bal)
-        self.assertEqual({f.name: f.value for f in embed.fields}["📦 예비"], "🗡️ 단검 · 🛡️ — · 🧥 —")
+        self.assertEqual({f.name: f.value for f in embed.fields}["📦 예비"], "🔪 레이저 커터 · 🛡️ — · 🧥 —")
 
     async def test_the_equipment_screen_lists_equipped_and_spare_gear(self):
         run = run_with(weapon="club", spare_weapon="longsword", shield="wooden_shield")
         embed = equip_embed(run, self.store.balance(G))
         fields = {f.name: f.value for f in embed.fields}
-        self.assertIn("**장착**: 🏏 **낡은 몽둥이**", fields["⚔️ 무기"])
-        self.assertIn("**예비**: ⚔️ **롱소드**", fields["⚔️ 무기"])
-        self.assertIn("**장착**: 🪵 **나무 방패**", fields["🛡️ 방패"])
+        self.assertIn("**장착**: 🔧 **낡은 스패너**", fields["⚔️ 무기"])
+        self.assertIn("**예비**: ⚡ **플라즈마 블레이드**", fields["⚔️ 무기"])
+        self.assertIn("**장착**: 🟫 **구리 방열판**", fields["🛡️ 방패"])
         self.assertIn("**예비**: 비어 있어요", fields["🛡️ 방패"])
         self.assertIn("무기·방패·갑옷을 1개씩", embed.description)
         bare = {f.name: f.value for f in equip_embed(run_with(), self.store.balance(G)).fields}
@@ -300,7 +300,7 @@ class ScreenTests(unittest.IsolatedAsyncioTestCase):
         await self.button(view, "무기 교체").callback(press)
         embed, view = self.edited(press)
         self.assertIn("🔄 무기를 교체했어요", embed.description)
-        self.assertIn("**장착**: ⚔️ **롱소드**", {f.name: f.value for f in embed.fields}["⚔️ 무기"])
+        self.assertIn("**장착**: ⚡ **플라즈마 블레이드**", {f.name: f.value for f in embed.fields}["⚔️ 무기"])
         saved = json.loads(self.store.dungeon_run(G, U))
         self.assertEqual((saved["weapon"], saved["spare_weapon"]), ("longsword", "club"))
         press = self.w.interaction()

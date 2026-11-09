@@ -6,7 +6,7 @@ import discord
 
 import main
 from cogs.admin import NO_MEMBERS_INTENT, Admin, ConfirmRoleGrant, role_member_ids
-from main import HalloweenBot, env_flag
+from main import EventBot, env_flag
 from store import CANDY_MAX, Store
 from tests.helpers import FakeRole, World, sent_embed
 
@@ -54,7 +54,7 @@ class BotOptionTests(unittest.TestCase):
     def test_members_intent_is_off_unless_asked_and_never_preloads_everyone(self):
         for flag in (False, True):
             store = Store(":memory:")
-            bot = HalloweenBot(store, members_intent=flag)
+            bot = EventBot(store, members_intent=flag)
             self.assertEqual(bot.intents.members, flag)
             self.assertFalse(bot._connection._chunk_guilds)
             store.close()
@@ -75,7 +75,7 @@ class RoleGrantFixture(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.w = World()
         self.store = self.w.store
-        self.bot = HalloweenBot(self.store, members_intent=True)        # 같은 저장소를 쓰는, 멤버 인텐트가 켜진 봇
+        self.bot = EventBot(self.store, members_intent=True)        # 같은 저장소를 쓰는, 멤버 인텐트가 켜진 봇
         self.cog = Admin(self.bot)
         self.role = self.w.add_role(60, name="손님")
         self.other = self.w.add_role(61, name="다른 역할")
@@ -118,7 +118,7 @@ class CommandTests(RoleGrantFixture):
         i.response.defer.assert_awaited_once()
         embed, kwargs = self.preview(i)
         self.assertIn("**2명**", embed.description)                     # 봇과 다른 역할 사람은 빠진다
-        self.assertIn("🍬 60", embed.description)                        # 총 60
+        self.assertIn("💾 60", embed.description)                        # 총 60
         self.assertIsInstance(kwargs["view"], ConfirmRoleGrant)
         self.assertFalse(kwargs["ephemeral"])
         self.assertEqual(self.candy(self.guest1, self.guest2, self.plain, self.robot), [0, 0, 0, 0])

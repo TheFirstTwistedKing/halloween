@@ -73,7 +73,7 @@ def settings_embed(cfg) -> discord.Embed:
     cur_emoji, cur_name = cfg["currency_emoji"], cfg["currency_name"]
     channels = ", ".join(f"<#{c}>" for c in cfg["channels"]) or "아직 없어요 — `/이벤트채널추가`로 정해 주세요."
     cooldown = lambda sec: f"{sec}초" if sec else "없음"
-    embed = theme.make_embed("🎃 이벤트 설정", color=theme.PURPLE)
+    embed = theme.make_embed("⚙️ 이벤트 설정", color=theme.PURPLE)
     embed.add_field(name="📍 이벤트 채널", value=channels, inline=False)
     embed.add_field(name=f"{cur_emoji} {cur_name}", inline=False,
                     value=f"채팅 한 번에 **{cfg['candy_chance']:g}%** 확률로 **{cfg['candy_min']}~{cfg['candy_max']}**개\n"

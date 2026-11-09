@@ -85,7 +85,7 @@ class TrapRuleTests(unittest.TestCase):
         run = climbing(bal, hp=50)
         events = dungeon.advance(run, Scripted(), bal)
         self.assertEqual((run.phase, run.hp), ("dead", 0))
-        self.assertTrue(any("쓰러졌어요" in e for e in events))
+        self.assertTrue(any("다운됐어요" in e for e in events))
 
     def test_zero_damage_is_harmless(self):
         bal = Balance.build({"방2.함정": 1000, "방2.빈방": 0, "방2.잡몹": 0, "함정.피해": 0})
@@ -185,12 +185,12 @@ class EffectTests(unittest.TestCase):
         self.assertEqual(run.hp, MAX - 176)
         dead, events = self.enter(bal, hp=100)
         self.assertEqual((dead.phase, dead.hp), ("dead", 0))
-        self.assertTrue(any("쓰러졌어요" in e for e in events))
+        self.assertTrue(any("다운됐어요" in e for e in events))
 
     def test_damage_comes_before_healing(self):
         bal = bal_with(room(heal=500, damage=300, rooms=[2], weight=1000))
         run, _ = self.enter(bal, hp=200)
-        self.assertEqual(run.phase, "dead")                                                          # 피해로 먼저 쓰러지면 회복은 없다
+        self.assertEqual(run.phase, "dead")                                                          # 피해로 먼저 다운되면 회복은 없다
         run, _ = self.enter(bal, hp=600)
         self.assertEqual(run.hp, 800)
 
@@ -199,7 +199,7 @@ class EffectTests(unittest.TestCase):
         run, events = self.enter(bal)
         self.assertEqual((run.room_candy, run.items), (40, {"candy": 3}))
         self.assertIn("item_gain:candy", run.last)
-        self.assertTrue(any("사탕" in e and "×3" in e for e in events))
+        self.assertTrue(any("소형 배터리" in e and "×3" in e for e in events))
 
     def test_a_deleted_item_or_room_is_skipped_without_breaking(self):
         bal = bal_with(room(heal=50, item="gone", rooms=[2], weight=1000))
@@ -283,7 +283,7 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         return {r.name: r for r in self.store.balance(G).rooms}
 
     async def test_add_edit_and_delete_a_room(self):
-        text = await self.run_cmd(ContentAdmin.room_add, "샘물", "⛲", "맑은 샘!", 12, heal=200, candy=5, item="사탕", amount=2, places="2,4", floors="3-5")
+        text = await self.run_cmd(ContentAdmin.room_add, "샘물", "⛲", "맑은 샘!", 12, heal=200, candy=5, item="소형 배터리", amount=2, places="2,4", floors="3-5")
         self.assertIn("샘물", text)
         r = self.rooms()["샘물"]
         self.assertEqual((r.heal, r.candy, r.item_amount, r.rooms, r.floors, r.weight), (200, 5, 2, (2, 4), (3, 4, 5), 12))

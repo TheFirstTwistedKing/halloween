@@ -43,10 +43,10 @@ class CreateItemTests(unittest.IsolatedAsyncioTestCase):
         i = await self.create("마나 가루")
         item = self.row("마나 가루")
         self.assertEqual((item["emoji"], item["description"], item["buyable"], item["sellable"], item["buy_price"], item["sell_price"], item["kind"]),
-                         ("🎃", "", 0, 0, 0, 0, "item"))
+                         ("⚙️", "", 0, 0, 0, 0, "item"))
         self.assertNotIn("마나 가루", [r["name"] for r in self.store.items(G, shop_only=True)])
         self.assertEqual(self.store.holdings(G, item["id"]), 0)
-        self.assertIn("🎃 **마나 가루**을(를) 만들었어요", self.text(i))
+        self.assertIn("⚙️ **마나 가루**을(를) 만들었어요", self.text(i))
         self.assertIn("상점에는 올라가지 않았어요", self.text(i))
         self.assertFalse(i.response.send_message.await_args.kwargs["ephemeral"])
 
@@ -61,7 +61,7 @@ class CreateItemTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn(command, text)
 
     async def test_bad_input_is_explained_and_nothing_is_made(self):
-        for args, needle in ((("가" * 31,), "30자"), (("마나 가루", "abc"), "이모지"), (("마나 가루", "🎃", "설" * 201), "200자"),
+        for args, needle in ((("가" * 31,), "30자"), (("마나 가루", "abc"), "이모지"), (("마나 가루", "⚙️", "설" * 201), "200자"),
                              (("   ",), "이름")):
             i = await self.create(*args)
             self.assertIn(needle, self.text(i), args)
@@ -70,7 +70,7 @@ class CreateItemTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_the_default_items_names_are_taken_even_on_a_brand_new_server(self):
         """기본 물품(열쇠·쓰레기·패키지 물품)은 아직 만들어지기 전인 새 서버에서도 이름이 이미 쓰인 것으로 본다."""
-        for name in ("열쇠", "쓰레기", "마녀 모자"):
+        for name in ("열쇠", "쓰레기", "구형 CPU"):
             self.assertIn("같은 이름", self.text(await self.create(name)), name)
         self.assertEqual([r["name"] for r in self.store.items(G) if r["system"] is None], [])
 
@@ -89,7 +89,7 @@ class CreateItemTests(unittest.IsolatedAsyncioTestCase):
         with self.store.db:
             listed = len(self.store.items(G, shop_only=True))
             for n in range(MAX_SHOP_ITEMS - listed):
-                self.store.db.execute("INSERT INTO items(guild,name,emoji,kind,buyable,buy_price) VALUES(?,?,?,?,?,?)", (G, f"자리{n}", "🎃", "item", 1, 1))
+                self.store.db.execute("INSERT INTO items(guild,name,emoji,kind,buyable,buy_price) VALUES(?,?,?,?,?,?)", (G, f"자리{n}", "⚙️", "item", 1, 1))
         self.assertEqual(len(self.store.items(G, shop_only=True)), MAX_SHOP_ITEMS)
         i = await self.create("마나 가루")
         self.assertIn("만들었어요", self.text(i))

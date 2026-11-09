@@ -149,47 +149,47 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         embed, _ = sent_embed(i)
         return (embed.description or "") + "".join(f.value for f in embed.fields)
 
-    def floors(self, name="공허의 군주"):
+    def floors(self, name="NULL 군주"):
         return next(s.floors for s in self.store.balance(G).secrets if s.name == name)
 
     async def test_set_several_floors_in_one_command(self):
-        text = await self.run_cmd(ContentAdmin.secret_floors, "공허의 군주", "3,5,8-10")
+        text = await self.run_cmd(ContentAdmin.secret_floors, "NULL 군주", "3,5,8-10")
         self.assertIn("3층, 5층, 8~10층", text)
         self.assertEqual(self.floors(), (3, 5, 8, 9, 10))
         self.assertIn("그 층의 보스를 이기고", text)
 
     async def test_viewing_without_a_value_changes_nothing(self):
-        text = await self.run_cmd(ContentAdmin.secret_floors, "공허의 군주")
+        text = await self.run_cmd(ContentAdmin.secret_floors, "NULL 군주")
         self.assertIn("모든 층", text)
-        await self.run_cmd(ContentAdmin.secret_floors, "공허의 군주", "2,4")
-        self.assertIn("2층, 4층", await self.run_cmd(ContentAdmin.secret_floors, "공허의 군주"))
+        await self.run_cmd(ContentAdmin.secret_floors, "NULL 군주", "2,4")
+        self.assertIn("2층, 4층", await self.run_cmd(ContentAdmin.secret_floors, "NULL 군주"))
         self.assertEqual(self.floors(), (2, 4))
 
     async def test_all_floors_clears_the_limit(self):
-        await self.run_cmd(ContentAdmin.secret_floors, "공허의 군주", "7")
-        text = await self.run_cmd(ContentAdmin.secret_floors, "공허의 군주", "전체")
+        await self.run_cmd(ContentAdmin.secret_floors, "NULL 군주", "7")
+        text = await self.run_cmd(ContentAdmin.secret_floors, "NULL 군주", "전체")
         self.assertIn("모든 층", text)
         self.assertEqual(self.floors(), ())
 
     async def test_bad_input_and_unknown_boss_are_explained(self):
-        self.assertIn("층 번호가 아니에요", await self.run_cmd(ContentAdmin.secret_floors, "공허의 군주", "abc"))
-        self.assertIn("작은 수부터", await self.run_cmd(ContentAdmin.secret_floors, "공허의 군주", "9-3"))
+        self.assertIn("층 번호가 아니에요", await self.run_cmd(ContentAdmin.secret_floors, "NULL 군주", "abc"))
+        self.assertIn("작은 수부터", await self.run_cmd(ContentAdmin.secret_floors, "NULL 군주", "9-3"))
         self.assertIn("그런 시크릿 보스가 없어요", await self.run_cmd(ContentAdmin.secret_floors, "없는왕", "3"))
         self.assertEqual(self.floors(), ())
 
     async def test_warnings_for_floors_that_cannot_be_reached(self):
-        text = await self.run_cmd(ContentAdmin.secret_floors, "공허의 군주", "12")
+        text = await self.run_cmd(ContentAdmin.secret_floors, "NULL 군주", "12")
         self.assertIn("무한모드를 골라야", text)                                         # 11층부터는 무한모드로만
         self.store.update_settings(G, dungeon={"일반.무한모드": 0})
-        text = await self.run_cmd(ContentAdmin.secret_floors, "공허의 군주", "12")
+        text = await self.run_cmd(ContentAdmin.secret_floors, "NULL 군주", "12")
         self.assertIn("나올 수 없어요", text)
         self.store.update_settings(G, dungeon={"일반.시크릿확률": 0})
-        self.assertIn("0%라 어디서도", await self.run_cmd(ContentAdmin.secret_floors, "공허의 군주", "3"))
+        self.assertIn("0%라 어디서도", await self.run_cmd(ContentAdmin.secret_floors, "NULL 군주", "3"))
 
     async def test_each_boss_has_its_own_floors_and_the_list_shows_them(self):
-        await self.run_cmd(ContentAdmin.secret_add, "심연의 왕", "🌌", 3000, 250, drop_item="사탕")
+        await self.run_cmd(ContentAdmin.secret_add, "심연의 왕", "🌌", 3000, 250, drop_item="소형 배터리")
         await self.run_cmd(ContentAdmin.secret_floors, "심연의 왕", "10")
-        await self.run_cmd(ContentAdmin.secret_floors, "공허의 군주", "1-5")
+        await self.run_cmd(ContentAdmin.secret_floors, "NULL 군주", "1-5")
         self.assertEqual((self.floors("심연의 왕"), self.floors()), ((10,), (1, 2, 3, 4, 5)))
         i = self.w.interaction(admin=True)
         await ContentAdmin.dungeon_list.callback(self.cog, i, type("C", (), {"value": "secrets"})())
@@ -199,17 +199,17 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("나오는 층 1~5층", text)
 
     async def test_admin_only_and_autocomplete(self):
-        self.assertIn("관리자만", await self.run_cmd(ContentAdmin.secret_floors, "공허의 군주", "3", admin=False))
+        self.assertIn("관리자만", await self.run_cmd(ContentAdmin.secret_floors, "NULL 군주", "3", admin=False))
         self.assertEqual(self.floors(), ())
         i = self.w.interaction(admin=True)
-        self.assertEqual([c.value for c in await self.cog.secret_names(i, "")], ["공허의 군주"])
+        self.assertEqual([c.value for c in await self.cog.secret_names(i, "")], ["NULL 군주"])
 
     def test_the_options_are_declared_as_text_so_many_floors_fit(self):
         kinds = {p.name: (p.type.name, p.required) for p in ContentAdmin.secret_floors.parameters}
         self.assertEqual(kinds, {"target": ("string", True), "floors": ("string", False)})
 
     async def test_a_floor_limit_survives_resetting_other_sections_but_not_its_own(self):
-        await self.run_cmd(ContentAdmin.secret_floors, "공허의 군주", "4")
+        await self.run_cmd(ContentAdmin.secret_floors, "NULL 군주", "4")
         content.reset(self.store, G, ("gear",))
         self.assertEqual(self.floors(), (4,))
         content.reset(self.store, G, ("secrets",))

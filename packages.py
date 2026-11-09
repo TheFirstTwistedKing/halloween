@@ -118,7 +118,7 @@ def summary_embed(row, openers, store=None) -> discord.Embed:
                 counts[result] = counts.get(result, 0) + 1
         detail = " · ".join(f"{label(k)} ×{v}" for k, v in counts.items())
         return theme.make_embed(f"📦 {kind}가 사라졌어요", f"{len(openers)}명이 뜯었어요.\n{detail}", color=color)
-    return theme.make_embed(f"📦 {kind}가 사라졌어요", "아무도 뜯지 않았어요… 🕸️", color=color)
+    return theme.make_embed(f"📦 {kind}가 사라졌어요", "아무도 뜯지 않았어요… 📭", color=color)
 
 
 async def summarize(client, row):

@@ -110,7 +110,7 @@ class SpawnTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_35_percent_of_packages_appear_as_a_pile_with_its_own_look(self):
         sent = await self.spawn(0.3499)
-        self.assertEqual(sent["embed"].title, "📦📦📦 패키지 더미가 나타났어요!")
+        self.assertEqual(sent["embed"].title, "📦📦📦 패키지 더미가 수신됐어요!")
         self.assertIn("3개", sent["embed"].description)
         self.assertEqual(sent["embed"].color.value, theme.GOLD)
         self.assertIsInstance(sent["view"], PackageView)
@@ -118,7 +118,7 @@ class SpawnTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_the_rest_appear_as_ordinary_packages(self):
         sent = await self.spawn(0.35)
-        self.assertEqual(sent["embed"].title, "📦 패키지가 나타났어요!")
+        self.assertEqual(sent["embed"].title, "📦 패키지가 수신됐어요!")
         self.assertEqual(self.store.package(9001)["pile"], 0)
 
     async def test_the_settings_change_the_chance_and_the_size(self):
@@ -128,7 +128,7 @@ class SpawnTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.store.package(9001)["pile"], 5)
         self.store.update_settings(G, package_pile_chance=0)
         sent = await self.spawn(0.0)                                                # 확률 0이면 주사위가 0이어도 일반이다.
-        self.assertEqual(sent["embed"].title, "📦 패키지가 나타났어요!")
+        self.assertEqual(sent["embed"].title, "📦 패키지가 수신됐어요!")
 
 
 class OpenTests(unittest.IsolatedAsyncioTestCase):
@@ -137,7 +137,7 @@ class OpenTests(unittest.IsolatedAsyncioTestCase):
         self.w.channel(400)
         self.w.bot.get_channel = lambda cid: self.w.channels.get(cid)
         self.store = self.w.store
-        pin_first_table(self.store)                    # 꽝 60 · 열쇠 20 · 재화(🍬50) 10 · 쓰레기 10 (누적 경계 0.6 / 0.8 / 0.9)
+        pin_first_table(self.store)                    # 꽝 60 · 열쇠 20 · 재화(💾50) 10 · 쓰레기 10 (누적 경계 0.6 / 0.8 / 0.9)
         self.ids = self.store.ensure_system_items(G)
         self.clock = mock.patch.object(packages.time, "time", return_value=NOW)
         self.clock.start()
@@ -162,7 +162,7 @@ class OpenTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(kwargs["ephemeral"])
         embed = kwargs["embed"]
         self.assertEqual(embed.title, "📦📦📦 패키지 더미! (3개)")
-        for needle in ("`1` 🗝️ 열쇠", "`2` 🍬 할로윈 재화 50", "`3` 🗑️ 쓰레기", "재화 합계 **+50**"):
+        for needle in ("`1` 🗝️ 열쇠", "`2` 💾 RAM 50", "`3` 🗑️ 쓰레기", "재화 합계 **+50**"):
             self.assertIn(needle, embed.description)
         self.assertEqual((self.store.qty(G, U, self.ids["key"]), self.store.qty(G, U, self.ids["trash"]), self.store.wallet(G, U)), (1, 1, 50))
         self.assertEqual(self.w.bot.rng.randoms, [])                         # 정확히 3번만 굴렸다.

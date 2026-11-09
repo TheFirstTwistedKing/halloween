@@ -37,9 +37,9 @@ class ItemTradeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_buy_and_sell_messages(self):
         result = await services.buy(self.w.store, self.w.locks, self.w.member, self.item, 2)
-        self.assertEqual((result.ok, result.text), (True, "🍬 60을 내고 🕯️ **초** ×2을(를) 샀어요."))
+        self.assertEqual((result.ok, result.text), (True, "💾 60을 내고 🕯️ **초** ×2을(를) 샀어요."))
         result = await services.sell(self.w.store, self.w.locks, self.w.member, self.item, 1)
-        self.assertEqual((result.ok, result.text), (True, "🕯️ **초** ×1을(를) 팔고 🍬 10을 받았어요."))
+        self.assertEqual((result.ok, result.text), (True, "🕯️ **초** ×1을(를) 팔고 💾 10을 받았어요."))
         self.assertEqual((self.w.store.wallet(100, 7), self.w.store.qty(100, 7, self.item["id"])), (50, 1))
 
     async def test_failures_are_reported_not_raised(self):
@@ -54,7 +54,7 @@ class ItemTradeTests(unittest.IsolatedAsyncioTestCase):
         stale = self.item                                            # 상세 화면을 열어 둔 사이에
         self.w.store.update_item(100, self.item["id"], buy_price=50)   # 가격이 바뀌었다.
         result = await services.buy(self.w.store, self.w.locks, self.w.member, stale, 1)
-        self.assertIn("🍬 50", result.text)
+        self.assertIn("💾 50", result.text)
         self.w.store.delete_item(100, self.item["id"])
         for call in (services.buy, services.sell):
             result = await call(self.w.store, self.w.locks, self.w.member, stale, 1)
@@ -77,7 +77,7 @@ class RoleTradeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_buying_a_role_gives_it_and_takes_candy(self):
         result = await self.buy()
-        self.assertEqual((result.ok, result.text), (True, "🍬 100을 내고 👑 <@&50> 역할을 받았어요!"))
+        self.assertEqual((result.ok, result.text), (True, "💾 100을 내고 👑 <@&50> 역할을 받았어요!"))
         self.assertEqual([r.id for r in self.w.member.roles], [50])
         self.assertEqual(self.w.store.wallet(100, 7), 50)
 
@@ -175,9 +175,9 @@ class CurrencyInServicesTests(unittest.IsolatedAsyncioTestCase):
         item = w.store.create_item(100, "초", buyable=True, buy_price=30, sellable=True, sell_price=10)
         w.store.add_candy(100, 7, 100)
         result = await services.buy(w.store, w.locks, w.member, item, 2)
-        self.assertEqual((result.ok, result.text), (True, "💎 60을 내고 🎃 **초** ×2을(를) 샀어요."))
+        self.assertEqual((result.ok, result.text), (True, "💎 60을 내고 ⚙️ **초** ×2을(를) 샀어요."))
         result = await services.sell(w.store, w.locks, w.member, item, 1)
-        self.assertEqual((result.ok, result.text), (True, "🎃 **초** ×1을(를) 팔고 💎 10을 받았어요."))
+        self.assertEqual((result.ok, result.text), (True, "⚙️ **초** ×1을(를) 팔고 💎 10을 받았어요."))
         w.store.add_candy(100, 7, 5000)
         result = await services.sell(w.store, w.locks, w.member, item, 1)
         self.assertEqual((result.ok, "젬이 최대(1,000개)" in result.text), (False, True))

@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import discord
 
-from main import HalloweenBot
+from main import EventBot
 from services import Locks
 from store import Store
 
@@ -51,7 +51,7 @@ class World:
 
     def __init__(self, rng=None, guild_ids=None):
         self.store = Store(":memory:")
-        self.bot = HalloweenBot(self.store, guild_ids, rng or Scripted())
+        self.bot = EventBot(self.store, guild_ids, rng or Scripted())
         self.locks = self.bot.locks
         self.top = FakeRole(1, position=10)
         self.roles = {}

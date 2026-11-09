@@ -17,8 +17,8 @@ from store import (MAX_CLEAR_REWARDS, MAX_PACKAGE_ENTRIES, NEW_ITEMS, PACKAGE_CA
                    valid_emoji)
 
 Choice = app_commands.Choice
-KINDS = [Choice(name="꽝 (아무것도 없음)", value="none"), Choice(name="재화", value="candy"), Choice(name="물품", value="item")]
-KIND_LABEL = {"none": "꽝", "candy": "재화", "item": "물품"}
+KINDS = [Choice(name="빈 패킷 (아무것도 없음)", value="none"), Choice(name="재화", value="candy"), Choice(name="물품", value="item")]
+KIND_LABEL = {"none": "없음", "candy": "재화", "item": "물품"}
 
 
 class RuleError(Exception):
@@ -166,7 +166,7 @@ class RulesAdmin(commands.Cog):
             return
         store, gid = self.bot.store, interaction.guild_id
         store.ensure_defaults(gid)
-        names = {"none": "꽝", "key": "열쇠", "candy": f"{store.currency(gid).name} {PACKAGE_CANDY}", "trash": "쓰레기",
+        names = {"none": "빈 패킷", "key": "열쇠", "candy": f"{store.currency(gid).name} {PACKAGE_CANDY}", "trash": "쓰레기",
                  **{item[0]: item[1] for item in NEW_ITEMS}, "revive": REVIVE_ITEM[0]}
         preview = default_package_table({"key": 0, "trash": 0}, {item[0]: 0 for item in NEW_ITEMS}, revive_id=-1)
         lines = " · ".join(f"{names[e['id']]} {e['weight']:g}%" for e in preview)
@@ -181,7 +181,7 @@ class RulesAdmin(commands.Cog):
 
     @package.command(name="추가", description="패키지 결과를 하나 더해요 (관리자)")
     @app_commands.rename(kind="종류", weight="확률", item="물품", amount="개수", emoji="이모지", title="이름")
-    @app_commands.describe(kind="꽝 / 재화 / 물품", weight="나올 비율 (다른 결과와의 비율로 계산해요. 예: 60, 20, 10)",
+    @app_commands.describe(kind="빈 패킷 / 재화 / 물품", weight="나올 비율 (다른 결과와의 비율로 계산해요. 예: 60, 20, 10)",
                            item="종류가 물품일 때 줄 물품", amount="재화·물품을 몇 개 줄지 (기본 1)",
                            emoji="결과에 보일 아이콘 (비우면 물품·재화의 것)", title="결과에 보일 이름 (비우면 자동)")
     @app_commands.choices(kind=KINDS)

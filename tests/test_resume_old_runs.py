@@ -11,19 +11,19 @@ from store import Store
 from tests.helpers import Scripted
 
 G, U = 100, 7
-# 상자에서 나온 나무 방패를 장착할지 정하는 중 (1번째 방)
+# 상자에서 나온 구리 방열판를 장착할지 정하는 중 (1번째 방)
 CHEST_PENDING = json.loads('{"enemy": null, "events": ["🎁 상자를 열었어요!"], "hp": 1000, "items": {"soul_essence": 1}, "kind": "chest", '
-                           '"loot": ["나무 방패", "영혼 에센스"], "pending_gear": "wooden_shield", "phase": "chest_done", "regen_amount": 0, '
+                           '"loot": ["구리 방열판", "나노봇 주입제"], "pending_gear": "wooden_shield", "phase": "chest_done", "regen_amount": 0, '
                            '"regen_turns": 0, "rev": 3, "room": 1, "shield": null, "weapon": null}')
-# 10번째 방의 해골 왕을 막 이긴 상태
+# 10번째 방의 메인프레임 군주을 막 이긴 상태
 BOSS_DOWN = json.loads('{"enemy": {"boss": true, "damage": 135, "dodge": 0, "emoji": "💀", "hp": 0, "key": "skeleton_king", "max_hp": 900, '
-                       '"name": "해골 왕", "stunned": false}, "events": ["🎉 **해골 왕**을(를) 쓰러뜨렸어요!"], "hp": 865, '
-                       '"items": {"candy": 3, "cookie": 1, "soul_essence": 1}, "kind": "boss", "loot": ["낡은 몽둥이", "사탕"], '
+                       '"name": "메인프레임 군주", "stunned": false}, "events": ["🎉 **메인프레임 군주**을(를) 무력화했어요!"], "hp": 865, '
+                       '"items": {"candy": 3, "cookie": 1, "soul_essence": 1}, "kind": "boss", "loot": ["낡은 스패너", "소형 배터리"], '
                        '"pending_gear": null, "phase": "cleared", "regen_amount": 0, "regen_turns": 0, "rev": 27, "room": 10, '
                        '"shield": null, "weapon": "club"}')
 # 몬스터와 싸우는 중 (8번째 방)
 IN_BATTLE = json.loads('{"enemy": {"boss": false, "damage": 65, "dodge": 10, "emoji": "🦇", "hp": 225, "key": "giant_bat", "max_hp": 225, '
-                       '"name": "거대 박쥐", "stunned": false}, "events": ["⚠️ 몬스터 조우!"], "hp": 700, "items": {"cookie": 1}, "kind": "monster", '
+                       '"name": "정찰 드론", "stunned": false}, "events": ["⚠️ 몬스터 조우!"], "hp": 700, "items": {"cookie": 1}, "kind": "monster", '
                        '"loot": [], "pending_gear": null, "phase": "battle", "regen_amount": 0, "regen_turns": 0, "rev": 12, "room": 8, '
                        '"shield": null, "weapon": "club"}')
 
@@ -72,7 +72,7 @@ class ResumeOldRunsTests(unittest.IsolatedAsyncioTestCase):
     async def test_an_old_run_without_a_floor_resumes_as_floor_one_with_everything_kept(self):
         run = await self.resume(CHEST_PENDING)
         self.assertEqual((run.floor, run.room, run.phase, run.pending_gear, run.items, run.hp), (1, 1, "chest_done", "wooden_shield", {"soul_essence": 1}, 1000))
-        self.assertEqual(run_embed(run, None, self.store.balance(G)).title, "🏚️ 던전 — 1/10층 · 방 1/10")
+        self.assertEqual(run_embed(run, None, self.store.balance(G)).title, "🏭 던전 — 1/10층 · 방 1/10")
         self.assertEqual(run.rev, CHEST_PENDING["rev"] + 1)                # 이전에 띄운 화면은 지난 화면이 된다.
 
     async def test_the_undecided_gear_can_still_be_equipped_and_the_run_goes_on_to_the_end(self):
@@ -86,7 +86,7 @@ class ResumeOldRunsTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_fight_in_progress_continues(self):
         run = await self.resume(IN_BATTLE)
-        self.assertEqual((run.phase, run.enemy["name"], run.enemy["hp"], run.hp), ("battle", "거대 박쥐", 225, 700))
+        self.assertEqual((run.phase, run.enemy["name"], run.enemy["hp"], run.hp), ("battle", "정찰 드론", 225, 700))
         done = await self.finish(run)
         self.assertEqual(done.ended, "clear")
 

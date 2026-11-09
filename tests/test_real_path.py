@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import discord
 
-from main import HalloweenBot
+from main import EventBot
 from store import Store
 
 ADMIN, MEMBER = str(discord.Permissions(administrator=True).value), str(discord.Permissions(send_messages=True).value)
@@ -15,7 +15,7 @@ ADMIN, MEMBER = str(discord.Permissions(administrator=True).value), str(discord.
 class RealPathTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.store = Store(":memory:")
-        self.bot = HalloweenBot(self.store)
+        self.bot = EventBot(self.store)
         self.state = self.bot._connection
         self.state.user = discord.ClientUser(state=self.state, data={
             "id": "999", "username": "bot", "discriminator": "0", "avatar": None, "bot": True})
@@ -198,11 +198,11 @@ class RealPathTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("드래곤", [b.name for b in self.store.balance(100).bosses])       # 일반 멤버는 못 지운다.
 
     async def test_autocomplete_for_dungeon_content_names_is_wired(self):
-        options = [{"name": "대상", "type": 3, "value": "슬라임", "focused": True}]
+        options = [{"name": "대상", "type": 3, "value": "슬러지", "focused": True}]
         await self.bot.tree._call(self.interaction("몬스터", [{"name": "수정", "type": 1, "options": options}], kind=4, perms=ADMIN))
         call = self.sent["autocomplete"].await_args
         choices = call.args[0] if call.args else call.kwargs["choices"]
-        self.assertEqual({c.value for c in choices}, {"슬라임", "거대 슬라임"})
+        self.assertEqual({c.value for c in choices}, {"오일 슬러지", "슬러지 코어"})
 
     def role_grant_interaction(self, perms):
         interaction = self.interaction("역할재화지급", [{"name": "역할", "type": 8, "value": "50"},

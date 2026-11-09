@@ -655,7 +655,7 @@ class ContentAdmin(commands.Cog):
         if percent is None:
             shown = ", ".join(f"{r}번째 {self._trap_percent(bal, r):.1f}%" for r in self.TRAP_ROOMS)
             await interaction.response.send_message(embed=theme.notice(
-                f"🪤 지금 함정 방 확률: {shown}\n피해는 `/방 함정피해`(지금 {bal.trap_damage:,}, 1층 기준)예요. `/방 함정확률 퍼센트:10`처럼 바꿔요."), ephemeral=False)
+                f"⚡ 지금 함정 방 확률: {shown}\n피해는 `/방 함정피해`(지금 {bal.trap_damage:,}, 1층 기준)예요. `/방 함정확률 퍼센트:10`처럼 바꿔요."), ephemeral=False)
             return
         overrides = dict(store.settings(gid)["dungeon"])
         for r in self.TRAP_ROOMS:
@@ -673,7 +673,7 @@ class ContentAdmin(commands.Cog):
         store.update_settings(gid, dungeon=overrides)
         shown = ", ".join(f"{r}번째 {self._trap_percent(store.balance(gid), r):.1f}%" for r in self.TRAP_ROOMS)
         await interaction.response.send_message(embed=theme.notice(
-            f"🪤 함정 방 확률을 바꿨어요: {shown}\n(빈 방·잡몹 등 다른 방과의 비율로 계산해요.) 지금 진행 중인 던전에도 바로 적용돼요."), ephemeral=False)
+            f"⚡ 함정 방 확률을 바꿨어요: {shown}\n(빈 방·잡몹 등 다른 방과의 비율로 계산해요.) 지금 진행 중인 던전에도 바로 적용돼요."), ephemeral=False)
 
     @room.command(name="함정피해", description="함정 방에서 입는 피해를 정해요(1층 기준, 층마다 늘어나요). 비우면 지금 값을 봐요 (관리자)")
     @app_commands.rename(damage="피해")
@@ -686,7 +686,7 @@ class ContentAdmin(commands.Cog):
         old = overrides.get(key, param.default)
         if damage is None:
             await interaction.response.send_message(embed=theme.notice(
-                f"🪤 함정 피해: **{old:,}** (기본 {param.default:,}, 1층 기준. 층마다 몬스터처럼 늘어나요)\n"
+                f"⚡ 함정 피해: **{old:,}** (기본 {param.default:,}, 1층 기준. 층마다 몬스터처럼 늘어나요)\n"
                 "`/방 함정피해 피해:150`으로 바꿔요. 갑옷·피해 감소·무적은 적용되고 가드는 못 써요."), ephemeral=False)
             return
         if damage == param.default:
@@ -695,7 +695,7 @@ class ContentAdmin(commands.Cog):
             overrides[key] = damage
         store.update_settings(gid, dungeon=overrides)
         await interaction.response.send_message(embed=theme.notice(
-            f"🪤 함정 피해: {old:,} → **{damage:,}** (기본 {param.default:,}). 함정 방이 나오게 하려면 `/방 함정확률`을 정하세요."), ephemeral=False)
+            f"⚡ 함정 피해: {old:,} → **{damage:,}** (기본 {param.default:,}). 함정 방이 나오게 하려면 `/방 함정확률`을 정하세요."), ephemeral=False)
 
     # ---------------------------------------------------------------- 장비 개조 레시피
     mod = app_commands.Group(name="장비개조", description="특정 재료를 특정 장비(무기·방패)에 쓰면 다른 장비로 바뀌는 레시피 (관리자)", **PERMS)
@@ -932,7 +932,7 @@ class ContentAdmin(commands.Cog):
         pages = self._pack_fields(blocks)
 
         def build(index: int) -> discord.Embed:
-            embed = theme.make_embed("🏚️ 던전 목록" + (f" — {index + 1}/{len(pages)}쪽" if len(pages) > 1 else ""), intro, color=theme.PURPLE)
+            embed = theme.make_embed("🏭 던전 목록" + (f" — {index + 1}/{len(pages)}쪽" if len(pages) > 1 else ""), intro, color=theme.PURPLE)
             for name, value in pages[index]:
                 embed.add_field(name=name, value=value, inline=False)
             return embed

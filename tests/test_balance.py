@@ -18,7 +18,7 @@ G, U = 100, 7
 
 
 def build(**changes):
-    """{'몬스터.슬라임.체력': 500} 같은 값을 적용한 Balance."""
+    """{'몬스터.오일 슬러지.체력': 500} 같은 값을 적용한 Balance."""
     return Balance.build(changes)
 
 
@@ -52,7 +52,7 @@ class DefaultsTests(unittest.TestCase):
 
     def test_descriptions_follow_the_numbers(self):
         self.assertEqual(dungeon.GEAR_BY_KEY["dagger"].description, "공격 피해량 +35, 크리티컬(2배) 확률 50%")
-        bal = build(**{"장비.낡은 몽둥이.공격력": 77, "아이템.사탕.회복량": 123})
+        bal = build(**{"장비.낡은 스패너.공격력": 77, "아이템.소형 배터리.회복량": 123})
         self.assertEqual(bal.gear_by_key["club"].description, "공격 피해량 +77")
         self.assertEqual(bal.item_by_key["candy"].description, "HP +123")
 
@@ -79,8 +79,8 @@ class ValidationTests(unittest.TestCase):
         self.assertIn("아이템", balance.validate(all_items))
 
     def test_garbage_in_storage_is_ignored_not_fatal(self):
-        bal = Balance.build({"몬스터.슬라임.체력": 999, "없는.항목": 5, "일반.최대체력": "많이", "방어.성공확률": 500,
-                             "몬스터.마녀.체력": 1.5, "일반.맨손공격력": True})
+        bal = Balance.build({"몬스터.오일 슬러지.체력": 999, "없는.항목": 5, "일반.최대체력": "많이", "방어.성공확률": 500,
+                             "몬스터.악성 AI.체력": 1.5, "일반.맨손공격력": True})
         self.assertEqual([m.hp for m in bal.monsters if m.key == "slime"], [999])
         self.assertEqual((bal.max_hp, bal.guard_chance, bal.base_damage), (1000, 60, 20))
         self.assertEqual(Balance.build("엉망").max_hp, 1000)
@@ -104,13 +104,13 @@ class EffectTests(unittest.TestCase):
         self.assertEqual(run.hp, 2000)
 
     def test_base_damage_and_weapon_attack(self):
-        bal = build(**{"일반.맨손공격력": 50, "장비.낡은 몽둥이.공격력": 5})
+        bal = build(**{"일반.맨손공격력": 50, "장비.낡은 스패너.공격력": 5})
         self.assertEqual(dungeon.player_damage(dungeon.new_run(), bal), 50)
         self.assertEqual(dungeon.player_damage(dungeon.new_run(weapon="club"), bal), 55)
         self.assertEqual(dungeon.player_damage(dungeon.new_run(weapon="club")), 50)             # bal 없이는 기본값
 
     def test_monster_numbers_and_rat_dodge(self):
-        bal = build(**{"몬스터.슬라임.체력": 500, "몬스터.거대 쥐.회피": 80})
+        bal = build(**{"몬스터.오일 슬러지.체력": 500, "몬스터.고장 난 마우스.회피": 80})
         slime = next(m for m in bal.monsters if m.key == "slime")
         self.assertEqual(dungeon._spawn(slime)["hp"], 500)
         run = dungeon.new_run(bal=bal)
@@ -121,7 +121,7 @@ class EffectTests(unittest.TestCase):
         self.assertEqual(dungeon.enemy_dodge(default_rat), 30)
 
     def test_weapon_dodge_conversion_value_is_adjustable_but_bosses_stay_undodgeable(self):
-        bal = build(**{"장비.총.회피변환": 5})
+        bal = build(**{"장비.레일건.회피변환": 5})
         run = dungeon.new_run(weapon="gun", bal=bal)
         run.enemy = dungeon._spawn(bal.monsters[1])
         self.assertEqual(dungeon.enemy_dodge(run, bal), 5)
@@ -139,7 +139,7 @@ class EffectTests(unittest.TestCase):
         self.assertEqual((run.hp, run.enemy["hp"]), (500, bal.monsters[2].hp))                  # 전부 막고, 회복·반사 없음
 
     def test_shield_gear_values(self):
-        bal = build(**{"장비.방패.가드": 50, "장비.방패.반사": 100})
+        bal = build(**{"장비.에너지 실드.가드": 50, "장비.에너지 실드.반사": 100})
         run = dungeon.new_run(shield="shield", bal=bal)
         self.assertEqual((dungeon.guard_percent(run, bal), dungeon.reflect_percent(run, bal)), (50, 100))
 
@@ -169,14 +169,14 @@ class EffectTests(unittest.TestCase):
     def test_chest_weights_are_used_as_ratios_at_the_boundary(self):
         """클럽 3 : 단검 1 → 난수 0.7499는 클럽, 0.75는 단검(합이 4이므로). 합을 100으로 착각하면 여기서 틀린다."""
         weights = {f"장비.{g.name}.등장": 0 for g in dungeon.GEAR}
-        weights.update({"장비.낡은 몽둥이.등장": 3, "장비.단검.등장": 1})
+        weights.update({"장비.낡은 스패너.등장": 3, "장비.레이저 커터.등장": 1})
         bal = build(**weights)
         for draw, expected in ((0.0, "club"), (0.7499, "club"), (0.75, "dagger"), (0.9999, "dagger")):
             run = dungeon.new_run(bal=bal)
             dungeon.open_chest(run, Scripted(randoms=[draw, 0.0]), bal)
             self.assertEqual(run.pending_gear, expected, draw)
         items = {f"아이템.{c.name}.등장": 0 for c in dungeon.CONSUMABLES}
-        items.update({"아이템.사탕.등장": 1, "아이템.호박죽.등장": 1})
+        items.update({"아이템.소형 배터리.등장": 1, "아이템.정비 모듈.등장": 1})
         bal = build(**items)
         for draw, expected in ((0.4999, "candy"), (0.5, "pumpkin_soup")):
             run = dungeon.new_run(bal=bal)
@@ -184,7 +184,7 @@ class EffectTests(unittest.TestCase):
             self.assertEqual(list(run.items), [expected], draw)
 
     def test_boss_hp_change_shows_up_in_a_real_fight(self):
-        bal = build(**{"보스.해골 왕.체력": 40, "보스.해골 왕.공격": 1})
+        bal = build(**{"보스.메인프레임 군주.체력": 40, "보스.메인프레임 군주.공격": 1})
         run = dungeon.new_run(bal=bal)
         run.enemy, run.phase, run.room = dungeon._spawn(bal.bosses[0]), "battle", 10
         dungeon.player_attack(run, Scripted(randoms=[0.99]), bal)
@@ -209,7 +209,7 @@ class StoreTests(unittest.TestCase):
         import os, tempfile
         path = os.path.join(tempfile.mkdtemp(), "t.sqlite3")
         first = Store(path)
-        first.update_settings(G, dungeon={"몬스터.마녀.공격": 99})
+        first.update_settings(G, dungeon={"몬스터.악성 AI.공격": 99})
         first.close()
         second = Store(path)
         self.assertEqual([m.damage for m in second.balance(G).monsters if m.key == "witch"], [99])
@@ -298,7 +298,7 @@ class AdminCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.store.balance(G).max_hp, 1500)
 
     async def test_monster_gear_and_item_numbers_are_edited_with_their_own_commands(self):
-        i = await self.run_cmd(DungeonAdmin.set_param, self.ask(), "몬스터.슬라임.체력", 300.0)
+        i = await self.run_cmd(DungeonAdmin.set_param, self.ask(), "몬스터.오일 슬러지.체력", 300.0)
         self.assertIn("/몬스터", self.text(i))
         self.assertEqual(self.store.settings(G)["dungeon"], {})
 
@@ -377,7 +377,7 @@ class AdminCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(hp.name, "✏️ 일반.최대체력 = 1,500 (기본 1,000)")
         self.assertLessEqual(len(param_choices(self.store, G, "")), 25)
         self.assertEqual({c.value for c in param_choices(self.store, G, "일반. 최 대체력")}, {"일반.최대체력"})
-        self.assertEqual({c.value for c in param_choices(self.store, G, "슬라임")}, set())     # 몬스터 수치는 /몬스터 명령으로 바꾼다.
+        self.assertEqual({c.value for c in param_choices(self.store, G, "오일 슬러지")}, set())     # 몬스터 수치는 /몬스터 명령으로 바꾼다.
         self.assertEqual({c.value for c in param_choices(self.store, G, "장비")}, set())
         for c in param_choices(self.store, G, "방"):
             self.assertLessEqual(len(c.name), 100)
@@ -432,7 +432,7 @@ class ScreenTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("가드 성공", shown["embed"].description)
 
     async def test_hp_bar_and_item_text_follow_the_settings(self):
-        run = await self.in_battle(**{"일반.최대체력": 2000, "아이템.사탕.회복량": 321})
+        run = await self.in_battle(**{"일반.최대체력": 2000, "아이템.소형 배터리.회복량": 321})
         shown = await self.press(run, "attack")
         fields = {f.name: f.value for f in shown["embed"].fields}
         self.assertRegex(fields["❤️ HP"], r"/2000$")
@@ -473,7 +473,7 @@ class SimulatorTests(unittest.TestCase):
 
     def test_extreme_values_move_the_result_the_right_way(self):
         base = balance_sim.simulate(Balance.build({}), 400, seed=3)["attack"]["clear"]
-        weak = balance_sim.simulate(build(**{"보스.해골 왕.체력": 1, "보스.거대 슬라임.체력": 1, "보스.고블린 왕.체력": 1}), 400, seed=3)["attack"]["clear"]
+        weak = balance_sim.simulate(build(**{"보스.메인프레임 군주.체력": 1, "보스.슬러지 코어.체력": 1, "보스.스크랩 봇 왕.체력": 1}), 400, seed=3)["attack"]["clear"]
         strong = balance_sim.simulate(build(**{"일반.최대체력": 100}), 400, seed=3)["attack"]["clear"]
         self.assertGreater(weak, base)
         self.assertLess(strong, base)

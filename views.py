@@ -99,7 +99,7 @@ class DetailView(discord.ui.View):
         item = client.store.item(member.guild.id, item_id)
         self.buy_button = discord.ui.Button(label="구매", emoji="🛒", style=discord.ButtonStyle.success,
                                             disabled=not (item and item["buyable"]))
-        self.sell_button = discord.ui.Button(label="판매", emoji="🎃", style=discord.ButtonStyle.danger,
+        self.sell_button = discord.ui.Button(label="판매", emoji="💱", style=discord.ButtonStyle.danger,
                                              disabled=not (item and item["sellable"]))
         self.buy_button.callback = lambda i: self.start(i, "buy")
         self.sell_button.callback = lambda i: self.start(i, "sell")

@@ -56,7 +56,7 @@ class Shop(commands.Cog):
         await interaction.response.send_message(embed=theme.notice(text, False), ephemeral=False)
 
     # ---------------------------------------------------------------- 상점 등록
-    @app_commands.command(name="상점등록", description="이 채널에 할로윈 상점을 띄워요 (관리자)")
+    @app_commands.command(name="상점등록", description="이 채널에 부품 상점을 띄워요 (관리자)")
     @app_commands.guild_only()
     @app_commands.default_permissions(administrator=True)
     @app_commands.rename(channel="채널")
@@ -80,7 +80,7 @@ class Shop(commands.Cog):
             return
         await interaction.followup.send(embed=theme.notice(f"{channel.mention}에 상점을 열었어요! {message.jump_url}"), ephemeral=False)
 
-    @app_commands.command(name="상점해제", description="이 채널의 할로윈 상점을 없애요 (관리자)")
+    @app_commands.command(name="상점해제", description="이 채널의 부품 상점을 없애요 (관리자)")
     @app_commands.guild_only()
     @app_commands.default_permissions(administrator=True)
     @app_commands.rename(channel="채널")
@@ -108,8 +108,8 @@ class Shop(commands.Cog):
     @app_commands.guild_only()
     @app_commands.default_permissions(administrator=True)
     @app_commands.rename(name="이름", emoji="이모지", description="설명")
-    @app_commands.describe(name="물품 이름 (30자까지)", emoji="아이콘 (기본 🎃)", description="설명 (200자까지)")
-    async def create_plain_item(self, interaction: discord.Interaction, name: str, emoji: str = "🎃", description: str = ""):
+    @app_commands.describe(name="물품 이름 (30자까지)", emoji="아이콘 (기본 ⚙️)", description="설명 (200자까지)")
+    async def create_plain_item(self, interaction: discord.Interaction, name: str, emoji: str = "⚙️", description: str = ""):
         """상점과 상관없이 물품만 만든다. 패키지 결과·연금술 재료·지급용처럼 상점에 올리지 않는 물품에 쓴다(상점 25칸에도 안 들어간다)."""
         if not await require_admin(interaction):
             return
@@ -134,10 +134,10 @@ class Shop(commands.Cog):
     @app_commands.describe(name="물품 이름 (30자까지)", buyable="사람들이 살 수 있게 할까요? (true/false)",
                            sellable="사람들이 팔 수 있게 할까요? (true/false)", buy_price="구입 가격(재화). 구입을 켰다면 필수",
                            sell_price="판매 가격(재화). 음수면 팔 때 재화를 내요. 판매를 켰다면 0이 아닌 값", description="설명 (200자까지)",
-                           emoji="아이콘 (기본 🎃)", sell_max=SELL_MAX_HELP)
+                           emoji="아이콘 (기본 ⚙️)", sell_max=SELL_MAX_HELP)
     async def add_item(self, interaction: discord.Interaction, name: str, buyable: bool, sellable: bool,
                        buy_price: app_commands.Range[int, 0, 1_000_000_000] = 0, sell_price: app_commands.Range[int, -1_000_000_000, 1_000_000_000] = 0,
-                       description: str = "", emoji: str = "🎃", sell_max: app_commands.Range[int, -1_000_000_000, 1_000_000_000] | None = None):
+                       description: str = "", emoji: str = "⚙️", sell_max: app_commands.Range[int, -1_000_000_000, 1_000_000_000] | None = None):
         if not await require_admin(interaction):
             return
         try:

@@ -1,16 +1,16 @@
-"""할로윈 분위기의 화면 조각: 색, 이모지, 임베드. 심플하게 호박·캔디·거미줄만 쓴다."""
+"""기계(서버실·회로) 분위기의 화면 조각: 색, 이모지, 임베드. 이름은 예전 그대로지만 ORANGE는 회로 시안, PURPLE은 강철 회색이다."""
 from __future__ import annotations
 
 import discord
 
-from store import DEFAULT_CURRENCY, Currency
+from store import DEFAULT_CURRENCY, EMPTY_EMOJI, EMPTY_TITLE, Currency
 
-ORANGE = 0xFF7518
-PURPLE = 0x6A4C93
-GOLD = 0xF1C40F
-GREEN = 0x7BC043
-RED = 0xC0392B
-FOOTER = "🕸️ Happy Halloween"
+ORANGE = 0x00A8E8                 # 기본 색: 회로 시안
+PURPLE = 0x5C6B7A                 # 보조 색: 강철 회색
+GOLD = 0xF5B700                   # 강조 색: 경고등 호박색
+GREEN = 0x2ECC71                  # 정상
+RED = 0xE74C3C                    # 오류
+FOOTER = "⚙️ SYSTEM ONLINE"
 LINE = "▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️"
 
 
@@ -25,7 +25,7 @@ def plain_money(amount: int, cur: Currency | None = None) -> str:
 
 
 def sell_text(row, cur: Currency | None = None, *, plain: bool = False) -> str:
-    """물품의 판매가 글자. 고정이면 '🍬 100', 음수면 '🍬 -150'(팔 때 재화를 낸다), 범위면 '🍬 -300 ~ 300'(팔 때마다 그 사이에서 뽑는다)."""
+    """물품의 판매가 글자. 고정이면 '💾 100', 음수면 '💾 -150'(팔 때 재화를 낸다), 범위면 '💾 -300 ~ 300'(팔 때마다 그 사이에서 뽑는다)."""
     show = plain_money if plain else money
     high = row["sell_max"] if "sell_max" in row.keys() else None
     low = row["sell_price"]
@@ -48,7 +48,7 @@ def make_embed(title: str, description: str = "", *, color: int = ORANGE) -> dis
 
 def notice(text: str, ok: bool = True) -> discord.Embed:
     """한 줄 결과 알림(구매 성공·실패 등)."""
-    return make_embed("🎃 완료!" if ok else "👻 앗!", text, color=GREEN if ok else RED)
+    return make_embed("✅ 처리 완료" if ok else "⚠️ 오류 발생", text, color=GREEN if ok else RED)
 
 
 def item_line(row, role_name: str | None = None, cur: Currency | None = None) -> str:
@@ -65,8 +65,8 @@ def shop_embed(rows, role_names: dict[int, str] | None = None, cur: Currency | N
     if rows:
         body = "\n".join(item_line(r, role_names.get(r["role_id"]), cur) for r in rows)
     else:
-        body = "아직 진열된 물품이 없어요. 🕸️"
-    embed = make_embed("🎃 할로윈 상점", f"아래 목록에서 물품을 골라 보세요.\n{LINE}\n{body}", color=ORANGE)
+        body = "아직 진열된 물품이 없어요. 📭"
+    embed = make_embed("🖥️ 부품 상점", f"아래 목록에서 물품을 골라 보세요.\n{LINE}\n{body}", color=ORANGE)
     embed.add_field(name=f"{cur.emoji} = {cur.name}", value="채팅하고, 패키지를 뜯고, 던전을 돌아서 모아요.", inline=False)
     return embed
 
@@ -86,7 +86,7 @@ def detail_embed(row, *, candy: int, owned: int | None, role_name: str | None = 
 
 def candy_bar(candy: int, top: int, width: int = 10) -> str:
     filled = min(width, round(candy / top * width)) if top else 0
-    return "🟧" * filled + "⬛" * (width - filled)
+    return "🟦" * filled + "⬛" * (width - filled)
 
 
 def bag_embed(name: str, *, candy: int, items, roles: list[str], tickets: int = 0, cur: Currency | None = None) -> discord.Embed:
@@ -95,7 +95,7 @@ def bag_embed(name: str, *, candy: int, items, roles: list[str], tickets: int = 
     embed.add_field(name=f"{cur.emoji} {cur.name}",
                     value=f"**{candy:,}** / {cur.max:,}\n{candy_bar(candy, cur.max)}", inline=False)
     lines = [f"{r['emoji']} {r['name']} ×{r['qty']:,}" for r in items]
-    embed.add_field(name="🎒 물품", value="\n".join(lines) if lines else "비어 있어요 🕸️", inline=False)
+    embed.add_field(name="🎒 물품", value="\n".join(lines) if lines else "비어 있어요 📭", inline=False)
     if tickets:
         embed.add_field(name="🎟️ 히든 칭호 획득권", value=f"×{tickets:,}", inline=False)
     if roles:
@@ -104,12 +104,12 @@ def bag_embed(name: str, *, candy: int, items, roles: list[str], tickets: int = 
 
 
 def package_embed(mode: str, seconds: int, pile: int = 0) -> discord.Embed:
-    """패키지가 나타났다는 메시지. pile이 0보다 크면 변이한 '패키지 더미'(뜯으면 결과가 pile개)다."""
+    """패키지가 수신됐다는 메시지. pile이 0보다 크면 변이한 '패키지 더미'(뜯으면 결과가 pile개)다."""
     rule = "가장 먼저 뜯는 **한 명**이 가져가요!" if mode == "first" else "누구나 **한 번씩** 뜯을 수 있어요!"
     if pile:
-        return make_embed("📦📦📦 패키지 더미가 나타났어요!",
-                          f"상자가 변이해서 **더미**로 쌓여 있어요! 뜯으면 **{pile}개**가 나와요.\n{rule}\n⏳ {seconds}초 동안만 머물러요.", color=GOLD)
-    return make_embed("📦 패키지가 나타났어요!", f"수상한 상자예요… 뜯어볼까요?\n{rule}\n⏳ {seconds}초 동안만 머물러요.",
+        return make_embed("📦📦📦 패키지 더미가 수신됐어요!",
+                          f"데이터가 변이해서 **더미**로 쌓여 있어요! 뜯으면 **{pile}개**가 나와요.\n{rule}\n⏳ {seconds}초 동안만 유지돼요.", color=GOLD)
+    return make_embed("📦 패키지가 수신됐어요!", f"출처를 알 수 없는 데이터 덩어리예요… 뜯어볼까요?\n{rule}\n⏳ {seconds}초 동안만 유지돼요.",
                       color=PURPLE)
 
 
@@ -122,7 +122,7 @@ def entry_icon_title(entry: dict, store, guild_id: int) -> tuple[str, str]:
         item = store.item(guild_id, entry.get("item"))
         emoji, title = (item["emoji"], item["name"] + (f" ×{entry['amount']}" if entry.get("amount", 1) != 1 else "")) if item else ("❔", "사라진 물품")
     else:
-        emoji, title = "👻", "꽝"
+        emoji, title = EMPTY_EMOJI, EMPTY_TITLE
     return entry.get("emoji") or emoji, entry.get("title") or title
 
 

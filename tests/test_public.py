@@ -196,15 +196,15 @@ class BagSellTests(FakeWorld):
         return modal, submit
 
     async def test_the_selector_lists_only_sellable_items_with_counts_and_prices(self):
-        self.give("마녀 모자", 3, sell_price=100, sellable=True)
-        self.give("깨진 유리조각", 2, sell_price=-150, sellable=True)
+        self.give("구형 CPU", 3, sell_price=100, sellable=True)
+        self.give("깨진 디스플레이 파편", 2, sell_price=-150, sellable=True)
         self.give("장식품", 5)                                                        # 팔 수 없는 물품은 안 나온다.
         i = await self.open_bag()
         kwargs = i.response.send_message.await_args.kwargs
         self.assertFalse(kwargs["ephemeral"])
         options = self.select(kwargs["view"]).options
-        self.assertEqual([o.label for o in options], ["마녀 모자 ×3", "깨진 유리조각 ×2"])
-        self.assertEqual([o.description for o in options], ["개당 판매 🍬 100", "개당 판매 🍬 -150"])
+        self.assertEqual([o.label for o in options], ["구형 CPU ×3", "깨진 디스플레이 파편 ×2"])
+        self.assertEqual([o.description for o in options], ["개당 판매 💾 100", "개당 판매 💾 -150"])
         self.assertNotIn("장식품", [o.label for o in options])
 
     async def test_no_selector_when_nothing_can_be_sold(self):
@@ -213,37 +213,37 @@ class BagSellTests(FakeWorld):
         self.assertNotIn("view", i.response.send_message.await_args.kwargs)
 
     async def test_picking_opens_a_quantity_box_for_that_item(self):
-        hat = self.give("마녀 모자", 3, sell_price=100, sellable=True)
+        hat = self.give("구형 CPU", 3, sell_price=100, sellable=True)
         view = (await self.open_bag()).response.send_message.await_args.kwargs["view"]
         pick = self.w.interaction(data={"values": [str(hat["id"])]})
         await self.select(view).callback(pick)
         modal = pick.response.send_modal.await_args.args[0]
         self.assertIsInstance(modal, QuantityModal)
-        self.assertEqual((modal.item_id, modal.action, modal.bag, modal.title), (hat["id"], "sell", True, "마녀 모자 판매"))
+        self.assertEqual((modal.item_id, modal.action, modal.bag, modal.title), (hat["id"], "sell", True, "구형 CPU 판매"))
 
     async def test_selling_pays_removes_the_items_and_redraws_the_same_bag_message(self):
-        hat = self.give("마녀 모자", 3, sell_price=100, sellable=True)
+        hat = self.give("구형 CPU", 3, sell_price=100, sellable=True)
         view = (await self.open_bag()).response.send_message.await_args.kwargs["view"]
         _, submit = await self.sell_through(view, hat["id"], "2")
         self.assertEqual((self.store.wallet(G, U), self.store.qty(G, U, hat["id"])), (200, 1))
         submit.response.send_message.assert_not_awaited()                              # 새 메시지가 아니라
         kwargs = submit.response.edit_message.await_args.kwargs                         # 그 가방 메시지를 고친다.
         self.assertIn("✅", kwargs["embed"].description)
-        self.assertIn("🍬 200을 받았어요", kwargs["embed"].description)
+        self.assertIn("💾 200을 받았어요", kwargs["embed"].description)
         fields = {f.name: f.value for f in kwargs["embed"].fields}
-        self.assertIn("**200**", fields["🍬 할로윈 재화"])
-        self.assertIn("마녀 모자 ×1", fields["🎒 물품"])
-        self.assertEqual(self.select(kwargs["view"]).options[0].label, "마녀 모자 ×1")
+        self.assertIn("**200**", fields["💾 RAM"])
+        self.assertIn("구형 CPU ×1", fields["🎒 물품"])
+        self.assertEqual(self.select(kwargs["view"]).options[0].label, "구형 CPU ×1")
 
     async def test_selling_the_last_one_removes_the_selector(self):
-        hat = self.give("마녀 모자", 1, sell_price=100, sellable=True)
+        hat = self.give("구형 CPU", 1, sell_price=100, sellable=True)
         view = (await self.open_bag()).response.send_message.await_args.kwargs["view"]
         _, submit = await self.sell_through(view, hat["id"], "1")
         self.assertIsNone(submit.response.edit_message.await_args.kwargs["view"])
         self.assertEqual(self.store.qty(G, U, hat["id"]), 0)
 
     async def test_a_negative_item_charges_you_and_refuses_when_you_cannot_pay(self):
-        glass = self.give("깨진 유리조각", 2, sell_price=-150, sellable=True)
+        glass = self.give("깨진 디스플레이 파편", 2, sell_price=-150, sellable=True)
         view = (await self.open_bag()).response.send_message.await_args.kwargs["view"]
         _, submit = await self.sell_through(view, glass["id"], "1")                     # 지갑이 비어 있다
         embed = submit.response.edit_message.await_args.kwargs["embed"]
@@ -252,7 +252,7 @@ class BagSellTests(FakeWorld):
         self.assertEqual(self.store.qty(G, U, glass["id"]), 2)
         self.store.add_candy(G, U, 500)
         _, submit = await self.sell_through(view, glass["id"], "2")
-        self.assertIn("🍬 300을 냈어요", submit.response.edit_message.await_args.kwargs["embed"].description)
+        self.assertIn("💾 300을 냈어요", submit.response.edit_message.await_args.kwargs["embed"].description)
         self.assertEqual((self.store.wallet(G, U), self.store.qty(G, U, glass["id"])), (200, 0))
 
     async def test_the_price_range_uses_the_bots_dice(self):
@@ -264,7 +264,7 @@ class BagSellTests(FakeWorld):
         self.assertEqual(self.store.wallet(G, U), 1123)
 
     async def test_bad_quantities_and_vanished_items_are_reported_not_applied(self):
-        hat = self.give("마녀 모자", 2, sell_price=100, sellable=True)
+        hat = self.give("구형 CPU", 2, sell_price=100, sellable=True)
         view = (await self.open_bag()).response.send_message.await_args.kwargs["view"]
         for text in ("abc", "0", "-1", "1.5", str(QTY_MAX + 1)):
             _, submit = await self.sell_through(view, hat["id"], text)
@@ -281,7 +281,7 @@ class BagSellTests(FakeWorld):
         self.assertIn("팔 수 없는", sent_embed(pick)[0].description)
 
     async def test_the_panels_bag_button_gives_a_private_bag_with_the_same_selector(self):
-        self.give("마녀 모자", 1, sell_price=100, sellable=True)
+        self.give("구형 CPU", 1, sell_price=100, sellable=True)
         click = self.w.interaction()
         await ShopPanelView().on_bag(click)
         kwargs = click.response.send_message.await_args.kwargs
@@ -292,13 +292,13 @@ class BagSellTests(FakeWorld):
         with self.store.db:                                                            # 상점 25칸 한도를 거치지 않고 30개를 직접 넣는다.
             for n in range(30):
                 item_id = self.store.db.execute("INSERT INTO items(guild,name,emoji,kind,sell_price,sellable) VALUES(?,?,?,?,?,?)",
-                                                (G, f"물건{n:02}", "🎃", "item", 1, 1)).lastrowid
+                                                (G, f"물건{n:02}", "⚙️", "item", 1, 1)).lastrowid
                 self.store.db.execute("INSERT INTO inventory VALUES(?,?,?,?)", (G, U, item_id, 1))
         view = (await self.open_bag()).response.send_message.await_args.kwargs["view"]
         self.assertEqual(len(self.select(view).options), 25)
 
     async def test_nobody_else_can_use_the_bag(self):
-        self.give("마녀 모자", 1, sell_price=100, sellable=True)
+        self.give("구형 CPU", 1, sell_price=100, sellable=True)
         view = (await self.open_bag()).response.send_message.await_args.kwargs["view"]
         stranger = self.w.interaction(uid=OTHER)
         self.assertFalse(await view.interaction_check(stranger))

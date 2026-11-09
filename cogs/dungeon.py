@@ -37,7 +37,7 @@ def _ready_mark(run: Run, item, bal) -> str:
 
 
 def shop_text(run: Run, bal, cur=None) -> str:
-    """상점 상품 목록: '1. 🍭 사탕 (일반) — HP +50 · 🍬 20'. 이미 산 것은 취소선."""
+    """상점 상품 목록: '1. 🔋 소형 배터리 (일반) — HP +50 · 💾 20'. 이미 산 것은 취소선."""
     lines = []
     for number, offer in enumerate(run.shop, start=1):
         thing = (bal.gear_by_key if offer["kind"] == "gear" else bal.item_by_key).get(offer["key"])
@@ -57,7 +57,7 @@ def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=No
     if ended == "clear":
         color, title = theme.GREEN, "🏆 던전 클리어!"
     elif ended == "dead":
-        color, title = theme.RED, "💀 쓰러졌어요…"
+        color, title = theme.RED, "💀 시스템이 다운됐어요…"
     elif ended == "quit":
         color, title = theme.PURPLE, "🚪 던전에서 나왔어요"
     elif run.phase == "summit":
@@ -69,7 +69,7 @@ def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=No
     elif run.infinite:
         color, title = theme.PURPLE, f"♾️ 무한모드 — {max(run.floor, 1)}층 · 방 {max(run.room, 1)}/{ROOMS}"
     else:
-        color, title = theme.ORANGE, f"🏚️ 던전 — {max(run.floor, 1)}/{bal.floors}층 · 방 {max(run.room, 1)}/{ROOMS}"
+        color, title = theme.ORANGE, f"🏭 던전 — {max(run.floor, 1)}/{bal.floors}층 · 방 {max(run.room, 1)}/{ROOMS}"
     embed = theme.make_embed(title, "\n".join(run.events) or None, color=color)
     if run.enemy and not ended:
         enemy = run.enemy
@@ -96,16 +96,16 @@ def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=No
             more = len(held) - len(shown)
             embed.add_field(name="🧪 소지품", value="\n".join(shown) + (f"\n… 외 {more}종 (아이템 메뉴에서 ◀ ▶로 넘겨 보세요)" if more else ""), inline=False)
         if run.regen_turns:
-            embed.add_field(name="👻 회복 중", value=f"턴마다 HP +{run.regen_amount} (남은 {run.regen_turns}턴)", inline=False)
+            embed.add_field(name="🧬 회복 중", value=f"턴마다 HP +{run.regen_amount} (남은 {run.regen_turns}턴)", inline=False)
         status = []
         if run.invuln_turns:
             status.append(f"✨ 무적 (남은 {run.invuln_turns}턴)")
         if run.reduce_turns and run.reduce_percent:
             status.append(f"🛡️ 받는 피해 {run.reduce_percent}% 감소 (남은 {run.reduce_turns}턴)")
         if run.drain_turns:
-            status.append(f"🩸 턴마다 HP -{run.drain_amount} (남은 {run.drain_turns}턴)")
+            status.append(f"🔥 턴마다 HP -{run.drain_amount} (남은 {run.drain_turns}턴)")
         if run.enemy and run.enemy.get("dot_turns"):
-            status.append(f"☠️ 몬스터가 턴마다 {run.enemy['dot']} 피해 (남은 {run.enemy['dot_turns']}턴)")
+            status.append(f"🌡️ 몬스터가 턴마다 {run.enemy['dot']} 피해 (남은 {run.enemy['dot_turns']}턴)")
         if status:
             embed.add_field(name="🌀 효과", value="\n".join(status), inline=False)
     reward = outcome.reward if outcome else None
@@ -134,9 +134,9 @@ def secret_intro_frames(enemy: dict) -> list[discord.Embed]:
         final.set_image(url=enemy["image"])
     return [
         theme.make_embed("…", "⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛\n⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛\n⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛", color=0x050507),
-        theme.make_embed("🌑 ……", "공기가 무겁게 가라앉는다.\n발밑의 그림자가 길게 늘어난다…", color=0x2B1B4A),
-        theme.make_embed("⚠️ ⚠️ ⚠️  WARNING  ⚠️ ⚠️ ⚠️", "**알 수 없는 거대한 기운이 다가온다!**", color=theme.RED),
-        theme.make_embed("👁️ 무언가 눈을 떴다", f"# 『 {cover} 』", color=0x7A1F1F),
+        theme.make_embed("🌑 ……", "서버실의 팬 소리가 갑자기 멈춘다.\n모든 모니터가 한꺼번에 꺼진다…", color=0x2B1B4A),
+        theme.make_embed("⚠️ ⚠️ ⚠️  WARNING  ⚠️ ⚠️ ⚠️", "**알 수 없는 거대한 신호가 감지된다!**", color=theme.RED),
+        theme.make_embed("👁️ 무언가 가동을 시작했다", f"# 『 {cover} 』", color=0x7A1F1F),
         theme.make_embed("👁️ 이름이 드러난다…", f"# 『 {half} 』", color=0xB5651D),
         final,
     ]
@@ -398,7 +398,7 @@ async def ask_auto(interaction: discord.Interaction, client, rev: int):
     text = (f"**{label}**을(를) 한 번 더 내고 이번 던전을 **컴퓨터가 알아서 진행**하게 할까요?\n"
             "• 화면이 라이브로 바뀌고, ⏹ 멈추기로 언제든 직접 진행으로 돌아올 수 있어요.\n"
             "• 이 던전에서는 **한 번만** 내요. 껐다 켜도 다시 내지 않아요.\n"
-            "• 컴퓨터는 더 좋은 장비만 끼고, 위험하면 방어·회복을 하지만 **쓰러질 수 있어요.** 장비·소모품을 파는 일은 하지 않아요.")
+            "• 컴퓨터는 더 좋은 장비만 끼고, 위험하면 방어·회복을 하지만 **다운될 수 있어요.** 장비·소모품을 파는 일은 하지 않아요.")
     await interaction.response.edit_message(embed=theme.make_embed("⏩ 빠른진행", text, color=theme.ORANGE), view=AutoConfirm(client, interaction.user.id, rev))
 
 
@@ -479,7 +479,7 @@ def sell_embed(run: Run, bal, cur, wallet: int, result: bool = False, page: int 
     page = max(0, min(page, len(pages) - 1))
     entries = pages[page]
     intro = ("팔 것을 고른 뒤 아래 버튼을 눌러요. 여러 개를 한꺼번에 고를 수 있어요.\n"
-             "던전을 나가거나 쓰러지면 장비·소지품은 사라지니, 팔 수 있을 때 팔아 두세요.")
+             "던전을 나가거나 다운되면 장비·소지품은 사라지니, 팔 수 있을 때 팔아 두세요.")
     embed = theme.make_embed("💰 던전 판매", "\n".join(run.events) if result and run.events else intro, color=theme.ORANGE)
     lines = []
     for e in entries:
@@ -611,14 +611,14 @@ async def respond_sell(interaction: discord.Interaction, client, rev: int, picks
 
 
 def gear_text(gear) -> str:
-    """장비 화면의 한 칸: '🏏 낡은 몽둥이 — 공격 피해량 +30'. 비어 있으면 '—'."""
+    """장비 화면의 한 칸: '🔧 낡은 스패너 — 공격 피해량 +30'. 비어 있으면 '—'."""
     return f"{gear.emoji} **{gear.name}** — {gear.description}" if gear else "—"
 
 
 def equip_embed(run: Run, bal, result: bool = False) -> discord.Embed:
     """장비 화면: 장착한 무기·방패와 예비 칸. result=True면 방금 한 교체(run.events)를 맨 위에 보여 준다."""
     intro = ("**무기·방패·갑옷을 1개씩** 예비 칸에 가지고 있다가 장착한 것과 서로 바꿀 수 있어요.\n"
-             "예비 칸은 이번 던전 동안만 쓰고, 던전을 나가거나 쓰러지면 사라져요.")
+             "예비 칸은 이번 던전 동안만 쓰고, 던전을 나가거나 다운되면 사라져요.")
     embed = theme.make_embed("🎒 장비", "\n".join(run.events) if result and run.events else intro, color=theme.ORANGE)
     for slot, name, icon, bare in (("weapon", "무기", "⚔️", "👊 맨손"), ("shield", "방패", "🛡️", "✋ 맨몸 가드"), ("armor", "갑옷", "🧥", "🧥 맨몸")):
         on = dungeon._valid(getattr(run, slot), slot, bal)
@@ -689,12 +689,12 @@ async def open_equip(interaction: discord.Interaction, client, rev: int):
 
 
 class Dungeon(commands.Cog):
-    """🏚️ 입장 물품을 내고 들어가는 10개 방의 던전."""
+    """🏭 입장 물품을 내고 들어가는 10개 방의 던전."""
 
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="던전", description="🏚️ 입장 물품을 내고 던전에 들어가요 (진행 중이면 이어서 해요)")
+    @app_commands.command(name="던전", description="🏭 입장 물품을 내고 던전에 들어가요 (진행 중이면 이어서 해요)")
     @app_commands.guild_only()
     async def enter(self, interaction: discord.Interaction):
         task = self.bot.autos.get((interaction.guild_id, interaction.user.id))

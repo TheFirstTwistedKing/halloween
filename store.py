@@ -1,4 +1,4 @@
-"""할로윈 봇의 규칙과 저장소. 디스코드에 접속하지 않는 순수 로직이라 그대로 시험할 수 있다."""
+"""기계 분위기 이벤트 봇의 규칙과 저장소. 디스코드에 접속하지 않는 순수 로직이라 그대로 시험할 수 있다."""
 from __future__ import annotations
 
 import copy
@@ -14,14 +14,15 @@ from josa import i_ga
 
 import balance as balance_rules
 
-CANDY = "🍬"                     # 할로윈 재화의 아이콘
-CANDY_NAME = "할로윈 재화"
+CANDY = "💾"                     # 재화(RAM)의 아이콘. 코드 안의 이름은 예전 그대로 CANDY다.
+CANDY_NAME = "RAM"
+LEGACY_CURRENCY = ("🍬", "할로윈 재화")   # 예전 기본 재화(이전 판 서버가 저장해 둔 값): 그대로면 새 기본으로 바꾼다(SEED_VERSION 3).
 CANDY_MAX = 99999                # 보유할 수 있는 최대 재화
 MAX_SHOP_ITEMS = 25              # 선택창 한도(디스코드): 상점에 올릴 수 있는 물품 수
 QTY_MAX = 999                    # 한 번에 사고팔 수 있는 수량
 TICKET_MAX = 99_999              # 한 사람이 가질 수 있는 히든 칭호 획득권의 최대(관리자 지급 기준)
 MAX_RECIPES = 100                # 서버마다 연금술 레시피 수 한도
-SEED_VERSION = 2                 # 기본 물품·패키지 결과표의 버전. 올리면 이미 운영 중인 서버도 한 번 이전한다(_upgrade_seed).
+SEED_VERSION = 3                 # 기본 물품·패키지 결과표의 버전. 올리면 이미 운영 중인 서버도 한 번 이전한다(_upgrade_seed).
 PACKAGE_CANDY = 50
 MAX_PACKAGE_ENTRIES = 20
 SYSTEM_ITEMS = {
@@ -31,14 +32,26 @@ SYSTEM_ITEMS = {
 # 패키지에서 나오는 물품(버전 1에서 추가). (시스템 이름, 이름, 이모지, 설명, 판매가(최소), 판매 최대가(없으면 고정), 패키지 확률 가중치)
 # 판매가가 음수면 팔 때 재화를 내고, 최소~최대면 팔 때마다 그 사이에서 뽑는다. 좋은 물품일수록 가중치가 낮고, 나쁜 물품은 흔하다.
 NEW_ITEMS = (
-    ("witch_hat", "마녀 모자", "🧙", "마녀가 쓰다 놓고 간 뾰족한 모자예요. 은근히 값이 나가요.", 100, None, 5.5),
-    ("ghost_cloth", "유령의 천", "👻", "유령이 두르고 있던 얇고 서늘한 천이에요.", 100, None, 5.5),
-    ("broken_glass", "깨진 유리조각", "🥃", "날카로운 유리조각이에요. 치우려면 처리 비용을 내야 해요.", -150, None, 8),
-    ("jack_o_lantern", "잭 오 랜턴", "🎃", "속이 빈 호박에 불이 켜져 있어요. 꺼지지 않는 신기한 불이에요.", 250, None, 3),
-    ("moon_shard", "달 조각", "🌙", "달에서 떨어져 나온 은빛 조각이에요. 아주 귀해요.", 300, None, 1.5),
-    ("vampire_wine", "뱀파이어맛 와인", "🍷", "붉고 진한 와인이에요. 한 모금이면 송곳니가 자란다는 소문이 있어요.", 500, None, 0.5),
-    ("mystery_bottle", "수상한 액체가 담긴 병", "⚗️", "뭐가 들었는지 아무도 몰라요. 팔 때마다 값이 달라져요.", -300, 300, 4),
+    ("witch_hat", "구형 CPU", "🔲", "한 시대를 풍미했던 구형 프로세서예요. 은근히 값이 나가요.", 100, None, 5.5),
+    ("ghost_cloth", "방열 패드", "🧊", "발열을 잡아 주던 얇고 서늘한 패드예요.", 100, None, 5.5),
+    ("broken_glass", "깨진 디스플레이 파편", "📺", "날카로운 파편이에요. 치우려면 처리 비용을 내야 해요.", -150, None, 8),
+    ("jack_o_lantern", "무정전 전원 장치", "🔌", "전원이 끊겨도 꺼지지 않는 신기한 전원 장치예요.", 250, None, 3),
+    ("moon_shard", "실리콘 웨이퍼", "💿", "거울처럼 반짝이는 얇은 웨이퍼예요. 아주 귀해요.", 300, None, 1.5),
+    ("vampire_wine", "액체 냉각제", "🧪", "차갑고 푸른 냉각액이에요. 한 방울이면 CPU가 식는다는 소문이 있어요.", 500, None, 0.5),
+    ("mystery_bottle", "출처 불명 부품 키트", "🧰", "뭐가 들었는지 아무도 몰라요. 팔 때마다 값이 달라져요.", -300, 300, 4),
 )
+# 예전(할로윈 판) 기본 물품 이름·아이콘·설명: 이전 판 서버의 물품이 아직 이 값 그대로일 때만 새 이름으로 바꾼다(SEED_VERSION 3). {시스템 이름: (이름, 이모지, 설명)}
+LEGACY_ITEMS = {
+    "witch_hat": ("마녀 모자", "🧙", "마녀가 쓰다 놓고 간 뾰족한 모자예요. 은근히 값이 나가요."),
+    "ghost_cloth": ("유령의 천", "👻", "유령이 두르고 있던 얇고 서늘한 천이에요."),
+    "broken_glass": ("깨진 유리조각", "🥃", "날카로운 유리조각이에요. 치우려면 처리 비용을 내야 해요."),
+    "jack_o_lantern": ("잭 오 랜턴", "🎃", "속이 빈 호박에 불이 켜져 있어요. 꺼지지 않는 신기한 불이에요."),
+    "moon_shard": ("달 조각", "🌙", "달에서 떨어져 나온 은빛 조각이에요. 아주 귀해요."),
+    "vampire_wine": ("뱀파이어맛 와인", "🍷", "붉고 진한 와인이에요. 한 모금이면 송곳니가 자란다는 소문이 있어요."),
+    "mystery_bottle": ("수상한 액체가 담긴 병", "⚗️", "뭐가 들었는지 아무도 몰라요. 팔 때마다 값이 달라져요."),
+}
+EMPTY_EMOJI, EMPTY_TITLE = "📭", "빈 패킷"        # 패키지 결과표의 '꽝'(아무것도 안 나옴)
+LEGACY_EMPTY = ("👻", "꽝")                          # 예전 기본 '꽝'. 결과표의 이 칸이 그대로면 새 값으로 바꾼다.
 # 부활권(버전 2에서 추가): 던전에서 쓰러졌을 때 가방에 있으면 자동으로 한 장 쓰여서 되살아난다. 팔 수도 살 수도 없게 만든다(관리자가 /물품수정으로 바꿀 수 있다).
 REVIVE_SYSTEM = "revive"
 REVIVE_ITEM = ("부활권", "🎟️", "던전에서 쓰러졌을 때 가방에 있으면 자동으로 한 장 쓰여서, 그 자리에서 다시 일어나요.")
@@ -272,10 +285,16 @@ def table_with_revive(table: list[dict], revive_id: int) -> list[dict]:
     return [dict(e) for e in table] + [entry]
 
 
+def modernize_table(table: list[dict]) -> list[dict]:
+    """결과표에서 예전 기본 '꽝'(👻 꽝) 칸의 아이콘·이름을 지금 값(📭 빈 패킷)으로 바꾼다. 관리자가 바꾼 칸은 건드리지 않는다."""
+    return [{**e, "emoji": EMPTY_EMOJI, "title": EMPTY_TITLE}
+            if e.get("kind") == "none" and (e.get("emoji"), e.get("title")) == LEGACY_EMPTY else e for e in table]
+
+
 def default_package_table(ids: dict, new_ids: dict, revive_id: int | None = None) -> list[dict]:
     """지금의 기본 패키지 결과표(가중치 합 100이라 가중치가 곧 퍼센트). 버전 1의 표에 부활권 0.1%를 더한 것(꽝에서 0.1을 덜어낸다)."""
     table = package_table_v1(ids, new_ids)
-    return table_with_revive(table, revive_id) if revive_id is not None else table
+    return modernize_table(table_with_revive(table, revive_id) if revive_id is not None else table)
 
 
 # ---------------------------------------------------------------- 저장소
@@ -487,6 +506,35 @@ class Store:
             self._upgrade_seed_v1(guild)
         if self.settings(guild)["seed_version"] < 2:
             self._upgrade_seed_v2(guild)
+        if self.settings(guild)["seed_version"] < 3:
+            self._upgrade_seed_v3(guild)
+
+    def _upgrade_seed_v3(self, guild: int) -> None:
+        """버전 3(기계 분위기 개편): 예전 기본값 그대로인 것만 새 이름으로 바꾼다. 관리자가 직접 바꾼 것은 건드리지 않는다.
+        - 재화: 아이콘 🍬 → 💾, 이름 '할로윈 재화' → 'RAM' (각각 예전 기본값일 때만)
+        - 기본 패키지 물품 7종: 이름·아이콘(·설명)이 예전 기본 그대로일 때만. 새 이름과 겹치는 다른 물품이 있으면 건너뛴다.
+        - 패키지 결과표의 기본 '꽝' 칸(👻 꽝 → 📭 빈 패킷)
+        - 던전: 기본 몬스터·보스·시크릿 보스·장비·소모품의 예전 이름(내용을 직접 편집해 저장해 둔 구역)과 /던전설정으로 정한 숫자의 항목 이름"""
+        cfg = self.settings(guild)
+        changes = {}
+        if cfg["currency_emoji"] == LEGACY_CURRENCY[0]:
+            changes["currency_emoji"] = CANDY
+        if cfg["currency_name"] == LEGACY_CURRENCY[1]:
+            changes["currency_name"] = CANDY_NAME
+        new_text = {system: (name, emoji, description) for system, name, emoji, description, *_ in NEW_ITEMS}
+        with self.db:
+            for system, (old_name, old_emoji, old_description) in LEGACY_ITEMS.items():
+                row = self.db.execute("SELECT id, name, emoji, description FROM items WHERE guild=? AND system=?", (guild, system)).fetchone()
+                if row is None or (row["name"], row["emoji"]) != (old_name, old_emoji):
+                    continue
+                name, emoji, description = new_text[system]
+                if self.db.execute("SELECT 1 FROM items WHERE guild=? AND lower(name)=lower(?) AND id<>?", (guild, name, row["id"])).fetchone():
+                    continue
+                self.db.execute("UPDATE items SET name=?, emoji=?, description=? WHERE id=?",
+                                (name, emoji, description if row["description"] == old_description else row["description"], row["id"]))
+        self.update_settings(guild, seed_version=3, package_table=modernize_table(cfg["package_table"]),
+                             dungeon_content=balance_rules.migrate_content_names(cfg["dungeon_content"]),
+                             dungeon=balance_rules.migrate_override_keys(cfg["dungeon"]), **changes)
 
     def _upgrade_seed_v2(self, guild: int) -> None:
         """버전 2: 부활권을 만들고 패키지 결과표에 0.1%로 넣는다(table_with_revive). 부활권이 이미 표에 있으면 그대로 둔다.
@@ -711,7 +759,7 @@ class Store:
                             (guild, user, recipe["result"]))
         return {"recipe": recipe, "result": result, "price": result["sell_price"]}
 
-    def create_item(self, guild, name, *, emoji="🎃", description="", kind="item", role_id=None,
+    def create_item(self, guild, name, *, emoji="⚙️", description="", kind="item", role_id=None,
                     buy_price=0, sell_price=0, buyable=False, sellable=False, sell_max=None):
         self._check_text(name, emoji, description)
         sell_max = None if sell_max == sell_price else sell_max          # 최소=최대면 고정값

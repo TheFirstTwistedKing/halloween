@@ -44,7 +44,7 @@ class ShopPanelView(discord.ui.View):
                 label=display_name(guild, row)[:100], value=str(row["id"]), description=f"{buy} · {sell}"[:100],
                 emoji=partial_emoji(row["emoji"]) if with_emoji else None))
         select = discord.ui.Select(
-            custom_id=SHOP_SELECT_ID, placeholder="🎃 물품을 골라 보세요",
+            custom_id=SHOP_SELECT_ID, placeholder="🖥️ 물품을 골라 보세요",
             options=options or [discord.SelectOption(label="(물품이 아직 없어요)", value="0")], disabled=not options)
         select.callback = self.on_select
         self.add_item(select)

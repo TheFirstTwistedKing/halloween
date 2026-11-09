@@ -1,5 +1,5 @@
 """무한모드: 마지막 층 보스를 이기고 앞으로 가면 '클리어하고 끝낼지, 무한모드로 계속할지' 묻는다.
-무한모드를 고르면 클리어 보상을 바로 받고(쓰러져도 잃지 않음), 11층부터 층마다 보너스 재화를 받는다."""
+무한모드를 고르면 클리어 보상을 바로 받고(다운돼도 잃지 않음), 11층부터 층마다 보너스 재화를 받는다."""
 import asyncio
 import json
 import random
@@ -301,7 +301,7 @@ class ScreenTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("앞으로", labels)
         embed = run_embed(run, None, bal)
         self.assertIn("꼭대기", embed.title)
-        self.assertEqual(embed.color.value, 0xF1C40F)
+        self.assertEqual(embed.color.value, 0xF5B700)
 
     def test_the_infinite_screen_shows_the_floor(self):
         run, bal = at_summit()

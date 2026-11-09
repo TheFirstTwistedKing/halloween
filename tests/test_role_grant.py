@@ -151,7 +151,7 @@ class CommandTests(RoleGrantFixture):
         text = click.response.edit_message.await_args.kwargs["embed"].description
         self.assertIn("1명은 0 아래로는 내려가지 않아서 일부만 반영됐어요", text)      # 11번은 5만 줄었다
         self.assertIn("합계: **-55**", text)                                           # 11번 −5, 12번 −50
-        view = self.preview(await self.run_cmd(self.ask(), self.role, 99999))[1]["view"]
+        view = self.preview(await self.run_cmd(self.ask(), self.role, CANDY_MAX))[1]["view"]
         click = self.ask()
         await view.confirm(click)
         self.assertEqual(self.candy(self.guest1, self.guest2), [CANDY_MAX, CANDY_MAX])

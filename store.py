@@ -17,12 +17,13 @@ import balance as balance_rules
 CANDY = "💾"                     # 재화(RAM)의 아이콘. 코드 안의 이름은 예전 그대로 CANDY다.
 CANDY_NAME = "RAM"
 LEGACY_CURRENCY = ("🍬", "할로윈 재화")   # 예전 기본 재화(이전 판 서버가 저장해 둔 값): 그대로면 새 기본으로 바꾼다(SEED_VERSION 3).
-CANDY_MAX = 99999                # 보유할 수 있는 최대 재화
+CANDY_MAX = 9_999_999_999         # 보유할 수 있는 최대 재화(기본값이자 /재화설정으로 정할 수 있는 한도). 예전 기본은 99,999였다.
+LEGACY_CANDY_MAX = 99999
 MAX_SHOP_ITEMS = 25              # 선택창 한도(디스코드): 상점에 올릴 수 있는 물품 수
 QTY_MAX = 999                    # 한 번에 사고팔 수 있는 수량
 TICKET_MAX = 99_999              # 한 사람이 가질 수 있는 히든 칭호 획득권의 최대(관리자 지급 기준)
 MAX_RECIPES = 100                # 서버마다 연금술 레시피 수 한도
-SEED_VERSION = 3                 # 기본 물품·패키지 결과표의 버전. 올리면 이미 운영 중인 서버도 한 번 이전한다(_upgrade_seed).
+SEED_VERSION = 4                 # 기본 물품·패키지 결과표의 버전. 올리면 이미 운영 중인 서버도 한 번 이전한다(_upgrade_seed).
 PACKAGE_CANDY = 50
 MAX_PACKAGE_ENTRIES = 20
 SYSTEM_ITEMS = {
@@ -121,7 +122,7 @@ def validate_settings(cfg: dict) -> None:
         raise ValueError("재화 이모지는 😀 같은 이모지 하나이거나 서버 이모지여야 해요.")
     if not isinstance(cfg["currency_name"], str) or not 1 <= len(cfg["currency_name"]) <= 20 or cfg["currency_name"] != cfg["currency_name"].strip():
         raise ValueError("재화 이름은 앞뒤 공백 없이 1~20자여야 해요.")
-    number("currency_max", 1, 10**9, True)
+    number("currency_max", 1, CANDY_MAX, True)
     if cfg["entry_item"] is not None and (isinstance(cfg["entry_item"], bool) or not isinstance(cfg["entry_item"], int)):
         raise ValueError("입장 물품 설정이 올바르지 않아요.")
     number("entry_cost", 1, 99, True)
@@ -508,6 +509,15 @@ class Store:
             self._upgrade_seed_v2(guild)
         if self.settings(guild)["seed_version"] < 3:
             self._upgrade_seed_v3(guild)
+        if self.settings(guild)["seed_version"] < 4:
+            self._upgrade_seed_v4(guild)
+
+    def _upgrade_seed_v4(self, guild: int) -> None:
+        """버전 4: 재화 최대 보유량의 기본값을 99,999 → 9,999,999,999로 늘렸다. 예전 기본값(99,999) 그대로인 서버만 새 기본값으로 올리고,
+        관리자가 /재화설정으로 정해 둔 값은 건드리지 않는다. 가진 재화는 그대로다(늘어나기만 한다)."""
+        cfg = self.settings(guild)
+        changes = {"currency_max": CANDY_MAX} if cfg["currency_max"] == LEGACY_CANDY_MAX else {}
+        self.update_settings(guild, seed_version=4, **changes)
 
     def _upgrade_seed_v3(self, guild: int) -> None:
         """버전 3(기계 분위기 개편): 예전 기본값 그대로인 것만 새 이름으로 바꾼다. 관리자가 직접 바꾼 것은 건드리지 않는다.

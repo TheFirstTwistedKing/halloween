@@ -72,7 +72,7 @@ class RulesAdmin(commands.Cog):
     @app_commands.describe(emoji="재화 아이콘 (이모지 하나 또는 서버 이모지)", name="재화 이름 (20자까지)",
                            maximum="한 사람이 가질 수 있는 최대량. 낮추면 그보다 많이 가진 사람은 최대량으로 줄어요")
     async def currency(self, interaction: discord.Interaction, emoji: str | None = None, name: str | None = None,
-                       maximum: app_commands.Range[int, 1, 1_000_000_000] | None = None):
+                       maximum: app_commands.Range[int, 1, 9_999_999_999] | None = None):
         if not await require_admin(interaction):
             return
         store, gid = self.bot.store, interaction.guild_id

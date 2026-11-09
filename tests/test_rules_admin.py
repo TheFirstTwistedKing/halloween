@@ -63,7 +63,7 @@ class AdminOnlyTests(RulesFixture):
 class CurrencyCommandTests(RulesFixture):
     async def test_show_then_change(self):
         i = await self.run_cmd(RulesAdmin.currency, self.ask())
-        self.assertIn("💾 **RAM** · 최대 99,999개", self.text(i))
+        self.assertIn("💾 **RAM** · 최대 9,999,999,999개", self.text(i))
         i = await self.run_cmd(RulesAdmin.currency, self.ask(), "💎", "젬", 5000)
         self.assertIn("💎 **젬** · 최대 5,000개", self.text(i))
         self.assertEqual(tuple(self.store.currency(G)), ("💎", "젬", 5000))
@@ -73,7 +73,7 @@ class CurrencyCommandTests(RulesFixture):
         for kwargs in (dict(emoji="abc"), dict(emoji="😀😀😀😀😀😀😀😀😀"), dict(name="가" * 21), dict(name="  ")):
             i = await self.run_cmd(RulesAdmin.currency, self.ask(), **kwargs)
             self.assertIn("오류", sent_embed(i)[0].title, kwargs)
-        self.assertEqual(tuple(self.store.currency(G)), ("💾", "RAM", 99999))
+        self.assertEqual(tuple(self.store.currency(G)), ("💾", "RAM", 9_999_999_999))
 
     async def test_lowering_the_max_asks_first_and_names_the_count(self):
         self.store.add_candy(G, 1, 900)
@@ -83,10 +83,10 @@ class CurrencyCommandTests(RulesFixture):
         self.assertIn("1명", embed.description)
         view = kwargs["view"]
         self.assertIsInstance(view, Confirm)
-        self.assertEqual((self.store.currency(G).max, self.store.wallet(G, 1)), (99999, 900))   # 확인 전에는 그대로
+        self.assertEqual((self.store.currency(G).max, self.store.wallet(G, 1)), (9_999_999_999, 900))   # 확인 전에는 그대로
         self.assertFalse(await view.interaction_check(self.ask(uid=99)))
         await view.cancel(self.ask())
-        self.assertEqual((self.store.currency(G).max, self.store.wallet(G, 1)), (99999, 900))
+        self.assertEqual((self.store.currency(G).max, self.store.wallet(G, 1)), (9_999_999_999, 900))
         click = self.ask()
         await view.confirm(click)
         self.assertEqual((self.store.currency(G).max, self.store.wallet(G, 1), self.store.wallet(G, 2)), (100, 100, 90))

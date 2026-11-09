@@ -57,7 +57,7 @@ class SeedTests(unittest.TestCase):
         self.store.ensure_defaults(G)
         table = self.store.settings(G)["package_table"]
         revive = self.store.revive_item(G)
-        self.assertEqual(self.store.settings(G)["seed_version"], 3)
+        self.assertEqual(self.store.settings(G)["seed_version"], 4)
         self.assertEqual([e["id"] for e in table][-1], "revive")
         self.assertEqual(table[-1]["item"], revive["id"])
         self.assertEqual(table[0]["weight"], 39.9)

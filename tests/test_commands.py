@@ -162,7 +162,7 @@ class GrantTests(CommandFixture):
         self.assertEqual(self.reply(interaction)[0], "<@8>의 RAM이 +40만큼 바뀌었어요. (지금 💾 40)")
         interaction = await self.call(Admin.give_candy, self.admin, self.ask(), self.target, CANDY_MAX)
         self.assertIn(f"+{CANDY_MAX - 40:,}만큼", self.reply(interaction)[0])                   # 상한까지만
-        interaction = await self.call(Admin.give_candy, self.admin, self.ask(), self.target, -99999)
+        interaction = await self.call(Admin.give_candy, self.admin, self.ask(), self.target, -CANDY_MAX)
         self.assertEqual(self.store.wallet(100, 8), 0)
 
     async def test_bots_are_refused(self):
@@ -414,7 +414,7 @@ class EconomyCommandTests(CommandFixture):
         self.assertNotIn("EXP", text)
         self.assertIn("📭 빈 패킷 39.9% · 🗝️ 열쇠 14% · 💾 RAM 50 7% · 🗑️ 쓰레기 11% · 🔲 구형 CPU 5.5% · 🧊 방열 패드 5.5% · "
                       "📺 깨진 디스플레이 파편 8% · 🔌 무정전 전원 장치 3% · 💿 실리콘 웨이퍼 1.5% · 🧪 액체 냉각제 0.5% · 🧰 출처 불명 부품 키트 4% · 🎟️ 부활권 0.1%", text)
-        self.assertIn("최대 99,999개", text)
+        self.assertIn("최대 9,999,999,999개", text)
         self.store.update_settings(100, channels=[400, 401], candy_chance=80, package_mode="first")
         interaction = await self.call(Economy.help, self.economy, self.ask(admin=False))
         text = "\n".join(f"{f.name} {f.value}" for f in sent_embed(interaction)[0].fields)

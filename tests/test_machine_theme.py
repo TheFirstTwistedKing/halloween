@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent
 class CurrencyAndJosaTests(unittest.TestCase):
     def test_the_default_currency_is_ram(self):
         self.assertEqual((CANDY, CANDY_NAME), ("💾", "RAM"))
-        self.assertEqual(tuple(store_module.DEFAULT_CURRENCY), ("💾", "RAM", 99999))
+        self.assertEqual(tuple(store_module.DEFAULT_CURRENCY), ("💾", "RAM", 9_999_999_999))
         self.assertEqual(theme.money(1234), "💾 1,234")
         self.assertEqual(theme.plain_money(5), "💾 5")
 
@@ -57,7 +57,7 @@ class FreshServerTests(unittest.TestCase):
 
     def test_a_new_server_starts_with_ram_machine_parts_and_empty_packets(self):
         self.store.ensure_defaults(G)
-        self.assertEqual(tuple(self.store.currency(G)), ("💾", "RAM", 99999))
+        self.assertEqual(tuple(self.store.currency(G)), ("💾", "RAM", 9_999_999_999))
         self.assertEqual(self.store.settings(G)["seed_version"], SEED_VERSION)
         names = {r["name"] for r in self.store.db.execute("SELECT name FROM items WHERE guild=?", (G,))}
         self.assertTrue({n for _, n, *_ in NEW_ITEMS} <= names)
@@ -96,8 +96,8 @@ class MigrationTests(unittest.TestCase):
     def test_untouched_old_defaults_are_renamed(self):
         self.assertEqual(self.item("witch_hat")["name"], "마녀 모자")
         self.store.ensure_defaults(G)
-        self.assertEqual(self.store.settings(G)["seed_version"], 3)
-        self.assertEqual(tuple(self.store.currency(G)), ("💾", "RAM", 99999))
+        self.assertEqual(self.store.settings(G)["seed_version"], 4)
+        self.assertEqual(tuple(self.store.currency(G)), ("💾", "RAM", 9_999_999_999))
         for system, name, emoji, description, *_ in NEW_ITEMS:
             row = self.item(system)
             self.assertEqual((row["name"], row["emoji"], row["description"]), (name, emoji, description), system)
@@ -135,7 +135,7 @@ class MigrationTests(unittest.TestCase):
         after = self.item("jack_o_lantern")
         self.assertEqual((after["id"], after["sell_price"], after["sellable"]), (before["id"], before["sell_price"], before["sellable"]))
         self.store.ensure_defaults(G)
-        self.assertEqual(self.store.settings(G)["seed_version"], 3)
+        self.assertEqual(self.store.settings(G)["seed_version"], 4)
         self.assertEqual(self.item("jack_o_lantern")["name"], "무정전 전원 장치")
 
     def test_the_default_package_table_reset_uses_the_new_empty_packet(self):

@@ -1062,6 +1062,10 @@ class Balance:
     special_power: int = 500
     special_ends: bool = True    # 특수 스킬을 쓰면 각성이 끝나는지
     awaken_bonus: int = 0        # 각성 중 내 공격 피해 보너스(%)
+    final_boss: "Monster | None" = None   # 무한모드 최종보스(/최종보스). build가 채운다
+    final_floor: int = 100       # 최종보스가 나오는 층(그 층의 10번째 방). 0이거나 마지막 층 이하면 나오지 않는다
+    final_reward: int = 50000    # 최종보스를 쓰러뜨리면 클리어 보상에 더해 받는 재화
+    final_tickets: int = 1       # 최종보스를 쓰러뜨리면 받는 히든 칭호 획득권
     elements: tuple = ()         # 관리자가 만든 속성 ((key, 이름, 이모지), ...)
     affinity: tuple = ()         # 상성표 ((공격 속성, 방어 속성, 배율 %), ...). 없는 조합은 100%
     mods: tuple = ()             # 장비 개조 레시피 ((무기 key, 재료 key, 결과 무기 key), ...). 만든 쪽에서 쓸 수 있는 것만 남긴다(build).
@@ -1080,6 +1084,11 @@ class Balance:
         object.__setattr__(self, "element_by_key", {k: (k, n, e) for k, n, e in self.elements})
         object.__setattr__(self, "affinity_map", {(a, d): p for a, d, p in self.affinity})
 
+    @property
+    def final_on(self) -> bool:
+        """무한모드 최종보스가 나오는가: 무한모드가 켜져 있고, 최종보스 층이 마지막 층보다 높다."""
+        return bool(self.infinite) and self.final_boss is not None and self.final_floor > self.floors
+
     def element_percent(self, attack: str | None, defend: str | None) -> int:
         """공격 속성이 방어 속성을 때릴 때의 피해 배율(%). 어느 쪽이든 속성이 없거나(지워진 속성 포함) 상성표에 없는 조합이면 100."""
         if attack not in self.element_by_key or defend not in self.element_by_key:
@@ -1096,7 +1105,7 @@ class Balance:
         return self.mod_by_pair.get((weapon_key, item_key))
 
     @classmethod
-    def build(cls, overrides=None, content=None, mods=None, elements=None, affinity=None, awakening=None) -> "Balance":
+    def build(cls, overrides=None, content=None, mods=None, elements=None, affinity=None, awakening=None, final=None) -> "Balance":
         """기본값 위에 숫자 덮어쓰기(overrides)를 얹고, 관리자가 만든 콘텐츠(content)가 있는 구역은 그것으로 통째로 바꾼다.
         mods는 장비 개조 레시피 [{weapon, item, result}, ...]: 무기·재료·결과가 지금 실제로 있는 것만 남긴다."""
         o = clean(overrides)
@@ -1143,7 +1152,7 @@ class Balance:
             clear_candy=(get("보상.최소"), get("보상.최대")), ticket_chance=get("보상.획득권확률"), room_plan=plan,
             monsters=custom.get("monsters", monsters), bosses=custom.get("bosses", bosses),
             gear=final_gear, consumables=final_items, mods=clean_mods(mods, final_gear, final_items),
-            **clean_elements(elements, affinity), **clean_awakening(awakening))
+            **clean_elements(elements, affinity), **clean_awakening(awakening), **clean_final(final))
 
 
 AWAKENING_DEFAULT = {"ult_charge": 20, "awaken_charge": 10, "special": "power", "special_power": 500, "special_ends": True, "awaken_bonus": 0}
@@ -1167,6 +1176,43 @@ def clean_awakening(raw) -> dict:
     if isinstance(raw.get("special_ends"), bool):
         out["special_ends"] = raw["special_ends"]
     return out
+
+
+FINAL_BOSS_DEFAULT = {"key": "final_boss", "name": "오메가 코어", "emoji": "🌀", "hp": 1500, "damage": 150, "dodge": 0,
+                      "phase2_hp": 1500, "phase2_damage": 180, "skill": "strike", "skill_every": 3, "skill_power": 200}
+FINAL_BOSS_FIELDS = ("name", "emoji", "hp", "damage", "element", "phase2_hp", "phase2_damage", "skill", "skill_every", "skill_power", "skill_turns")
+FINAL_RULES_DEFAULT = {"floor": 100, "reward": 50000, "tickets": 1}
+FINAL_LIMITS = {"floor": (0, 1000), "reward": (0, 1_000_000_000), "tickets": (0, 10)}
+
+
+def check_final(raw) -> tuple[dict | None, str | None]:
+    """저장할 최종보스 설정(/최종보스)을 검사한다. (정리된 사전, None) 또는 (None, 이유). 비운 칸은 기본값이다."""
+    raw = raw if isinstance(raw, dict) else {}
+    data = dict(FINAL_BOSS_DEFAULT)
+    data.update({k: raw[k] for k in FINAL_BOSS_FIELDS if k in raw})
+    data["key"] = FINAL_BOSS_DEFAULT["key"]              # 회피(dodge)는 FINAL_BOSS_FIELDS에 없어서 늘 0(보스는 항상 명중)
+    if data.get("skill") == "none":                      # 관리자가 스킬을 지웠다(비운 칸이면 기본 스킬이라 따로 표시해 둔다)
+        data["skill"] = None
+    boss, problem = check_entity("bosses", data)
+    if problem:
+        return None, problem
+    out = {k: v for k, v in entity_dict(boss).items() if k in FINAL_BOSS_FIELDS}
+    for key, (low, high) in FINAL_LIMITS.items():
+        value = raw.get(key, FINAL_RULES_DEFAULT[key])
+        if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+            return None, {"floor": f"층은 0(없음)~{high:,} 사이", "reward": f"보상은 {low}~{high:,} 사이",
+                          "tickets": f"획득권은 {low}~{high} 사이"}[key] + "로 정해 주세요."
+        out[key] = value
+    return out, None
+
+
+def clean_final(raw) -> dict:
+    """저장된 최종보스 설정을 Balance 칸으로. 잘못 저장돼 있으면 기본 최종보스·규칙을 쓴다."""
+    data, problem = check_final(raw)
+    if problem:
+        data, _ = check_final({})
+    boss = check_entity("bosses", dict(data, key=FINAL_BOSS_DEFAULT["key"]))[0]
+    return {"final_boss": boss, "final_floor": data["floor"], "final_reward": data["reward"], "final_tickets": data["tickets"]}
 
 
 MAX_ELEMENTS = 20               # 서버마다 속성 수 한도

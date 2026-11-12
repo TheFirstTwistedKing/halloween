@@ -72,6 +72,7 @@ class Run:
     auto: bool = False                              # 빠른진행 중(컴퓨터가 알아서 진행). 켜 둔 채 봇이 꺼지면 다음에 /던전을 열 때 꺼진다.
     auto_paid: bool = False                         # 이 던전에서 빠른진행 비용(입장 물품 한 번 더)을 이미 냈다: 껐다 켜도 다시 내지 않는다.
     infinite: bool = False                          # 무한모드 중: 마지막 층을 깬 뒤 클리어하지 않고 계속 올라가고 있다.
+    final_clear: bool = False                       # 무한모드 최종보스를 쓰러뜨려 완전 클리어했다(서비스가 최종보스 보상을 더 준다)
     bonus: int = 0                                  # 방금 올라간 무한 층의 보너스 재화(서비스가 지급하고 0으로 되돌린다)
     shop: list = field(default_factory=list)        # 지금 상점의 상품 [{kind: gear|item, key, price, sold}]
     shop_floor: int = 0                             # 마지막으로 상점이 열린 층(같은 층에서 또 열리지 않게)
@@ -273,6 +274,8 @@ def advance(run: Run, rng, bal: Balance | None = None) -> list[str]:
                 run.phase, run.enemy, run.kind = "summit", None, "summit"
                 run.events = [f"🏆 **{bal.floors}층 꼭대기**에 도착했어요!", "**클리어하고 끝낼지**, **♾️ 무한모드**로 계속 올라갈지 정해 주세요.",
                               "무한모드를 고르면 클리어 보상을 지금 받고, 다운돼도 잃지 않아요. 층마다 보너스 재화가 나오지만 몬스터는 계속 강해져요."]
+                if bal.final_on:
+                    run.events.append(f"🌀 무한 **{bal.final_floor}층**에는 **최종보스**가 기다려요. 쓰러뜨리면 던전을 완전히 클리어하고 큰 보상을 받아요.")
                 return run.events
             run.phase, run.enemy, run.kind = "clear", None, ""
             run.events = [f"🏆 {bal.floors}층 꼭대기에 도착했어요! 던전을 모두 돌파했어요!"]
@@ -291,9 +294,16 @@ def advance(run: Run, rng, bal: Balance | None = None) -> list[str]:
     if run.kind.startswith("custom:"):                   # 커스텀 방: 종류는 'custom'으로 두고 방 정보는 여기서 꺼낸다(관리자가 지운 방이면 빈 방).
         custom = next((c for c in bal.rooms if c.key == run.kind[7:]), None)
         run.kind = "custom" if custom else "empty"
-    if run.kind in ("monster", "boss") and not (bal.bosses if run.kind == "boss" else bal.monsters):
+    final = run.infinite and run.room == ROOMS and run.floor == bal.final_floor and bal.final_on
+    if final:                                            # 무한모드 최종보스 층의 10번째 방: 방 배치와 상관없이 최종보스가 나온다
+        run.kind = "boss"
+    if run.kind in ("monster", "boss") and not final and not (bal.bosses if run.kind == "boss" else bal.monsters):
         run.kind = "empty"                               # 관리자가 몬스터를 모두 지웠다면(검사를 통과한 설정이면 없는 일) 빈 방으로 둔다.
-    if run.kind in ("monster", "boss"):
+    if final:
+        run.enemy, run.phase = dict(_spawn(bal.final_boss, run.floor, bal), final=True), "battle"
+        run.last.append("final_intro")
+        text = [f"🌀 **최종 관문** — 무한 **{run.floor}층**의 끝이에요.", f"{bal.final_boss.emoji} **{bal.final_boss.name}**이(가) 깨어났어요! 쓰러뜨리면 던전을 **완전히 클리어**해요!"]
+    elif run.kind in ("monster", "boss"):
         table = bal.bosses if run.kind == "boss" else bal.monsters
         monster = pick_weighted(rng, monsters_for_floor(table, run.floor))      # 이 층에 나올 수 있는 것 중에서 '등장' 비율대로(기본은 모두 같은 확률)
         run.enemy, run.phase = _spawn(monster, run.floor, bal), "battle"
@@ -515,7 +525,7 @@ def _enemy_attack(run: Run, reduction: int, bal: Balance | None = None, guarded:
 
 def _end_turn(run: Run, bal: Balance, rng=None) -> list[str]:
     """한 턴이 끝날 때: 턴마다 회복(나노봇 주입제), 턴마다 줄어드는 HP(자해), 무적·피해 감소 턴 줄이기, 몬스터에게 걸린 지속 피해."""
-    if run.phase == "dead":
+    if run.phase in ("dead", "clear"):                   # 끝난 던전(다운·최종보스 완전 클리어)에는 턴 효과가 없다
         return []
     events = []
     if run.regen_turns > 0:
@@ -605,6 +615,10 @@ def enemy_down(run: Run, bal: Balance, rng=None) -> tuple[list[str], bool]:
             enemy["damage"] = enemy["phase2_damage"]
         return [f"⚠️ **{enemy['name']}**의 1페이즈 체력 바가 다 깎였어요… 🔴 **2페이즈 돌입!** (HP {enemy['hp']:,} · 공격 {enemy['damage']:,})"], True
     events = [f"🎉 **{enemy['name']}**을(를) 무력화했어요!"]
+    if enemy.get("final"):                               # 최종보스: 그 자리에서 완전 클리어로 끝난다(보상은 서비스가 준다)
+        run.phase, run.final_clear, run.burn_turns = "clear", True, 0
+        events.append("🏆 **최종보스를 쓰러뜨렸어요!** 던전을 **완전히 클리어**했어요!")
+        return events, False
     run.phase = "cleared"
     if enemy.get("secret"):
         events += secret_drops(run, rng or random, bal)

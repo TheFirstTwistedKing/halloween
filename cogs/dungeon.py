@@ -60,7 +60,9 @@ def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=No
     """지금 화면. 끝난 던전이면 결과(보상)를 보여 준다."""
     bal = bal or DEFAULT
     ended = outcome.ended if outcome else None
-    if ended == "clear":
+    if ended == "clear" and run.final_clear:
+        color, title = theme.GOLD, "🌀 던전 완전 클리어!"
+    elif ended == "clear":
         color, title = theme.GREEN, "🏆 던전 클리어!"
     elif ended == "dead":
         color, title = theme.RED, "💀 시스템이 다운됐어요…"
@@ -70,6 +72,8 @@ def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=No
         color, title = theme.GOLD, f"🏔️ {max(run.floor, 1)}층 꼭대기에 도착했어요!"
     elif run.phase == "shop":
         color, title = theme.GOLD, f"🛒 {max(run.floor, 1)}층 상점"
+    elif run.enemy and run.enemy.get("final") and not ended:
+        color, title = theme.GOLD, f"🌀 최종 관문 — 무한 {max(run.floor, 1)}층"
     elif run.kind == "secret":
         color, title = theme.GOLD, f"🌌 시크릿 방 — {max(run.floor, 1)}/{bal.floors}층"
     elif run.infinite:
@@ -81,7 +85,7 @@ def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=No
         enemy = run.enemy
         if enemy.get("image"):
             embed.set_image(url=enemy["image"])                # 시크릿 보스의 그림(움직이는 gif도 돼요)
-        embed.add_field(name=f"{enemy['emoji']} {enemy['name']}" + (f" [{bal.element_label(enemy.get('element'))}]" if bal.element_label(enemy.get("element")) else "") + (" 🌌 SECRET" if enemy.get("secret") else " 👑" if enemy["boss"] else "")
+        embed.add_field(name=f"{enemy['emoji']} {enemy['name']}" + (f" [{bal.element_label(enemy.get('element'))}]" if bal.element_label(enemy.get("element")) else "") + (" 🌌 SECRET" if enemy.get("secret") else " 🌀 FINAL" if enemy.get("final") else " 👑" if enemy["boss"] else "")
                         + (f" [{enemy.get('phase', 1)}/2페이즈]" if enemy.get("phase2_hp") or enemy.get("phase", 1) == 2 else "") + (" 💫 기절(다음 공격 못 함)" if enemy.get("stunned") else ""), inline=False,
                         value=f"{bar(enemy['hp'], enemy['max_hp'], '🟥')} {enemy['hp']}/{enemy['max_hp']}")
     if run.phase == "shop" and run.shop and not ended:
@@ -139,7 +143,12 @@ def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=No
         lines += [f"{emoji} **{name}** ×{amount:,}" for emoji, name, amount in reward.items]
         if reward.ticket:
             lines.append(f"🎟️ **히든 칭호 획득권**이 나왔어요! (지금 {reward.tickets_total}장)")
+        if reward.final:
+            lines.append("🌀 **최종보스 보상**" + (f" {theme.money(reward.final_candy, cur)}" if reward.final_candy else "")
+                         + (f" · 🎟️ 획득권 +{reward.final_tickets} (지금 {reward.tickets_total}장)" if reward.final_tickets else "") + " (위 재화에 포함)")
         embed.add_field(name="🎁 보상", value="\n".join(lines), inline=False)
+        if reward.final:
+            embed.add_field(name="🌀 완전 클리어", value=f"무한 **{run.floor}층**의 최종보스까지 쓰러뜨리고 던전을 완전히 클리어했어요!", inline=False)
     elif ended in ("dead", "quit"):
         embed.add_field(name="입장 물품", value="입장에 쓴 물품은 돌아오지 않아요. 새로 도전하려면 입장 물품이 다시 필요해요.", inline=False)
         if run.infinite:                                  # 클리어 보상과 층 보너스는 이미 받았다.
@@ -149,18 +158,27 @@ def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=No
     return embed
 
 
+def has_intro(run: Run) -> bool:
+    """방금 시크릿 보스나 무한모드 최종보스가 나타나서 등장 연출을 보여 줘야 하나."""
+    return "secret_intro" in run.last or "final_intro" in run.last
+
+
 def secret_intro_frames(enemy: dict) -> list[discord.Embed]:
     """시크릿 보스 등장 연출: 같은 메시지를 장면마다 고쳐서 움직이는 것처럼 보이게 한다(어둠 → 경고 → 이름이 드러남 → 등장)."""
     name, emoji = enemy["name"], enemy["emoji"]
     cover = "？" * min(len(name), 12)
     half = name[: max(1, len(name) // 2)] + "？" * (min(len(name), 12) - max(1, len(name) // 2))
-    final = theme.make_embed("🌌 S E C R E T   B O S S 🌌", f"# {emoji} 『 {name} 』\n" + (f"*{enemy['intro']}*" if enemy.get("intro") else ""), color=theme.GOLD)
+    if enemy.get("final"):                               # 무한모드 최종보스: 같은 연출에 제목·문구만 다르다
+        title, quiet, warn = "🌀 F I N A L   B O S S 🌀", "던전 전체의 전력이 한 곳으로 빨려 들어간다.\n모든 층의 기계가 동시에 멈춘다…", "**던전의 중심 코어가 깨어난다!**"
+    else:
+        title, quiet, warn = "🌌 S E C R E T   B O S S 🌌", "서버실의 팬 소리가 갑자기 멈춘다.\n모든 모니터가 한꺼번에 꺼진다…", "**알 수 없는 거대한 신호가 감지된다!**"
+    final = theme.make_embed(title, f"# {emoji} 『 {name} 』\n" + (f"*{enemy['intro']}*" if enemy.get("intro") else ""), color=theme.GOLD)
     if enemy.get("image"):
         final.set_image(url=enemy["image"])
     return [
         theme.make_embed("…", "⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛\n⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛\n⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛", color=0x050507),
-        theme.make_embed("🌑 ……", "서버실의 팬 소리가 갑자기 멈춘다.\n모든 모니터가 한꺼번에 꺼진다…", color=0x2B1B4A),
-        theme.make_embed("⚠️ ⚠️ ⚠️  WARNING  ⚠️ ⚠️ ⚠️", "**알 수 없는 거대한 신호가 감지된다!**", color=theme.RED),
+        theme.make_embed("🌑 ……", quiet, color=0x2B1B4A),
+        theme.make_embed("⚠️ ⚠️ ⚠️  WARNING  ⚠️ ⚠️ ⚠️", warn, color=theme.RED),
         theme.make_embed("👁️ 무언가 가동을 시작했다", f"# 『 {cover} 』", color=0x7A1F1F),
         theme.make_embed("👁️ 이름이 드러난다…", f"# 『 {half} 』", color=0xB5651D),
         final,
@@ -344,7 +362,7 @@ async def respond(interaction: discord.Interaction, client, rev: int, action: st
         return
     run = outcome.run
     view = None if outcome.ended else DungeonView(client, interaction.user.id, run, bal)
-    if "secret_intro" in run.last and not outcome.ended and not from_confirm:      # 시크릿 방이 열렸다: 특별한 등장 연출을 먼저 보여 준다.
+    if has_intro(run) and not outcome.ended and not from_confirm:      # 시크릿 방이 열렸다: 특별한 등장 연출을 먼저 보여 준다.
         await play_secret_intro(interaction, run.enemy, first_is_response=True)
         await interaction.edit_original_response(embed=run_embed(run, outcome, bal, client.store.currency(interaction.guild_id)), view=view)
         return
@@ -492,7 +510,7 @@ async def run_auto(interaction: discord.Interaction, client, user_id: int, view)
             if outcome.ended:
                 await interaction.edit_original_response(embed=auto_embed(outcome.run, outcome, bal, cur), view=None)
                 return
-            if "secret_intro" in outcome.run.last:             # 빠른진행 중에도 시크릿 보스 등장 연출은 그대로 보여 준다.
+            if has_intro(outcome.run):             # 빠른진행 중에도 시크릿 보스 등장 연출은 그대로 보여 준다.
                 await play_secret_intro(interaction, outcome.run.enemy, first_is_response=False, view=view)
             await interaction.edit_original_response(embed=auto_embed(outcome.run, outcome, bal, cur), view=view)
     except asyncio.CancelledError:

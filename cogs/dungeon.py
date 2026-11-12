@@ -97,6 +97,9 @@ def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=No
         gear = [f"{weapon.emoji} {weapon.name}{tag(weapon)}" if weapon else "👊 맨손", f"{shield.emoji} {shield.name}" if shield else "✋ 맨몸 가드",
                 f"{armor.emoji} {armor.name}{tag(armor)}" if armor else "🧥 맨몸"]
         embed.add_field(name="🎒 장비", value=" · ".join(gear), inline=False)
+        passive = {"attack": run.base_attack, "guard": run.base_guard, "reflect": run.base_reflect, "reduction": run.base_reduction}
+        if any(passive.values()):                         # 기지에 전시한 장비의 패시브(들어올 때 정해졌다)
+            embed.add_field(name="🏠 기지 패시브", value=service.passive_text(passive), inline=False)
         spare = [bal.gear_by_key.get(run.spare_weapon), bal.gear_by_key.get(run.spare_shield), bal.gear_by_key.get(run.spare_armor)]
         if any(spare):                                    # 예비 칸은 비어 있으면 보여 주지 않는다.
             embed.add_field(name="📦 예비", inline=False,

@@ -364,6 +364,9 @@ class Store:
             CREATE TABLE IF NOT EXISTS vault(
                 guild INTEGER, user INTEGER, kind TEXT NOT NULL CHECK(kind IN ('gear','item')), key TEXT NOT NULL,
                 qty INTEGER NOT NULL CHECK(qty > 0), PRIMARY KEY(guild, user, kind, key));
+            CREATE TABLE IF NOT EXISTS base_display(
+                guild INTEGER, user INTEGER, slot TEXT NOT NULL CHECK(slot IN ('weapon','shield','armor')), key TEXT NOT NULL,
+                PRIMARY KEY(guild, user, slot));
             CREATE TABLE IF NOT EXISTS vault_loadout(
                 guild INTEGER, user INTEGER, data TEXT NOT NULL, PRIMARY KEY(guild, user));
         """)
@@ -1117,6 +1120,33 @@ class Store:
                     raise StoreError("보관함에 그만큼 없어요. 화면을 다시 열어 주세요.")
             self.db.execute("UPDATE wallets SET candy=candy+? WHERE guild=? AND user=?", (total, guild, user))
         return old + total
+
+    # ---- 기지: 보관함의 장비를 종류마다 하나씩 전시한다(전시한 것은 던전에 가져갈 수 없고, 능력치 일부가 패시브로 더해진다) ----
+    def base(self, guild: int, user: int) -> dict[str, str]:
+        """기지에 전시한 장비 {칸: key}."""
+        return {row["slot"]: row["key"] for row in
+                self.db.execute("SELECT slot, key FROM base_display WHERE guild=? AND user=?", (guild, user))}
+
+    def set_display(self, guild: int, user: int, slot: str, key: str | None) -> None:
+        """slot 칸에 보관함의 장비 key를 전시한다(보관함에서 1개 뺀다). 이미 전시한 것은 보관함으로 돌아간다. key가 None이면 비운다.
+        보관함에 그 장비가 없거나, 돌려놓을 보관함 자리가 없으면 StoreError이고 아무것도 바꾸지 않는다."""
+        with self.db:
+            old = self.base(guild, user).get(slot)
+            if key is not None and key == old:
+                return
+            if key is not None and not self._vault_take(guild, user, "gear", key, 1):
+                raise StoreError("보관함에 그 장비가 없어요. 화면을 다시 열어 주세요.")
+            if old is not None:
+                held = self.db.execute("SELECT COALESCE(SUM(qty), 0) AS n FROM vault WHERE guild=? AND user=? AND kind='gear'",
+                                       (guild, user)).fetchone()["n"]
+                if held >= balance_rules.VAULT_GEAR_MAX:
+                    raise StoreError(f"보관함이 가득 차서(장비 {balance_rules.VAULT_GEAR_MAX}개) 전시한 장비를 돌려놓을 수 없어요. 먼저 보관함에서 팔아 주세요.")
+                self._vault_put(guild, user, "gear", old, 1)
+            if key is None:
+                self.db.execute("DELETE FROM base_display WHERE guild=? AND user=? AND slot=?", (guild, user, slot))
+            else:
+                self.db.execute("INSERT INTO base_display VALUES(?,?,?,?) ON CONFLICT(guild,user,slot) DO UPDATE SET key=excluded.key",
+                                (guild, user, slot, key))
 
     def loadout(self, guild: int, user: int) -> dict:
         """다음 던전에 보관함에서 가져갈 것 {'weapon','shield','armor': key|None, 'items': [key, ...]}."""

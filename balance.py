@@ -20,6 +20,7 @@ INFINITE_STEP = 10                # 그 뒤로 한 층 오를 때마다 늘어�
 SECRET_CHANCE = 10.0               # 보스를 이기고 올라갈 때 11번째 방(시크릿 보스)이 생길 확률(%)
 REVIVE_HEAL = 50                 # 부활권으로 되살아날 때 최대 HP의 몇 %로 일어나는지
 FLOOR_HEAL = 50                  # 위 층으로 올라갈 때 잃은 HP의 몇 %를 회복하는지
+BASE_PASSIVE = 10                # 기지에 전시한 장비 능력치 중 던전에서 더해지는 %
 VAULT_ITEMS = 5                  # 던전에 들어갈 때 보관함에서 가져갈 수 있는 소모품 수(종류마다 1개)
 VAULT_GEAR_MAX = 30              # 보관함에 둘 수 있는 장비 수(전부 합쳐)
 VAULT_ITEM_MAX = 99              # 보관함에 둘 수 있는 소모품 수(종류마다)
@@ -937,6 +938,7 @@ def _build_params() -> dict[str, Param]:
     add("일반.층당강화", "일반", FLOOR_SCALE, 0, 200, note="층이 하나 오를 때마다 몬스터·보스의 체력과 공격이 1층의 몇 %씩 늘어날지(0이면 그대로)")
     add("일반.층이동회복", "일반", FLOOR_HEAL, 0, 100, note="위 층으로 올라갈 때 잃은 HP의 몇 %를 회복할지")
     add("일반.무한모드", "일반", INFINITE, 0, 1, note="1이면 마지막 층 보스를 이기고 앞으로 갈 때 '클리어하고 끝낼지, 무한모드로 계속할지' 물어요. 0이면 묻지 않고 바로 클리어해요")
+    add("기지.패시브", "일반", BASE_PASSIVE, 0, 100, note="기지에 전시한 장비 능력치의 몇 %가 던전에서 더해질지(무기 공격력, 방패 가드·반사, 갑옷 피해 감소)")
     add("보관함.소모품", "일반", VAULT_ITEMS, 0, 25, note="던전에 들어갈 때 보관함에서 가져갈 수 있는 소모품 수(종류마다 1개). 0이면 소모품은 못 가져가요")
     add("무한.층보너스", "일반", INFINITE_BONUS, 0, 99999, note="무한모드에서 마지막 층 다음 첫 층에 오를 때 받는 재화")
     add("무한.보너스증가", "일반", INFINITE_STEP, 0, 99999, note="무한모드에서 한 층 더 오를 때마다 보너스가 늘어나는 양")
@@ -1066,6 +1068,7 @@ class Balance:
     special_power: int = 500
     special_ends: bool = True    # 특수 스킬을 쓰면 각성이 끝나는지
     awaken_bonus: int = 0        # 각성 중 내 공격 피해 보너스(%)
+    base_passive: int = BASE_PASSIVE # 기지에 전시한 장비 능력치 중 던전에서 더해지는 %
     vault_items: int = VAULT_ITEMS   # 던전에 들어갈 때 보관함에서 가져갈 수 있는 소모품 수
     final_boss: "Monster | None" = None   # 무한모드 최종보스(/최종보스). build가 채운다
     final_floor: int = 100       # 최종보스가 나오는 층(그 층의 10번째 방). 0이거나 마지막 층 이하면 나오지 않는다
@@ -1150,7 +1153,7 @@ class Balance:
         final_gear, final_items = custom.get("gear", tuple(gear)), custom.get("consumables", tuple(items))
         return cls(
             max_hp=get("일반.최대체력"), floors=get("일반.층수"), floor_scale=get("일반.층당강화"), floor_heal=get("일반.층이동회복"), revive_heal=get("일반.부활체력"), secret_chance=get("일반.시크릿확률"), infinite=get("일반.무한모드"),
-            vault_items=get("보관함.소모품"), infinite_bonus=get("무한.층보너스"), infinite_step=get("무한.보너스증가"), secrets=custom.get("secrets", SECRET_BOSSES),
+            vault_items=get("보관함.소모품"), base_passive=get("기지.패시브"), infinite_bonus=get("무한.층보너스"), infinite_step=get("무한.보너스증가"), secrets=custom.get("secrets", SECRET_BOSSES),
             rooms=custom.get("rooms", ()), trap_damage=get("함정.피해"), shop_interval=get("상점.간격"), shop_markup=get("상점.가격배율"),
             base_damage=get("일반.맨손공격력"), guard_chance=get("방어.성공확률"),
             guard_base=get("방어.기본피해감소"), guard_heal=get("방어.회복률"), reflect_base=get("방어.기본반사"),
@@ -1188,6 +1191,28 @@ FINAL_BOSS_DEFAULT = {"key": "final_boss", "name": "오메가 코어", "emoji": 
 FINAL_BOSS_FIELDS = ("name", "emoji", "hp", "damage", "element", "phase2_hp", "phase2_damage", "skill", "skill_every", "skill_power", "skill_turns")
 FINAL_RULES_DEFAULT = {"floor": 100, "reward": 50000, "tickets": 1}
 FINAL_LIMITS = {"floor": (0, 1000), "reward": (0, 1_000_000_000), "tickets": (0, 10)}
+
+
+def base_bonus(display: dict, bal: "Balance") -> dict[str, int]:
+    """기지에 전시한 장비({'weapon'|'shield'|'armor': key})의 패시브: 능력치의 base_passive%(내림).
+    무기는 공격력, 방패는 가드(피해 감소)·반사, 갑옷은 피해 감소에 더해진다. 지워졌거나 칸이 맞지 않는 장비는 0."""
+    out = {"attack": 0, "guard": 0, "reflect": 0, "reduction": 0}
+    percent = bal.base_passive
+
+    def part(value):
+        return (value or 0) * percent // 100
+    for slot, key in (display or {}).items():
+        gear = bal.gear_by_key.get(key)
+        if gear is None or gear.slot != slot:
+            continue
+        if slot == "weapon":
+            out["attack"] += part(gear.attack)
+        elif slot == "shield":
+            out["guard"] += part(gear.guard)
+            out["reflect"] += part(gear.reflect)
+        else:
+            out["reduction"] += part(gear.reduction)
+    return out
 
 
 def check_final(raw) -> tuple[dict | None, str | None]:

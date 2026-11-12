@@ -226,6 +226,7 @@ def deposit(store, guild: int, user: int, amount: int) -> int:
         raise GuildError("길드에 들어가 있지 않아요.")
     if amount < 1:
         raise GuildError("1 이상 넣어 주세요.")
+    _war_check(store, guild, row["id"], "금고에 입금")              # 진 쪽이 RAM을 금고로 옮겨 50%를 피하지 못하게
     cur = store.currency(guild)
     with store.db:
         store._ensure_wallet(guild, user)

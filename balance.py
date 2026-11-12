@@ -20,6 +20,9 @@ INFINITE_STEP = 10                # 그 뒤로 한 층 오를 때마다 늘어�
 SECRET_CHANCE = 10.0               # 보스를 이기고 올라갈 때 11번째 방(시크릿 보스)이 생길 확률(%)
 REVIVE_HEAL = 50                 # 부활권으로 되살아날 때 최대 HP의 몇 %로 일어나는지
 FLOOR_HEAL = 50                  # 위 층으로 올라갈 때 잃은 HP의 몇 %를 회복하는지
+VAULT_ITEMS = 5                  # 던전에 들어갈 때 보관함에서 가져갈 수 있는 소모품 수(종류마다 1개)
+VAULT_GEAR_MAX = 30              # 보관함에 둘 수 있는 장비 수(전부 합쳐)
+VAULT_ITEM_MAX = 99              # 보관함에 둘 수 있는 소모품 수(종류마다)
 BASE_DODGE = 10                  # 잡몹 기본 회피 10% (보스는 회피 불가)
 GUARD_BASE = 60                  # 가드 성공 시 피해 60% 감소(방패가 없을 때)
 GUARD_CHANCE = 60                # 방어 버튼을 눌렀을 때 가드에 성공할 확률(%)
@@ -934,6 +937,7 @@ def _build_params() -> dict[str, Param]:
     add("일반.층당강화", "일반", FLOOR_SCALE, 0, 200, note="층이 하나 오를 때마다 몬스터·보스의 체력과 공격이 1층의 몇 %씩 늘어날지(0이면 그대로)")
     add("일반.층이동회복", "일반", FLOOR_HEAL, 0, 100, note="위 층으로 올라갈 때 잃은 HP의 몇 %를 회복할지")
     add("일반.무한모드", "일반", INFINITE, 0, 1, note="1이면 마지막 층 보스를 이기고 앞으로 갈 때 '클리어하고 끝낼지, 무한모드로 계속할지' 물어요. 0이면 묻지 않고 바로 클리어해요")
+    add("보관함.소모품", "일반", VAULT_ITEMS, 0, 25, note="던전에 들어갈 때 보관함에서 가져갈 수 있는 소모품 수(종류마다 1개). 0이면 소모품은 못 가져가요")
     add("무한.층보너스", "일반", INFINITE_BONUS, 0, 99999, note="무한모드에서 마지막 층 다음 첫 층에 오를 때 받는 재화")
     add("무한.보너스증가", "일반", INFINITE_STEP, 0, 99999, note="무한모드에서 한 층 더 오를 때마다 보너스가 늘어나는 양")
     add("일반.시크릿확률", "일반", SECRET_CHANCE, 0, 100, integer=False, note="보스를 이기고 올라갈 때 11번째 방(시크릿 보스)이 생길 확률(%). 소수 가능, 0이면 안 생겨요")
@@ -1062,6 +1066,7 @@ class Balance:
     special_power: int = 500
     special_ends: bool = True    # 특수 스킬을 쓰면 각성이 끝나는지
     awaken_bonus: int = 0        # 각성 중 내 공격 피해 보너스(%)
+    vault_items: int = VAULT_ITEMS   # 던전에 들어갈 때 보관함에서 가져갈 수 있는 소모품 수
     final_boss: "Monster | None" = None   # 무한모드 최종보스(/최종보스). build가 채운다
     final_floor: int = 100       # 최종보스가 나오는 층(그 층의 10번째 방). 0이거나 마지막 층 이하면 나오지 않는다
     final_reward: int = 50000    # 최종보스를 쓰러뜨리면 클리어 보상에 더해 받는 재화
@@ -1145,7 +1150,7 @@ class Balance:
         final_gear, final_items = custom.get("gear", tuple(gear)), custom.get("consumables", tuple(items))
         return cls(
             max_hp=get("일반.최대체력"), floors=get("일반.층수"), floor_scale=get("일반.층당강화"), floor_heal=get("일반.층이동회복"), revive_heal=get("일반.부활체력"), secret_chance=get("일반.시크릿확률"), infinite=get("일반.무한모드"),
-            infinite_bonus=get("무한.층보너스"), infinite_step=get("무한.보너스증가"), secrets=custom.get("secrets", SECRET_BOSSES),
+            vault_items=get("보관함.소모품"), infinite_bonus=get("무한.층보너스"), infinite_step=get("무한.보너스증가"), secrets=custom.get("secrets", SECRET_BOSSES),
             rooms=custom.get("rooms", ()), trap_damage=get("함정.피해"), shop_interval=get("상점.간격"), shop_markup=get("상점.가격배율"),
             base_damage=get("일반.맨손공격력"), guard_chance=get("방어.성공확률"),
             guard_base=get("방어.기본피해감소"), guard_heal=get("방어.회복률"), reflect_base=get("방어.기본반사"),

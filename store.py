@@ -361,6 +361,11 @@ class Store:
                 guild INTEGER, user INTEGER, data TEXT NOT NULL, PRIMARY KEY(guild, user));
             CREATE TABLE IF NOT EXISTS tickets(
                 guild INTEGER, user INTEGER, count INTEGER NOT NULL DEFAULT 0 CHECK(count >= 0), PRIMARY KEY(guild, user));
+            CREATE TABLE IF NOT EXISTS vault(
+                guild INTEGER, user INTEGER, kind TEXT NOT NULL CHECK(kind IN ('gear','item')), key TEXT NOT NULL,
+                qty INTEGER NOT NULL CHECK(qty > 0), PRIMARY KEY(guild, user, kind, key));
+            CREATE TABLE IF NOT EXISTS vault_loadout(
+                guild INTEGER, user INTEGER, data TEXT NOT NULL, PRIMARY KEY(guild, user));
         """)
         # 판매가 범위(sell_max)가 생기기 전에 만든 DB에는 칸이 없다. 기존 데이터는 그대로 두고 칸만 더한다.
         if "sell_max" not in {row["name"] for row in self.db.execute("PRAGMA table_info(items)")}:
@@ -1055,17 +1060,82 @@ class Store:
         row = self.db.execute("SELECT data FROM dungeons WHERE guild=? AND user=?", (guild, user)).fetchone()
         return row["data"] if row else None
 
-    def enter_dungeon(self, guild: int, user: int, new_data: str) -> tuple[str, bool]:
+    def enter_dungeon(self, guild: int, user: int, new_data: str, take=()) -> tuple[str, bool]:
         """진행 중인 던전이 있으면 그대로 돌려주고(입장 물품 없음), 없으면 입장 물품을 내고 new_data로 새로 시작한다.
+        새로 시작할 때 take [(kind, key, 개수)]만큼 보관함에서 꺼낸다(new_data에 이미 담겨 있다). 모두 한 덩어리다.
         입장 물품이 없음으로 설정돼 있으면 무료다. (던전 JSON, 새로 시작했는지)를 돌려준다. 물품이 모자라면 StoreError."""
         existing = self.dungeon_run(guild, user)
         if existing is not None:
             return existing, False
         self.ensure_defaults(guild)                              # 이 안에서 따로 커밋하므로 아래 거래 밖에서 먼저 한다.
-        with self.db:                                              # 입장 물품 차감과 던전 생성은 한 덩어리
+        with self.db:                                              # 입장 물품 차감·보관함에서 꺼내기·던전 생성은 한 덩어리
             self._take_entry(guild, user)
+            for kind, key, qty in take:
+                if not self._vault_take(guild, user, kind, key, qty):
+                    raise StoreError("보관함에서 가져가려던 물건이 없어졌어요. `/보관함`을 다시 확인해 주세요.")
             self.db.execute("INSERT INTO dungeons VALUES(?,?,?)", (guild, user, new_data))
         return new_data, True
+
+    # ---- 보관함(던전 밖 창고): 클리어하면 들고 있던 장비·소모품이 들어오고, 다음 입장 때 골라 가져간다 ----
+    def vault(self, guild: int, user: int) -> dict[str, dict[str, int]]:
+        """보관함 내용 {'gear': {key: 개수}, 'item': {key: 개수}}."""
+        out: dict[str, dict[str, int]] = {"gear": {}, "item": {}}
+        for row in self.db.execute("SELECT kind, key, qty FROM vault WHERE guild=? AND user=? ORDER BY rowid", (guild, user)):
+            out[row["kind"]][row["key"]] = row["qty"]
+        return out
+
+    def _vault_take(self, guild: int, user: int, kind: str, key: str, qty: int) -> bool:
+        """보관함에서 qty개를 뺀다(거래 안에서). 모자라면 아무것도 안 하고 False."""
+        if self.db.execute("UPDATE vault SET qty=qty-? WHERE guild=? AND user=? AND kind=? AND key=? AND qty>?",
+                           (qty, guild, user, kind, key, qty)).rowcount:
+            return True
+        return bool(self.db.execute("DELETE FROM vault WHERE guild=? AND user=? AND kind=? AND key=? AND qty=?",
+                                    (guild, user, kind, key, qty)).rowcount)
+
+    def _vault_put(self, guild: int, user: int, kind: str, key: str, qty: int) -> None:
+        if qty > 0:
+            self.db.execute("INSERT INTO vault VALUES(?,?,?,?,?) ON CONFLICT(guild,user,kind,key) DO UPDATE SET qty=qty+excluded.qty",
+                            (guild, user, kind, key, qty))
+
+    def vault_put(self, guild: int, user: int, entries) -> None:
+        """보관함에 넣는다 [(kind, key, 개수)]. 한도 계산은 부르는 쪽이 한다(dungeon_service.vault_fit)."""
+        with self.db:
+            for kind, key, qty in entries:
+                self._vault_put(guild, user, kind, key, qty)
+
+    def vault_sell(self, guild: int, user: int, entries, total: int) -> int:
+        """보관함 물건을 판다 [(kind, key, 개수)] → 재화 total을 받는다(한 덩어리). 지금 가진 재화를 돌려준다.
+        물건이 모자라거나 재화가 최대 보유량을 넘으면 거절하고 아무것도 바꾸지 않는다."""
+        with self.db:
+            self._ensure_wallet(guild, user)
+            old = self.wallet(guild, user)
+            cur = self.currency(guild)
+            if old + total > cur.max:
+                raise StoreError(f"{i_ga(cur.name)} 최대({cur.max:,}개)를 넘어서 팔 수 없어요. 먼저 재화를 써 주세요.")
+            for kind, key, qty in entries:
+                if not self._vault_take(guild, user, kind, key, qty):
+                    raise StoreError("보관함에 그만큼 없어요. 화면을 다시 열어 주세요.")
+            self.db.execute("UPDATE wallets SET candy=candy+? WHERE guild=? AND user=?", (total, guild, user))
+        return old + total
+
+    def loadout(self, guild: int, user: int) -> dict:
+        """다음 던전에 보관함에서 가져갈 것 {'weapon','shield','armor': key|None, 'items': [key, ...]}."""
+        row = self.db.execute("SELECT data FROM vault_loadout WHERE guild=? AND user=?", (guild, user)).fetchone()
+        try:
+            data = json.loads(row["data"]) if row else {}
+        except ValueError:
+            data = {}
+        data = data if isinstance(data, dict) else {}
+        items = data.get("items")
+        return {"weapon": data.get("weapon") if isinstance(data.get("weapon"), str) else None,
+                "shield": data.get("shield") if isinstance(data.get("shield"), str) else None,
+                "armor": data.get("armor") if isinstance(data.get("armor"), str) else None,
+                "items": [k for k in items if isinstance(k, str)][:25] if isinstance(items, list) else []}
+
+    def set_loadout(self, guild: int, user: int, data: dict) -> None:
+        with self.db:
+            self.db.execute("INSERT INTO vault_loadout VALUES(?,?,?) ON CONFLICT(guild,user) DO UPDATE SET data=excluded.data",
+                            (guild, user, json.dumps(data, ensure_ascii=False)))
 
     def _take_entry(self, guild: int, user: int) -> None:
         """입장 물품을 정해진 개수만큼 낸다(거래 안에서 불러야 한다). 모자라면 StoreError. 무료 입장이면 아무것도 안 한다."""
@@ -1151,13 +1221,15 @@ class Store:
             self.db.execute("UPDATE wallets SET candy=candy-? WHERE guild=? AND user=?", (total, guild, user))
         return old - total
 
-    def end_dungeon(self, guild: int, user: int, *, candy: int = 0, tickets: int = 0, items=()) -> tuple[int, int] | None:
-        """던전을 끝내고 기록을 지운다. 보상(재화는 최대 보유량까지)을 한 번에 준다.
+    def end_dungeon(self, guild: int, user: int, *, candy: int = 0, tickets: int = 0, items=(), vault=()) -> tuple[int, int] | None:
+        """던전을 끝내고 기록을 지운다. 보상(재화는 최대 보유량까지)과 보관함에 넣을 것(vault [(kind, key, 개수)])을 한 번에 준다.
         (실제로 받은 재화, 지금 가진 획득권 수)를 돌려준다. 이미 끝난 던전이면 None이고 보상도 없다."""
         with self.db:
             if self.db.execute("DELETE FROM dungeons WHERE guild=? AND user=?", (guild, user)).rowcount == 0:
                 return None
             gained = self._pay_rewards(guild, user, candy, tickets, items)
+            for kind, key, qty in vault:
+                self._vault_put(guild, user, kind, key, qty)
         return gained, self.tickets(guild, user)
 
     def _pay_rewards(self, guild: int, user: int, candy: int, tickets: int, items) -> int:

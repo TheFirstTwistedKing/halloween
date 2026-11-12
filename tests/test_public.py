@@ -27,7 +27,7 @@ from tests.helpers import Scripted, World, sent_embed
 from views import BagView, DetailView, QuantityModal, send_bag
 
 ROOT = Path(__file__).resolve().parent.parent
-COMMAND_MODULES = ["access", "cogs/admin", "cogs/announce", "cogs/elements", "cogs/boss_patterns", "cogs/weapon_skills", "cogs/final_boss", "cogs/content_admin", "cogs/dungeon_admin", "cogs/economy", "cogs/rules_admin", "cogs/shop"]
+COMMAND_MODULES = ["access", "cogs/admin", "cogs/announce", "cogs/elements", "cogs/boss_patterns", "cogs/weapon_skills", "cogs/final_boss", "cogs/vault", "cogs/content_admin", "cogs/dungeon_admin", "cogs/economy", "cogs/rules_admin", "cogs/shop"]
 G, U, OTHER = 100, 7, 8
 
 
@@ -53,7 +53,7 @@ class PublicByDefaultTests(unittest.TestCase):
     def test_every_screen_a_command_opens_is_locked_to_who_opened_it(self):
         open_to_all = {ShopPanelView, PackageView}                                   # 공용 패널과 패키지: 누구나 누른다(각자 자기 몫).
         views = []
-        for module in ("confirm", "views", "panel", "packages", "paging", "bulk", "cogs.admin", "cogs.dungeon", "cogs.dungeon_admin", "cogs.shop"):
+        for module in ("confirm", "views", "panel", "packages", "paging", "bulk", "cogs.admin", "cogs.dungeon", "cogs.dungeon_admin", "cogs.shop", "cogs.vault"):
             mod = importlib.import_module(module)
             views += [cls for _, cls in inspect.getmembers(mod, inspect.isclass)
                       if issubclass(cls, discord.ui.View) and cls.__module__ == mod.__name__]

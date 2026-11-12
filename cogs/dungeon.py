@@ -147,6 +147,12 @@ def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=No
             lines.append("🌀 **최종보스 보상**" + (f" {theme.money(reward.final_candy, cur)}" if reward.final_candy else "")
                          + (f" · 🎟️ 획득권 +{reward.final_tickets} (지금 {reward.tickets_total}장)" if reward.final_tickets else "") + " (위 재화에 포함)")
         embed.add_field(name="🎁 보상", value="\n".join(lines), inline=False)
+        if reward.vault or reward.vault_lost:                 # 클리어하면 들고 있던 장비·소모품은 보관함으로
+            kept = ", ".join(f"{e} {n}" + (f" ×{q}" if q > 1 else "") for e, n, q in reward.vault)
+            lost = ", ".join(f"{e} {n}" + (f" ×{q}" if q > 1 else "") for e, n, q in reward.vault_lost)
+            embed.add_field(name="📦 보관함", inline=False,
+                            value=((f"{kept}을(를) 보관함에 넣었어요. `/보관함`에서 다음 던전에 가져갈 것을 골라요." if kept else "")
+                                   + (f"\n⚠️ 보관함이 가득 차서 버려졌어요: {lost}" if lost else "")).strip()[:1024])
         if reward.final:
             embed.add_field(name="🌀 완전 클리어", value=f"무한 **{run.floor}층**의 최종보스까지 쓰러뜨리고 던전을 완전히 클리어했어요!", inline=False)
     elif ended in ("dead", "quit"):

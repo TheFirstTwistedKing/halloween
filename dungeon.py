@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass, field
 from balance import (BASE_DAMAGE, BASE_DODGE, BOSSES, CLEAR_CANDY, CONSUMABLES, DEFAULT, FLOOR_HEAL, FLOOR_SCALE, FLOORS,  # noqa: F401  (다시 내보냄)
                      GEAR, GUARD_BASE, GUARD_CHANCE, GUARD_HEAL, MAX_HP, MONSTERS, REFLECT_BASE, ROOM_PLAN, ROOMS,
                      TICKET_CHANCE, TIER_ORDER, Balance, Consumable, EVENT_TAG, Gear, Monster, SecretBoss, condition_text, candidates_for_floor, floor_scaled,
-                     monsters_for_floor, reduce_damage, shop_price, BOSS_SKILLS, WEAPON_SKILLS, GEAR_SLOTS, SLOT_NAMES, SHOP_SLOTS)
+                     monsters_for_floor, reduce_damage, shop_price, BOSS_SKILLS, WEAPON_SKILLS, GEAR_SLOTS, SLOT_NAMES, SHOP_SLOTS, ARMOR_MAX)
 from josa import eul_reul, i_ga
 
 BARE = {"weapon": "맨손", "shield": "맨몸 가드", "armor": "맨몸"}       # 그 칸이 비었을 때 부르는 말
@@ -72,6 +72,10 @@ class Run:
     auto: bool = False                              # 빠른진행 중(컴퓨터가 알아서 진행). 켜 둔 채 봇이 꺼지면 다음에 /던전을 열 때 꺼진다.
     auto_paid: bool = False                         # 이 던전에서 빠른진행 비용(입장 물품 한 번 더)을 이미 냈다: 껐다 켜도 다시 내지 않는다.
     infinite: bool = False                          # 무한모드 중: 마지막 층을 깬 뒤 클리어하지 않고 계속 올라가고 있다.
+    base_attack: int = 0                            # 기지 패시브(입장할 때 정해진다): 공격력 +
+    base_guard: int = 0                             # 가드 피해 감소 +%p
+    base_reflect: int = 0                           # 반사 +%p
+    base_reduction: int = 0                         # 갑옷 피해 감소 +%p
     final_clear: bool = False                       # 무한모드 최종보스를 쓰러뜨려 완전 클리어했다(서비스가 최종보스 보상을 더 준다)
     bonus: int = 0                                  # 방금 올라간 무한 층의 보너스 재화(서비스가 지급하고 0으로 되돌린다)
     shop: list = field(default_factory=list)        # 지금 상점의 상품 [{kind: gear|item, key, price, sold}]
@@ -143,7 +147,7 @@ def _armor(run: Run, bal: Balance) -> Gear | None:
 def armor_percent(run: Run, bal: Balance | None = None) -> int:
     """입고 있는 갑옷이 줄여 주는 피해(%). 갑옷이 없으면 0."""
     armor = _armor(run, bal or DEFAULT)
-    return armor.reduction if armor else 0
+    return min(ARMOR_MAX, (armor.reduction if armor else 0) + run.base_reduction)      # 기지 패시브(갑옷)는 갑옷이 없어도 적용된다
 
 
 def apply_percent(value: int, percent: int) -> int:
@@ -175,19 +179,21 @@ def defend_element_percent(run: Run, bal: Balance) -> int:
 def player_damage(run: Run, bal: Balance | None = None) -> int:
     bal = bal or DEFAULT
     weapon = _weapon(run, bal)
-    return bal.base_damage + (weapon.attack if weapon else 0)
+    return bal.base_damage + (weapon.attack if weapon else 0) + run.base_attack
 
 
 def guard_percent(run: Run, bal: Balance | None = None) -> int:
     bal = bal or DEFAULT
     shield = _shield(run, bal)
-    return shield.guard if shield and shield.guard is not None else bal.guard_base
+    own = shield.guard if shield and shield.guard is not None else bal.guard_base
+    return min(100, own + run.base_guard)                # 기지 패시브(방패)
 
 
 def reflect_percent(run: Run, bal: Balance | None = None) -> int:
     bal = bal or DEFAULT
     shield = _shield(run, bal)
-    return shield.reflect if shield and shield.reflect is not None else bal.reflect_base
+    own = shield.reflect if shield and shield.reflect is not None else bal.reflect_base
+    return min(500, own + run.base_reflect)              # 기지 패시브(방패)
 
 
 def enemy_dodge(run: Run, bal: Balance | None = None) -> int:

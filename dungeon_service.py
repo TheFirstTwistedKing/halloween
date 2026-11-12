@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 
 import dungeon
 import dungeon_auto
+import balance as balance_rules
 from balance import VAULT_GEAR_MAX, VAULT_ITEM_MAX
 from dungeon import DungeonError, Run
 from store import Store, StoreError
@@ -49,6 +50,13 @@ def entry_label(store: Store, guild_id: int) -> str:
     cfg = store.settings(guild_id)
     item = store.item(guild_id, cfg["entry_item"]) if cfg["entry_item"] is not None else None
     return f"{item['emoji']} {item['name']} {cfg['entry_cost']}개" if item else ""
+
+
+def passive_text(bonus: dict) -> str:
+    """기지 패시브 한 줄('공격 +3 · 가드 +6%p'). 없으면 '없음'."""
+    parts = [f"공격 +{bonus['attack']}" if bonus["attack"] else "", f"가드 +{bonus['guard']}%p" if bonus["guard"] else "",
+             f"반사 +{bonus['reflect']}%p" if bonus["reflect"] else "", f"피해 감소 +{bonus['reduction']}%p" if bonus["reduction"] else ""]
+    return " · ".join(p for p in parts if p) or "없음"
 
 
 def loadout_plan(store: Store, guild_id: int, user_id: int, bal):
@@ -112,6 +120,9 @@ async def enter(store: Store, locks, guild_id: int, user_id: int, auto_running: 
         for slot, key in gear.items():
             setattr(fresh, slot, key)
         fresh.items = dict(items)
+        bonus = balance_rules.base_bonus(store.base(guild_id, user_id), bal)          # 기지 패시브는 들어갈 때 정해진다
+        fresh.base_attack, fresh.base_guard, fresh.base_reflect, fresh.base_reduction = (bonus["attack"], bonus["guard"], bonus["reflect"],
+                                                                                         bonus["reduction"])
         try:
             data, started = store.enter_dungeon(guild_id, user_id, fresh.to_json(), take)
         except StoreError as exc:
@@ -127,6 +138,8 @@ async def enter(store: Store, locks, guild_id: int, user_id: int, auto_running: 
                       else ["📖 진행 중이던 던전을 이어서 해요. (입장 물품은 쓰지 않아요)"])
         if started and brought:
             run.events.append("📦 보관함에서 가져왔어요: " + ", ".join(brought))
+        if started and any(bonus.values()):
+            run.events.append("🏠 기지 패시브: " + passive_text(bonus))
         if was_auto:
             run.events.append("⏸ 빠른진행이 멈춰 있어요(봇이 다시 켜졌거나 중간에 끊겼어요). 다시 켜도 이 던전에서는 입장 물품을 더 내지 않아요.")
         store.save_dungeon(guild_id, user_id, run.to_json())

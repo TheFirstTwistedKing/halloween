@@ -30,6 +30,7 @@ SHOP_PRICE_HELP = "상점에서 파는 값(재화). 비우면 판매가 × 상�
 SHOP_PRICE_EDIT_HELP = SHOP_PRICE_HELP + ". -1이면 자동 계산으로 되돌려요"
 SELL_TARGETS = [Choice(name="장비와 소모품 모두", value="both"), Choice(name="장비만", value="gear"), Choice(name="소모품만", value="consumables")]
 COND_CHOICES = [Choice(name=COND_LABELS[k].format(v="N"), value=k) for k in COND_STATE + COND_EVENT]
+NOTHING_HELP = "무력화해도 아무것도 떨어뜨리지 않을 확률(%). 소수도 돼요. 0이면 늘 하나는 떨어뜨려요(기본 0)"
 CHANCE_HELP = "그 드롭이 나올 확률(%). 소수도 돼요(기본 100). 둘 다 안 나오면 확률이 더 높은 쪽이 반드시 나와요"
 IMAGE_HELP = "등장 연출과 전투 화면에 붙일 그림 주소(http/https). 움직이는 gif 주소도 돼요."
 MATERIAL_HELP = "개조 재료로 만들까요? 재료는 효과가 없고, /장비개조 레시피에 있는 무기를 들고 쓰면 그 무기가 개조돼요"
@@ -414,18 +415,20 @@ class ContentAdmin(commands.Cog):
 
     @secret.command(name="추가", description="시크릿 보스를 만들어요. 장비나 아이템 드롭을 하나는 정해야 해요 (관리자)")
     @app_commands.rename(name="이름", emoji="이모지", hp="체력", damage="공격", drop_gear="드롭장비", gear_chance="장비확률", drop_item="드롭아이템",
-                         item_chance="아이템확률", amount="아이템개수", weight="등장", intro="등장문구", image="그림")
+                         item_chance="아이템확률", amount="아이템개수", weight="등장", intro="등장문구", image="그림", nothing="빈드롭확률")
     @app_commands.describe(drop_gear="떨어뜨릴 장비(자동완성)", gear_chance=CHANCE_HELP, drop_item="떨어뜨릴 소모품(자동완성)", item_chance=CHANCE_HELP,
+                           nothing=NOTHING_HELP,
                            amount="아이템을 몇 개 떨어뜨릴까요(기본 1)", weight="시크릿 보스가 여럿일 때 나올 비율. 소수도 돼요(기본 1)",
                            intro="등장 연출에 나올 한마디(200자까지)", image=IMAGE_HELP)
     async def secret_add(self, interaction: discord.Interaction, name: str, emoji: str, hp: app_commands.Range[int, 1, 1000000],
                          damage: app_commands.Range[int, 0, 100000], drop_gear: str | None = None,
                          gear_chance: app_commands.Range[float, 0, 100] = 100, drop_item: str | None = None,
                          item_chance: app_commands.Range[float, 0, 100] = 100, amount: app_commands.Range[int, 1, 99] = 1,
-                         weight: app_commands.Range[float, 0, 1000] = 1, intro: str = "", image: str = ""):
+                         weight: app_commands.Range[float, 0, 1000] = 1, intro: str = "", image: str = "",
+                         nothing: app_commands.Range[float, 0, 100] = 0):
         def go():
             data = dict(name=name, emoji=emoji.strip(), hp=hp, damage=damage, drop_gear_chance=gear_chance, drop_item_chance=item_chance,
-                        drop_item_amount=amount, weight=weight, intro=intro, image=image.strip())
+                        drop_item_amount=amount, weight=weight, intro=intro, image=image.strip(), nothing_chance=nothing)
             data["drop_gear"] = self._gear_key(drop_gear, interaction.guild_id) if drop_gear else None
             data["drop_item"] = self._item_key(drop_item, interaction.guild_id) if drop_item else None
             entity = content.add(self.bot.store, interaction.guild_id, "secrets", data)
@@ -472,18 +475,19 @@ class ContentAdmin(commands.Cog):
 
     @secret.command(name="수정", description="시크릿 보스의 값을 고쳐요. 바꿀 것만 적으세요. 드롭장비·드롭아이템·등장문구·그림은 -를 적으면 지워요 (관리자)")
     @app_commands.rename(target="대상", new_name="새이름", emoji="이모지", hp="체력", damage="공격", drop_gear="드롭장비", gear_chance="장비확률",
-                         drop_item="드롭아이템", item_chance="아이템확률", amount="아이템개수", weight="등장", intro="등장문구", image="그림")
+                         drop_item="드롭아이템", item_chance="아이템확률", amount="아이템개수", weight="등장", intro="등장문구", image="그림",
+                         nothing="빈드롭확률")
     @app_commands.describe(drop_gear="떨어뜨릴 장비(자동완성). -는 지움", gear_chance=CHANCE_HELP, drop_item="떨어뜨릴 소모품(자동완성). -는 지움",
-                           item_chance=CHANCE_HELP, intro="등장 연출에 나올 한마디. -는 지움", image=IMAGE_HELP + " -는 지움")
+                           item_chance=CHANCE_HELP, intro="등장 연출에 나올 한마디. -는 지움", image=IMAGE_HELP + " -는 지움", nothing=NOTHING_HELP)
     async def secret_edit(self, interaction: discord.Interaction, target: str, new_name: str | None = None, emoji: str | None = None,
                           hp: app_commands.Range[int, 1, 1000000] | None = None, damage: app_commands.Range[int, 0, 100000] | None = None,
                           drop_gear: str | None = None, gear_chance: app_commands.Range[float, 0, 100] | None = None,
                           drop_item: str | None = None, item_chance: app_commands.Range[float, 0, 100] | None = None,
                           amount: app_commands.Range[int, 1, 99] | None = None, weight: app_commands.Range[float, 0, 1000] | None = None,
-                          intro: str | None = None, image: str | None = None):
+                          intro: str | None = None, image: str | None = None, nothing: app_commands.Range[float, 0, 100] | None = None):
         def go():
             changes = dict(name=new_name, emoji=emoji and emoji.strip(), hp=hp, damage=damage, drop_gear_chance=gear_chance,
-                           drop_item_chance=item_chance, drop_item_amount=amount, weight=weight)
+                           drop_item_chance=item_chance, drop_item_amount=amount, weight=weight, nothing_chance=nothing)
             changes = {k: v for k, v in changes.items() if v is not None}
             if drop_gear is not None:
                 changes["drop_gear"] = None if drop_gear.strip() == "-" else self._gear_key(drop_gear, interaction.guild_id)

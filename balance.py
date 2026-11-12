@@ -112,7 +112,8 @@ class Monster:
 
 @dataclass(frozen=True)
 class SecretBoss:
-    """시크릿 보스: 보스를 이기고 올라갈 때 가끔(기본 10%) 열리는 11번째 방의 보스. 장비나 아이템을 반드시 하나는 떨어뜨린다."""
+    """시크릿 보스: 보스를 이기고 올라갈 때 가끔(기본 10%) 열리는 11번째 방의 보스. 장비나 아이템을 반드시 하나는 떨어뜨린다.
+    단, '빈 드롭 확률'(nothing_chance)을 정하면 그 확률로는 아무것도 떨어뜨리지 않는다."""
     key: str
     name: str
     emoji: str
@@ -129,6 +130,7 @@ class SecretBoss:
     boss: bool = True                  # 보스처럼 회피 불가
     dodge: int = 0
     floors: tuple = ()                 # 이 시크릿 보스가 나올 수 있는 층(비어 있으면 모든 층). 보스를 이긴 그 층의 11번째 방에 나온다.
+    nothing_chance: float = 0          # 무력화해도 아무것도 떨어뜨리지 않을 확률(%). 0이면 늘 하나는 떨어뜨린다.
 
 
 @dataclass(frozen=True)
@@ -522,6 +524,9 @@ def _check_secret(data: dict, key: str, name: str, emoji: str, numbers):
         chances[field_name], problem = _decimal(data, field_name, 100, 100)
         if problem:
             return None, problem
+    nothing, problem = _decimal(data, "nothing_chance", 100, 0)       # 예전에 저장된 시크릿 보스에는 없어서 0(늘 하나는 떨어뜨림)
+    if problem:
+        return None, problem
     floors, problem = _check_floors(data)
     if problem:
         return None, problem
@@ -531,7 +536,7 @@ def _check_secret(data: dict, key: str, name: str, emoji: str, numbers):
     if not isinstance(image, str) or len(image) > 300 or (image and (not image.startswith(("http://", "https://")) or any(c.isspace() for c in image))):
         return None, "그림은 공백 없는 http:// 또는 https:// 주소(300자까지)여야 해요."
     boss = SecretBoss(key, name, emoji, n["hp"], n["damage"], weight, drops["drop_gear"], chances["drop_gear_chance"], drops["drop_item"],
-                      chances["drop_item_chance"], n["drop_item_amount"], intro.strip(), image, floors=floors)
+                      chances["drop_item_chance"], n["drop_item_amount"], intro.strip(), image, floors=floors, nothing_chance=nothing)
     return boss, None
 
 

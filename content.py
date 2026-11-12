@@ -265,8 +265,9 @@ def describe(section: str, data: dict, bal=None) -> str:
         if entity.drop_item:
             drops.append((f"{item.emoji} {item.name}" if item else (f"{entity.drop_item}" if bal is None else "(없어진 아이템)"))
                           + (f" ×{entity.drop_item_amount}" if entity.drop_item_amount > 1 else "") + f" {entity.drop_item_chance:g}%")
+        rule = f"드롭({entity.nothing_chance:g}% 확률로 없음, 아니면 하나는 반드시)" if entity.nothing_chance else "드롭(하나는 반드시)"
         return (f"{head} — HP {entity.hp:,} · 공격 {entity.damage:,} · 등장 {entity.weight:g} · 나오는 층 {balance.floors_text(entity.floors)}"
-                f" · 드롭(하나는 반드시): " + " / ".join(drops) + (" · 🖼️ 그림 있음" if entity.image else ""))
+                f" · {rule}: " + " / ".join(drops) + (" · 🖼️ 그림 있음" if entity.image else ""))
     if section == "rooms":
         effects = [f"피해 {entity.damage:,}"] if entity.damage else []
         effects += [f"회복 {entity.heal:,}"] if entity.heal else []

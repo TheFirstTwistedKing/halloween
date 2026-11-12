@@ -207,7 +207,7 @@ def _spawn(monster: Monster, floor: int = 1, bal: Balance | None = None) -> dict
     if isinstance(monster, SecretBoss):                  # 시크릿 보스: 드롭·연출 정보를 같이 담는다(싸우는 도중 설정이 바뀌어도 이 싸움은 그대로).
         enemy.update(secret=True, intro=monster.intro, image=monster.image,
                      drops={"gear": monster.drop_gear, "gear_chance": monster.drop_gear_chance, "item": monster.drop_item,
-                            "item_chance": monster.drop_item_chance, "amount": monster.drop_item_amount})
+                            "item_chance": monster.drop_item_chance, "amount": monster.drop_item_amount, "nothing": monster.nothing_chance})
     return enemy
 
 
@@ -491,9 +491,13 @@ def _end_turn(run: Run, bal: Balance, rng=None) -> list[str]:
 
 
 def secret_drops(run: Run, rng, bal: Balance) -> list[str]:
-    """무력화한 시크릿 보스의 드롭을 준다: 장비와 아이템을 각자 확률로 굴리고, 둘 다 안 나오면 **반드시 하나는** 준다(확률이 더 높은 쪽, 같으면 장비).
+    """무력화한 시크릿 보스의 드롭을 준다: 먼저 '빈 드롭 확률'로 아무것도 안 주는지 굴리고(정해 둔 경우만), 아니면 장비와 아이템을 각자 확률로 굴리고,
+    둘 다 안 나오면 **반드시 하나는** 준다(확률이 더 높은 쪽, 같으면 장비).
     장비는 상자처럼 장착/예비/버리기를 정해야 하고, 아이템은 소지품에 들어간다. 없어진 장비·아이템은 건너뛴다. 줄 수 있는 게 하나도 없으면 빈 목록."""
     spec = run.enemy.get("drops") or {}
+    nothing = spec.get("nothing") or 0
+    if nothing > 0 and rng.random() * 100 < nothing:       # 빈 드롭: 이 확률로는 아무것도 떨어뜨리지 않는다(0이면 난수를 뽑지 않는다)
+        return ["🎁 **시크릿 보스의 드롭…** 📭 아무것도 떨어뜨리지 않았어요."]
     gear, item = bal.gear_by_key.get(spec.get("gear")), bal.item_by_key.get(spec.get("item"))
     got_gear = gear is not None and rng.random() * 100 < spec.get("gear_chance", 100)
     got_item = item is not None and rng.random() * 100 < spec.get("item_chance", 100)

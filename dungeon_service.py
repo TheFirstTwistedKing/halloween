@@ -13,7 +13,7 @@ from dungeon import DungeonError, Run
 from store import Store, StoreError
 
 AUTO_REFUSE = "⏩ 빠른진행 중이에요. ⏹ 멈추기를 누르면 직접 진행할 수 있어요."
-ACTIONS = ("advance", "attack", "defend", "item", "chest", "equip", "stash", "swap_weapon", "swap_shield", "swap_armor", "discard", "quit", "finish", "infinite", "buy")
+ACTIONS = ("advance", "attack", "defend", "item", "chest", "equip", "stash", "swap_weapon", "swap_shield", "swap_armor", "discard", "quit", "finish", "infinite", "buy", "skill", "ult", "special")
 
 
 @dataclass
@@ -293,6 +293,8 @@ def _apply(run: Run, rng, action: str, arg: str | None, guard_ok: bool | None, b
         dungeon.player_defend(run, ok, bal, rng)
     elif action == "item":
         dungeon.use_consumable(run, arg or "", bal, rng)
+    elif action in ("skill", "ult", "special"):
+        dungeon.use_technique(run, action, rng, bal)
     elif action == "chest":
         if run.phase != "chest":
             return "열 수 있는 상자가 없어요."

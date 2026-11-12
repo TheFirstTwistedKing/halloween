@@ -7,7 +7,7 @@ balance_sim의 '체력이 60% 아래일 때만 방어' 방식을 따른다: 기�
 from __future__ import annotations
 
 from balance import Balance, Consumable, Gear
-from dungeon import Run, can_use_now, mod_target
+from dungeon import Run, can_use_now, mod_target, skill_ready
 
 DEFEND_BELOW = 60          # HP가 최대의 이 %보다 낮으면 방어한다
 ASSUMED_DODGE = 10         # 장비 비교에 쓰는 잡몹 회피(%)
@@ -87,6 +87,10 @@ def choose(run: Run, bal: Balance) -> tuple[str, str | None]:
         healers = [i for i in heals if not i.regen]
         if healers and not stunned and run.hp <= enemy["damage"] * 2:
             return "item", max(healers, key=lambda i: (i.full, i.heal)).key
+        ready = skill_ready(run, bal)
+        for which in ("special", "ult", "skill"):                    # 쓸 수 있는 기술은 아끼지 않고 쓴다(센 것부터)
+            if ready[which]:
+                return which, None
         if stunned:
             return "attack", None
         return ("defend" if run.hp * 100 < bal.max_hp * DEFEND_BELOW else "attack"), None

@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass, field
 from balance import (BASE_DAMAGE, BASE_DODGE, BOSSES, CLEAR_CANDY, CONSUMABLES, DEFAULT, FLOOR_HEAL, FLOOR_SCALE, FLOORS,  # noqa: F401  (다시 내보냄)
                      GEAR, GUARD_BASE, GUARD_CHANCE, GUARD_HEAL, MAX_HP, MONSTERS, REFLECT_BASE, ROOM_PLAN, ROOMS,
                      TICKET_CHANCE, TIER_ORDER, Balance, Consumable, EVENT_TAG, Gear, Monster, SecretBoss, condition_text, candidates_for_floor, floor_scaled,
-                     monsters_for_floor, reduce_damage, shop_price, BOSS_SKILLS, GEAR_SLOTS, SLOT_NAMES, SHOP_SLOTS)
+                     monsters_for_floor, reduce_damage, shop_price, BOSS_SKILLS, WEAPON_SKILLS, GEAR_SLOTS, SLOT_NAMES, SHOP_SLOTS)
 from josa import eul_reul, i_ga
 
 BARE = {"weapon": "맨손", "shield": "맨몸 가드", "armor": "맨몸"}       # 그 칸이 비었을 때 부르는 말
@@ -53,6 +53,10 @@ class Run:
     spare_armor: str | None = None                  # 예비 갑옷 1개
     regen_amount: int = 0
     regen_turns: int = 0
+    skill_cd: int = 0                               # 무기 스킬의 남은 쿨타임(싸우는 중 턴마다 1씩 준다)
+    ult_gauge: int = 0                              # 궁극기 게이지(0~100). 이번 던전 동안 이어진다
+    awaken_gauge: int = 0                           # 각성 게이지(0~100). 궁극기를 쓸 때마다 찬다
+    awakened: bool = False                          # 각성 중: 특수 스킬을 쓸 수 있다
     burn_amount: int = 0                            # 보스 스킬 [과열]: 턴마다 받는 피해와 남은 턴(갑옷·피해 감소·무적은 적용, 쓰러질 수 있다)
     burn_turns: int = 0
     drain_amount: int = 0                           # 턴마다 내 HP가 줄어드는 양(자해 소모품)과 남은 턴. HP는 1 밑으로 내려가지 않는다.
@@ -526,6 +530,8 @@ def _end_turn(run: Run, bal: Balance, rng=None) -> list[str]:
         run.drain_turns -= 1
         if run.hp != before:
             events.append(f"🔥 HP -{before - run.hp} (남은 {run.drain_turns}턴)")
+    if run.skill_cd > 0:                                 # 싸우는 중 행동마다 불린다(싸움을 끝낸 그 턴도 한 턴으로 친다)
+        run.skill_cd -= 1
     if run.burn_turns > 0:                               # 보스 스킬 [과열]: 무적·갑옷·피해 감소는 적용되고, 쓰러질 수 있다
         damage = incoming_damage(run, run.burn_amount, 0, bal)
         run.hp = max(0, run.hp - damage)
@@ -629,12 +635,106 @@ def player_attack(run: Run, rng, bal: Balance | None = None) -> list[str]:
             damage, crit = damage * 2, True
         percent = attack_element_percent(run, bal)
         damage = apply_percent(damage, percent)
+        if run.awakened and bal.awaken_bonus:
+            damage = apply_percent(damage, 100 + bal.awaken_bonus)
         shield = run.enemy.get("barrier", 0) if run.enemy.get("barrier_turns", 0) > 0 else 0
         if shield:
             damage = reduce_damage(damage, shield)
         run.enemy["hp"] = max(0, run.enemy["hp"] - damage)
         events = [f"{'💥 크리티컬! ' if crit else '⚔️ '}{run.enemy['name']}에게 **{damage}** 피해를 줬어요.{element_note(percent)}"
                   + (f" (방어막 {shield}%)" if shield else "")]
+    events += _charge_ult(run, bal)
+    events += _after_player_action(run, 0, bal, rng)
+    run.events = events
+    return events
+
+
+def _charge_ult(run: Run, bal: Balance) -> list[str]:
+    """싸우는 중 공격·방어 한 번마다 궁극기 게이지를 채운다(궁극기가 있는 무기를 들었을 때만). 다 차면 알려 준다."""
+    weapon = _weapon(run, bal)
+    if not weapon or not weapon.ult or run.ult_gauge >= 100:
+        return []
+    run.ult_gauge = min(100, run.ult_gauge + bal.ult_charge)
+    return [f"🟡 궁극기 게이지 **100%**! [{WEAPON_SKILLS[weapon.ult][0]}]을(를) 쓸 수 있어요."] if run.ult_gauge >= 100 else []
+
+
+def skill_ready(run: Run, bal: Balance | None = None) -> dict:
+    """지금 쓸 수 있는 기술: {'skill': bool, 'ult': bool, 'special': bool}. 싸우는 중이고 살아 있는 몬스터가 있어야 한다."""
+    bal = bal or DEFAULT
+    weapon = _weapon(run, bal)
+    fighting = run.phase == "battle" and bool(run.enemy) and run.enemy.get("hp", 0) > 0
+    return {"skill": fighting and bool(weapon and weapon.skill) and run.skill_cd <= 0,
+            "ult": fighting and bool(weapon and weapon.ult) and run.ult_gauge >= 100,
+            "special": fighting and run.awakened}
+
+
+def _technique(run: Run, rng, bal: Balance, kind: str, power: int, title: str) -> list[str]:
+    """스킬·궁극기·특수 스킬 한 번: 종류대로 몬스터에게 피해를 주고(속성·각성 보너스 적용), 흡혈·기절 같은 덧붙은 효과를 낸다."""
+    enemy = run.enemy
+    name = WEAPON_SKILLS[kind][0]
+    if kind != "pierce" and rng.random() * 100 < enemy_dodge(run, bal):
+        run.last.append("attack_miss")
+        return [f"{title} **[{name}]**! 💨 {enemy['name']}이(가) 피했어요!"]
+    run.last.append("attack_hit")
+    base = player_damage(run, bal)
+    damage = {"power": apply_percent(base, power), "multi": base * power, "drain": base,
+              "stun": apply_percent(base, power), "pierce": apply_percent(base, power)}[kind]
+    percent = attack_element_percent(run, bal)
+    damage = apply_percent(damage, percent)
+    if run.awakened and bal.awaken_bonus:
+        damage = apply_percent(damage, 100 + bal.awaken_bonus)
+    shield = enemy.get("barrier", 0) if enemy.get("barrier_turns", 0) > 0 and kind != "pierce" else 0
+    if shield:
+        damage = reduce_damage(damage, shield)
+    enemy["hp"] = max(0, enemy["hp"] - damage)
+    events = [f"{title} **[{name}]**! {enemy['name']}에게 **{damage:,}** 피해" + (f" ({power}연타)" if kind == "multi" else "")
+              + ("!" if not shield else f"! (방어막 {shield}%)") + element_note(percent)]
+    if kind == "drain":
+        gained = max(0, min(bal.max_hp, run.hp + damage * power // 100) - run.hp)
+        run.hp += gained
+        events.append(f"🩸 흡혈로 HP +{gained}")
+    if kind == "stun" and enemy["hp"] > 0:
+        enemy["stunned"] = True
+        events.append(f"💫 {enemy['name']}이(가) 기절했어요! 다음 공격을 하지 못해요.")
+    return events
+
+
+def use_technique(run: Run, which: str, rng, bal: Balance | None = None) -> list[str]:
+    """싸우는 중 기술을 쓴다(which: skill | ult | special). 쓴 뒤에는 공격처럼 몬스터가 반격하고 턴이 끝난다.
+    - skill: 무기 스킬. 쓰면 쿨타임이 돈다.
+    - ult: 무기 궁극기. 게이지 100%일 때만, 쓰면 게이지가 0이 되고 각성 게이지가 찬다(다 차면 각성).
+    - special: 각성 중에만 쓰는 특수 스킬(/각성설정). 설정에 따라 쓰면 각성이 끝난다."""
+    bal = bal or DEFAULT
+    ready = skill_ready(run, bal)
+    if which not in ready:
+        raise DungeonError("알 수 없는 기술이에요.")
+    weapon = _weapon(run, bal)
+    if not ready[which]:
+        if run.phase != "battle":
+            raise DungeonError("싸우는 중에만 쓸 수 있어요.")
+        if which == "skill":
+            raise DungeonError(f"스킬은 {run.skill_cd}턴 뒤에 다시 쓸 수 있어요." if weapon and weapon.skill else "이 무기에는 스킬이 없어요.")
+        if which == "ult":
+            raise DungeonError(f"궁극기 게이지가 {run.ult_gauge}%예요. 100%가 되면 쓸 수 있어요." if weapon and weapon.ult else "이 무기에는 궁극기가 없어요.")
+        raise DungeonError(f"각성 중에만 쓸 수 있어요. 각성 게이지 {run.awaken_gauge}% (궁극기를 쓰면 차요).")
+    run.last = []
+    if which == "skill":
+        events = _technique(run, rng, bal, weapon.skill, weapon.skill_power, "✨ 스킬")
+        run.skill_cd = weapon.skill_cooldown + 1                 # 이번 턴 끝에 하나 줄어서, 쿨타임만큼의 턴을 쉰다
+    elif which == "ult":
+        events = _technique(run, rng, bal, weapon.ult, weapon.ult_power, "🟡 궁극기")
+        run.ult_gauge = 0
+        run.awaken_gauge = min(100, run.awaken_gauge + bal.awaken_charge)
+        if run.awaken_gauge >= 100 and not run.awakened:
+            run.awakened = True
+            events.append("⚡ **각성!** 특수 스킬을 쓸 수 있어요." + (f" (각성 중 피해 +{bal.awaken_bonus}%)" if bal.awaken_bonus else ""))
+        else:
+            events.append(f"⚡ 각성 게이지 {run.awaken_gauge}%")
+    else:
+        events = _technique(run, rng, bal, bal.special, bal.special_power, "⚡ 각성 특수 스킬")
+        if bal.special_ends:
+            run.awakened, run.awaken_gauge = False, 0
+            events.append("⚡ 각성이 끝났어요. 각성 게이지가 0%로 돌아갔어요.")
     events += _after_player_action(run, 0, bal, rng)
     run.events = events
     return events
@@ -663,6 +763,7 @@ def player_defend(run: Run, guard_ok: bool, bal: Balance | None = None, rng=None
             else:
                 enemy["stunned"] = True
                 events.append(f"💫 {enemy['name']}이(가) 충격으로 다음 공격을 하지 못해요!")
+    events += _charge_ult(run, bal)
     events += _end_turn(run, bal, rng)
     run.events = events
     return events

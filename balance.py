@@ -63,6 +63,11 @@ class Gear:
     reduction: int = 0           # 갑옷: 몬스터에게 받는 모든 피해를 이 %만큼 줄인다(가드에 성공한 공격에는 적용되지 않는다)
     shop_price: int | None = None  # 상점에서 팔 때 값(재화). 없으면 판매가 × 상점.가격배율
     element: str | None = None   # 속성(key). 무기는 공격 속성, 갑옷은 몬스터 공격을 받을 때의 방어 속성. 방패는 쓰지 않는다.
+    skill: str | None = None     # 무기 스킬(WEAPON_SKILLS). 쓰면 skill_cooldown턴 동안 다시 못 쓴다
+    skill_power: int = 0
+    skill_cooldown: int = 0
+    ult: str | None = None       # 무기 궁극기(WEAPON_SKILLS). 게이지가 100%가 되면 쓸 수 있다
+    ult_power: int = 0
 
 
 GEAR_SLOTS = ("weapon", "shield", "armor")
@@ -173,6 +178,10 @@ def describe_gear(gear: Gear) -> str:
             parts.append(f"크리티컬(2배) 확률 {gear.crit}%")
         if gear.dodge is not None:
             parts.append(f"대상 회피 확률 {gear.dodge}%로 변환")
+        if gear.skill:
+            parts.append(f"스킬 {weapon_skill_text(gear.skill, gear.skill_power)}(쿨타임 {gear.skill_cooldown}턴)")
+        if gear.ult:
+            parts.append(f"궁극기 {weapon_skill_text(gear.ult, gear.ult_power)}")
         return ", ".join(parts)
     if gear.slot == "armor":
         return f"받는 피해 {gear.reduction}% 감소"
@@ -558,6 +567,51 @@ def skill_text(skill: str | None, every: int, power: int, turns: int) -> str:
     return f"[{name}] {every}번째 공격마다 · {detail}"
 
 
+# 무기 스킬·궁극기·각성 특수 스킬의 종류: (이름, 세기의 뜻, 세기 범위)
+WEAPON_SKILLS = {
+    "power": ("강타", "공격 피해의 몇 %로 때리는지", (100, 2000)),
+    "multi": ("연타", "몇 번 때리는지(한 번마다 공격 피해)", (2, 10)),
+    "drain": ("흡혈", "준 피해의 몇 %만큼 HP를 회복하는지(피해는 공격 그대로)", (1, 200)),
+    "stun": ("기절탄", "공격 피해의 몇 %로 때리고 몬스터를 기절시키는지", (50, 1000)),
+    "pierce": ("관통", "공격 피해의 몇 %로, 회피·방어막을 무시하고 때리는지", (100, 2000)),
+}
+SKILL_COOLDOWN_MAX = 20
+
+
+def weapon_skill_text(kind: str | None, power: int) -> str:
+    """무기 스킬 한 줄('[강타] 공격 피해의 300%'). 없으면 빈 문자열."""
+    if not kind:
+        return ""
+    name = WEAPON_SKILLS[kind][0]
+    detail = {"power": f"공격 피해의 {power}%", "multi": f"{power}연타", "drain": f"준 피해의 {power}%만큼 회복",
+              "stun": f"공격 피해의 {power}% + 기절", "pierce": f"공격 피해의 {power}%, 회피·방어막 무시"}[kind]
+    return f"[{name}] {detail}"
+
+
+def _check_weapon_skills(data: dict, slot: str):
+    """무기 스킬·궁극기 칸. (값 사전, None) 또는 (None, 이유). 무기가 아니면 모두 없다."""
+    out = {"skill": None, "skill_power": 0, "skill_cooldown": 0, "ult": None, "ult_power": 0}
+    if slot != "weapon":
+        return out, None
+    for field_name, power_name, extra in (("skill", "skill_power", "skill_cooldown"), ("ult", "ult_power", None)):
+        kind = data.get(field_name)
+        if kind in (None, ""):
+            continue
+        if kind not in WEAPON_SKILLS:
+            return None, "무기 스킬 종류가 올바르지 않아요."
+        name, meaning, (low, high) = WEAPON_SKILLS[kind]
+        power, problem = _num(data, power_name, low, high, low)
+        if problem:
+            return None, f"[{name}]의 세기는 {meaning}이고 {low}~{high:,} 사이여야 해요."
+        out[field_name], out[power_name] = kind, power
+        if extra:
+            cooldown, problem = _num(data, extra, 1, SKILL_COOLDOWN_MAX, 3)
+            if problem:
+                return None, f"스킬 쿨타임은 1~{SKILL_COOLDOWN_MAX}턴이에요."
+            out[extra] = cooldown
+    return out, None
+
+
 def _check_element(data: dict):
     """속성(key) 하나. 없으면 None. (값, None) 또는 (None, 이유). 그 속성이 실제로 있는지는 명령어 쪽에서 본다(없어진 속성은 무속성으로 친다)."""
     value = data.get("element")
@@ -740,9 +794,12 @@ def check_entity(section: str, data) -> tuple[object | None, str | None]:
             return None, problem
         if slot == "shield":                               # 방패는 속성을 쓰지 않는다(공격은 무기, 받는 피해는 갑옷의 속성)
             element = None
+        skills, problem = _check_weapon_skills(data, slot)
+        if problem:
+            return None, problem
         gear = Gear(key, name, emoji, slot, tier, n["weight"], attack=n["attack"], crit=n["crit"], dodge=extra["dodge"],
                     guard=extra["guard"], reflect=extra["reflect"], sell_price=n["sell_price"],
-                    guard_chance=extra["guard_chance"], floors=floors, reduction=n["reduction"], shop_price=shop, element=element)
+                    guard_chance=extra["guard_chance"], floors=floors, reduction=n["reduction"], shop_price=shop, element=element, **skills)
         return replace(gear, description=describe_gear(gear)), None
     n, problem = numbers(("heal", 0, 100000, 0), ("regen", 0, 100000, 0), ("regen_turns", 0, 1000, 0),
                          ("sell_price", 0, SELL_MAX, SELL_DEFAULT[tier]), ("damage", 0, 1000000, 0), ("dot", 0, 1000000, 0),
@@ -999,6 +1056,12 @@ class Balance:
     trap_damage: int = TRAP_DAMAGE
     shop_interval: int = SHOP_INTERVAL
     shop_markup: int = SHOP_MARKUP
+    ult_charge: int = 20         # 싸우는 중 공격·방어 한 번마다 궁극기 게이지가 차는 %(궁극기가 있는 무기일 때)
+    awaken_charge: int = 10      # 궁극기를 한 번 쓸 때마다 각성 게이지가 차는 %
+    special: str = "power"       # 각성 특수 스킬 종류(WEAPON_SKILLS)
+    special_power: int = 500
+    special_ends: bool = True    # 특수 스킬을 쓰면 각성이 끝나는지
+    awaken_bonus: int = 0        # 각성 중 내 공격 피해 보너스(%)
     elements: tuple = ()         # 관리자가 만든 속성 ((key, 이름, 이모지), ...)
     affinity: tuple = ()         # 상성표 ((공격 속성, 방어 속성, 배율 %), ...). 없는 조합은 100%
     mods: tuple = ()             # 장비 개조 레시피 ((무기 key, 재료 key, 결과 무기 key), ...). 만든 쪽에서 쓸 수 있는 것만 남긴다(build).
@@ -1033,7 +1096,7 @@ class Balance:
         return self.mod_by_pair.get((weapon_key, item_key))
 
     @classmethod
-    def build(cls, overrides=None, content=None, mods=None, elements=None, affinity=None) -> "Balance":
+    def build(cls, overrides=None, content=None, mods=None, elements=None, affinity=None, awakening=None) -> "Balance":
         """기본값 위에 숫자 덮어쓰기(overrides)를 얹고, 관리자가 만든 콘텐츠(content)가 있는 구역은 그것으로 통째로 바꾼다.
         mods는 장비 개조 레시피 [{weapon, item, result}, ...]: 무기·재료·결과가 지금 실제로 있는 것만 남긴다."""
         o = clean(overrides)
@@ -1080,7 +1143,30 @@ class Balance:
             clear_candy=(get("보상.최소"), get("보상.최대")), ticket_chance=get("보상.획득권확률"), room_plan=plan,
             monsters=custom.get("monsters", monsters), bosses=custom.get("bosses", bosses),
             gear=final_gear, consumables=final_items, mods=clean_mods(mods, final_gear, final_items),
-            **clean_elements(elements, affinity))
+            **clean_elements(elements, affinity), **clean_awakening(awakening))
+
+
+AWAKENING_DEFAULT = {"ult_charge": 20, "awaken_charge": 10, "special": "power", "special_power": 500, "special_ends": True, "awaken_bonus": 0}
+AWAKENING_LIMITS = {"ult_charge": (1, 100), "awaken_charge": (1, 100), "awaken_bonus": (0, 1000)}
+
+
+def clean_awakening(raw) -> dict:
+    """저장된 각성 설정(/각성설정)에서 쓸 수 있는 값만 꺼내고, 없거나 잘못된 칸은 기본값으로 채운다."""
+    out = dict(AWAKENING_DEFAULT)
+    if not isinstance(raw, dict):
+        return out
+    for key, (low, high) in AWAKENING_LIMITS.items():
+        value = raw.get(key)
+        if not isinstance(value, bool) and isinstance(value, int) and low <= value <= high:
+            out[key] = value
+    if raw.get("special") in WEAPON_SKILLS:
+        low, high = WEAPON_SKILLS[raw["special"]][2]
+        power = raw.get("special_power")
+        if not isinstance(power, bool) and isinstance(power, int) and low <= power <= high:
+            out["special"], out["special_power"] = raw["special"], power
+    if isinstance(raw.get("special_ends"), bool):
+        out["special_ends"] = raw["special_ends"]
+    return out
 
 
 MAX_ELEMENTS = 20               # 서버마다 속성 수 한도

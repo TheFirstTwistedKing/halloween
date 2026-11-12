@@ -20,7 +20,7 @@ from store import Store
 BASE = Path(__file__).resolve().parent
 LOG = logging.getLogger("halloween")
 EXTENSIONS = ("cogs.economy", "cogs.admin", "cogs.shop", "cogs.dungeon", "cogs.dungeon_admin",
-              "cogs.rules_admin", "cogs.content_admin", "cogs.alchemy", "cogs.announce", "cogs.elements")
+              "cogs.rules_admin", "cogs.content_admin", "cogs.alchemy", "cogs.announce", "cogs.elements", "cogs.boss_patterns")
 
 
 def env_flag(raw: str) -> bool:

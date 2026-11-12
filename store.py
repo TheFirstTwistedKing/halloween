@@ -76,6 +76,8 @@ DEFAULT_SETTINGS = {
     "entry_item": None,          # 던전에 들어갈 때 내는 물품 id. None이면 무료 입장
     "entry_cost": 1,             # 입장에 필요한 개수
     "package_table": [],         # 패키지 결과표 [{id, kind(none|candy|item), item, amount, weight, emoji, title}]
+    "guild_cost": 1000,          # 길드를 만드는 데 드는 재화(/길드 만들기)
+    "guild_size": 20,            # 길드 인원 한도(길드장 포함)
     "workshop": [],              # 기지의 요리·제작 레시피(/기지레시피) [{id, kind: cook|craft, result: 던전 key, amount, ingredients: [[물품 id, 개수], ...], cost}]
     "clear_rewards": [],         # 던전 클리어 때 추가로 주는 물품 [{id, item, amount, chance(%)}]. 재화·획득권은 /던전설정의 보상.* 항목
     "dungeon_content": {},       # 던전 콘텐츠 {monsters|bosses|gear|consumables: [...]}. 없는 항목은 기본값 (balance.py)
@@ -137,6 +139,8 @@ def validate_settings(cfg: dict) -> None:
     check_package_table(cfg["package_table"])
     check_clear_rewards(cfg["clear_rewards"])
     check_workshop(cfg["workshop"])
+    number("guild_cost", 0, 1_000_000_000, True)
+    number("guild_size", 2, 100, True)
     if not isinstance(cfg["dungeon_content"], dict):
         raise ValueError("던전 콘텐츠 설정이 올바르지 않아요.")
     mods = cfg["weapon_mods"]
@@ -398,6 +402,15 @@ class Store:
             CREATE TABLE IF NOT EXISTS base_display(
                 guild INTEGER, user INTEGER, slot TEXT NOT NULL CHECK(slot IN ('weapon','shield','armor')), key TEXT NOT NULL,
                 PRIMARY KEY(guild, user, slot));
+            CREATE TABLE IF NOT EXISTS guilds(
+                id INTEGER PRIMARY KEY AUTOINCREMENT, guild INTEGER NOT NULL, name TEXT NOT NULL, leader INTEGER NOT NULL,
+                buff TEXT, vault INTEGER NOT NULL DEFAULT 0 CHECK(vault >= 0), wins INTEGER NOT NULL DEFAULT 0, losses INTEGER NOT NULL DEFAULT 0,
+                created REAL NOT NULL DEFAULT 0);
+            CREATE UNIQUE INDEX IF NOT EXISTS guilds_name ON guilds(guild, lower(name));
+            CREATE TABLE IF NOT EXISTS guild_members(
+                guild INTEGER, user INTEGER, gid INTEGER NOT NULL, PRIMARY KEY(guild, user));
+            CREATE TABLE IF NOT EXISTS guild_requests(
+                guild INTEGER, user INTEGER, gid INTEGER, at REAL NOT NULL DEFAULT 0, PRIMARY KEY(guild, user, gid));
             CREATE TABLE IF NOT EXISTS vault_loadout(
                 guild INTEGER, user INTEGER, data TEXT NOT NULL, PRIMARY KEY(guild, user));
         """)

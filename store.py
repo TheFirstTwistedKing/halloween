@@ -80,6 +80,7 @@ DEFAULT_SETTINGS = {
     "dungeon_content": {},       # 던전 콘텐츠 {monsters|bosses|gear|consumables: [...]}. 없는 항목은 기본값 (balance.py)
     "weapon_mods": [],           # 장비 개조 레시피 [{id, weapon, item, result}] (무기·재료·결과 무기의 key). balance.clean_mods가 쓸 수 있는 것만 고른다
     "elements": [],              # 속성 [{key, name, emoji}] (/속성 추가)
+    "final_boss": {},            # 무한모드 최종보스(/최종보스): 이름·능력치·패턴·층·보상. 빈 칸은 기본값(balance.FINAL_BOSS_DEFAULT)
     "awakening": {},             # 각성 설정(/각성설정): 궁극기·각성 게이지 충전, 특수 스킬. 빈 칸은 기본값(balance.AWAKENING_DEFAULT)
     "affinity": [],              # 상성표 [{atk, def, percent}] (/속성 상성). 없는 조합은 100%
     "dungeon": {},               # 던전 밸런스 중 관리자가 바꾼 값 {항목 이름: 숫자}. 비어 있으면 모두 기본값 (balance.py)
@@ -153,6 +154,8 @@ def validate_settings(cfg: dict) -> None:
         raise ValueError("상성표 설정이 올바르지 않아요.")
     if not isinstance(cfg["awakening"], dict) or len(cfg["awakening"]) > 20:
         raise ValueError("각성 설정이 올바르지 않아요.")
+    if not isinstance(cfg["final_boss"], dict) or len(cfg["final_boss"]) > 30:
+        raise ValueError("최종보스 설정이 올바르지 않아요.")
     channels = cfg["channels"]
     if not isinstance(channels, list) or len(channels) > 100 or any(isinstance(c, bool) or not isinstance(c, int) for c in channels):
         raise ValueError("이벤트 채널 목록이 올바르지 않아요.")
@@ -401,7 +404,8 @@ class Store:
         if cached is None:
             cfg = self.settings(guild)
             cached = self._balances[guild] = balance_rules.Balance.build(cfg["dungeon"], cfg["dungeon_content"], cfg["weapon_mods"],
-                                                                         cfg["elements"], cfg["affinity"], cfg["awakening"])
+                                                                         cfg["elements"], cfg["affinity"], cfg["awakening"],
+                                                                         cfg["final_boss"])
         return cached
 
     # ---- 지갑 ----

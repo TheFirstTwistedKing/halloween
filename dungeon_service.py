@@ -22,6 +22,9 @@ class Reward:
     ticket: bool = False          # 이번에 히든 칭호 획득권이 나왔는지
     tickets_total: int = 0        # 지금 가진 획득권 수
     items: list = field(default_factory=list)   # 받은 물품 [(이모지, 이름, 개수)]
+    final: bool = False           # 무한모드 최종보스를 쓰러뜨린 완전 클리어인지
+    final_candy: int = 0          # 그중 최종보스 보상 재화(정한 값. 최대 보유량에 막히면 실제로는 덜 받는다)
+    final_tickets: int = 0        # 최종보스 보상 획득권
 
 
 @dataclass
@@ -341,10 +344,13 @@ def _finish(store: Store, rng, guild_id: int, user_id: int, run: Run, bal) -> Ou
     """던전이 끝났다. 클리어면 보상을 주고, 어느 쪽이든 진행 기록을 지운다."""
     ended = {"clear": "clear", "quit": "quit"}.get(run.phase, "dead")
     candy, ticket, given = _roll_clear(store, rng, guild_id, bal) if ended == "clear" else (0, False, [])
-    done = store.end_dungeon(guild_id, user_id, candy=candy, tickets=1 if ticket else 0,
+    final = ended == "clear" and run.final_clear          # 최종보스 완전 클리어: 클리어 보상에 최종보스 보상을 더한다
+    extra_candy, extra_tickets = (bal.final_reward, bal.final_tickets) if final else (0, 0)
+    done = store.end_dungeon(guild_id, user_id, candy=candy + extra_candy, tickets=(1 if ticket else 0) + extra_tickets,
                              items=[(item["id"], amount) for item, amount in given])
     if done is None:                                  # 이미 끝난 던전(겹친 요청): 보상은 이미 나갔다.
         return Outcome(False, "이미 끝난 던전이에요.", stale=True)
     reward = Reward(candy=done[0], ticket=ticket, tickets_total=done[1],
-                    items=[(item["emoji"], item["name"], amount) for item, amount in given]) if ended == "clear" else None
+                    items=[(item["emoji"], item["name"], amount) for item, amount in given],
+                    final=final, final_candy=extra_candy, final_tickets=extra_tickets) if ended == "clear" else None
     return Outcome(True, run=run, ended=ended, reward=reward)

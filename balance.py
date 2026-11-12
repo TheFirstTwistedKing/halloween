@@ -76,6 +76,8 @@ class Gear:
     skill_cooldown: int = 0
     ult: str | None = None       # 무기 궁극기(WEAPON_SKILLS). 게이지가 100%가 되면 쓸 수 있다
     ult_power: int = 0
+    skill_name: str | None = None  # 관리자가 붙인 스킬 이름. 없으면 종류의 기본 이름(WEAPON_SKILLS)
+    ult_name: str | None = None    # 관리자가 붙인 궁극기 이름
 
 
 GEAR_SLOTS = ("weapon", "shield", "armor")
@@ -129,6 +131,7 @@ class Monster:
     skill_every: int = 0         # 몇 번째 공격마다 스킬을 쓰는지(3이면 3·6·9번째)
     skill_power: int = 0         # 스킬 세기(종류마다 뜻이 다르다: BOSS_SKILLS 참고)
     skill_turns: int = 0         # 방어막·화상이 이어지는 턴 수
+    skill_name: str | None = None  # 관리자가 붙인 스킬 이름. 없으면 종류의 기본 이름(BOSS_SKILLS)
 
 
 @dataclass(frozen=True)
@@ -159,6 +162,7 @@ class SecretBoss:
     skill_every: int = 0         # 몇 번째 공격마다 스킬을 쓰는지(3이면 3·6·9번째)
     skill_power: int = 0         # 스킬 세기(종류마다 뜻이 다르다: BOSS_SKILLS 참고)
     skill_turns: int = 0         # 방어막·화상이 이어지는 턴 수
+    skill_name: str | None = None  # 관리자가 붙인 스킬 이름. 없으면 종류의 기본 이름(BOSS_SKILLS)
 
 
 @dataclass(frozen=True)
@@ -187,9 +191,9 @@ def describe_gear(gear: Gear) -> str:
         if gear.dodge is not None:
             parts.append(f"대상 회피 확률 {gear.dodge}%로 변환")
         if gear.skill:
-            parts.append(f"스킬 {weapon_skill_text(gear.skill, gear.skill_power)}(쿨타임 {gear.skill_cooldown}턴)")
+            parts.append(f"스킬 {weapon_skill_text(gear.skill, gear.skill_power, gear.skill_name)}(쿨타임 {gear.skill_cooldown}턴)")
         if gear.ult:
-            parts.append(f"궁극기 {weapon_skill_text(gear.ult, gear.ult_power)}")
+            parts.append(f"궁극기 {weapon_skill_text(gear.ult, gear.ult_power, gear.ult_name)}")
         return ", ".join(parts)
     if gear.slot == "armor":
         return f"받는 피해 {gear.reduction}% 감소"
@@ -548,8 +552,11 @@ def _check_boss_pattern(data: dict):
             return None, problem
     skill = data.get("skill")
     if skill in (None, ""):
-        out.update(skill=None, skill_every=0, skill_power=0, skill_turns=0)
+        out.update(skill=None, skill_every=0, skill_power=0, skill_turns=0, skill_name=None)
         return out, None
+    out["skill_name"], problem = clean_skill_name(data.get("skill_name"))
+    if problem:
+        return None, problem
     if skill not in BOSS_SKILLS:
         return None, "보스 스킬 종류가 올바르지 않아요."
     name, meaning, (low, high), needs_turns = BOSS_SKILLS[skill]
@@ -565,14 +572,14 @@ def _check_boss_pattern(data: dict):
     return out, None
 
 
-def skill_text(skill: str | None, every: int, power: int, turns: int) -> str:
-    """보스 스킬 한 줄 설명. 없으면 빈 문자열."""
+def skill_text(skill: str | None, every: int, power: int, turns: int, custom: str | None = None) -> str:
+    """보스 스킬 한 줄 설명(이름을 붙였으면 '[지옥불](과열) …'). 없으면 빈 문자열."""
     if not skill:
         return ""
-    name = BOSS_SKILLS[skill][0]
+    name = f"[{custom}]({BOSS_SKILLS[skill][0]})" if custom else f"[{BOSS_SKILLS[skill][0]}]"
     detail = {"strike": f"공격의 {power}%", "heal": f"최대 체력의 {power}% 회복", "barrier": f"{turns}턴 동안 받는 피해 {power}% 감소",
               "burn": f"{turns}턴 동안 턴마다 {power:,} 피해"}[skill]
-    return f"[{name}] {every}번째 공격마다 · {detail}"
+    return f"{name} {every}번째 공격마다 · {detail}"
 
 
 # 무기 스킬·궁극기·각성 특수 스킬의 종류: (이름, 세기의 뜻, 세기 범위)
@@ -586,25 +593,69 @@ WEAPON_SKILLS = {
 SKILL_COOLDOWN_MAX = 20
 
 
-def weapon_skill_text(kind: str | None, power: int) -> str:
-    """무기 스킬 한 줄('[강타] 공격 피해의 300%'). 없으면 빈 문자열."""
+SKILL_NAME_MAX = 20             # 스킬·궁극기 이름 길이 한도
+SKILL_NAME_BANNED = "@#<>`*_~|[]\n"
+
+
+def clean_skill_name(value) -> tuple[str | None, str | None]:
+    """관리자가 붙이는 스킬·궁극기 이름. (이름 또는 None(기본 이름), 문제)."""
+    if value in (None, ""):
+        return None, None
+    if not isinstance(value, str):
+        return None, "스킬 이름이 올바르지 않아요."
+    value = value.strip()
+    if not 1 <= len(value) <= SKILL_NAME_MAX or any(c in value for c in SKILL_NAME_BANNED):
+        return None, f"스킬 이름은 1~{SKILL_NAME_MAX}자로, @ # < > ` * _ ~ | [ ] 없이 써 주세요."
+    return value, None
+
+
+RESET_NAME = "기본"              # 이름 칸에 이렇게 쓰면 기본 이름으로 되돌린다
+
+
+def name_change(text: str | None) -> tuple[bool, str | None, str | None]:
+    """명령어의 '이름' 칸: (바꿀지, 새 이름(None이면 기본 이름), 문제). 비우면 바꾸지 않고, '기본'이면 기본 이름으로."""
+    if text is None:
+        return False, None, None
+    if text.strip() == RESET_NAME:
+        return True, None, None
+    name, problem = clean_skill_name(text)
+    if name is None and problem is None:
+        problem = f"이름을 써 주세요. 기본 이름으로 되돌리려면 `{RESET_NAME}`이라고 써요."
+    return True, name, problem
+
+
+def weapon_skill_name(kind: str | None, custom: str | None = None) -> str:
+    """무기 스킬·궁극기·특수 스킬의 보이는 이름: 관리자가 붙인 이름, 없으면 종류의 기본 이름."""
+    return custom or (WEAPON_SKILLS[kind][0] if kind in WEAPON_SKILLS else "")
+
+
+def boss_skill_name(kind: str | None, custom: str | None = None) -> str:
+    """보스 스킬의 보이는 이름: 관리자가 붙인 이름, 없으면 종류의 기본 이름."""
+    return custom or (BOSS_SKILLS[kind][0] if kind in BOSS_SKILLS else "")
+
+
+def weapon_skill_text(kind: str | None, power: int, custom: str | None = None) -> str:
+    """무기 스킬 한 줄('[강타] 공격 피해의 300%', 이름을 붙였으면 '[플라즈마 참격](강타) …'). 없으면 빈 문자열."""
     if not kind:
         return ""
-    name = WEAPON_SKILLS[kind][0]
+    name = f"[{custom}]({WEAPON_SKILLS[kind][0]})" if custom else f"[{WEAPON_SKILLS[kind][0]}]"
     detail = {"power": f"공격 피해의 {power}%", "multi": f"{power}연타", "drain": f"준 피해의 {power}%만큼 회복",
               "stun": f"공격 피해의 {power}% + 기절", "pierce": f"공격 피해의 {power}%, 회피·방어막 무시"}[kind]
-    return f"[{name}] {detail}"
+    return f"{name} {detail}"
 
 
 def _check_weapon_skills(data: dict, slot: str):
     """무기 스킬·궁극기 칸. (값 사전, None) 또는 (None, 이유). 무기가 아니면 모두 없다."""
-    out = {"skill": None, "skill_power": 0, "skill_cooldown": 0, "ult": None, "ult_power": 0}
+    out = {"skill": None, "skill_power": 0, "skill_cooldown": 0, "ult": None, "ult_power": 0, "skill_name": None, "ult_name": None}
     if slot != "weapon":
         return out, None
     for field_name, power_name, extra in (("skill", "skill_power", "skill_cooldown"), ("ult", "ult_power", None)):
         kind = data.get(field_name)
         if kind in (None, ""):
             continue
+        out[f"{field_name}_name"], problem = clean_skill_name(data.get(f"{field_name}_name"))     # 이름은 그 기술이 있을 때만 남는다
+        if problem:
+            return None, problem
         if kind not in WEAPON_SKILLS:
             return None, "무기 스킬 종류가 올바르지 않아요."
         name, meaning, (low, high) = WEAPON_SKILLS[kind]
@@ -1071,6 +1122,7 @@ class Balance:
     special: str = "power"       # 각성 특수 스킬 종류(WEAPON_SKILLS)
     special_power: int = 500
     special_ends: bool = True    # 특수 스킬을 쓰면 각성이 끝나는지
+    special_name: str | None = None  # 관리자가 붙인 특수 스킬 이름
     awaken_bonus: int = 0        # 각성 중 내 공격 피해 보너스(%)
     base_passive: int = BASE_PASSIVE # 기지에 전시한 장비 능력치 중 던전에서 더해지는 %
     vault_items: int = VAULT_ITEMS   # 던전에 들어갈 때 보관함에서 가져갈 수 있는 소모품 수
@@ -1167,7 +1219,8 @@ class Balance:
             **clean_elements(elements, affinity), **clean_awakening(awakening), **clean_final(final))
 
 
-AWAKENING_DEFAULT = {"ult_charge": 20, "awaken_charge": 10, "special": "power", "special_power": 500, "special_ends": True, "awaken_bonus": 0}
+AWAKENING_DEFAULT = {"ult_charge": 20, "awaken_charge": 10, "special": "power", "special_power": 500, "special_ends": True, "awaken_bonus": 0,
+                     "special_name": None}
 AWAKENING_LIMITS = {"ult_charge": (1, 100), "awaken_charge": (1, 100), "awaken_bonus": (0, 1000)}
 
 
@@ -1187,12 +1240,16 @@ def clean_awakening(raw) -> dict:
             out["special"], out["special_power"] = raw["special"], power
     if isinstance(raw.get("special_ends"), bool):
         out["special_ends"] = raw["special_ends"]
+    name, problem = clean_skill_name(raw.get("special_name"))
+    if not problem:
+        out["special_name"] = name
     return out
 
 
 FINAL_BOSS_DEFAULT = {"key": "final_boss", "name": "오메가 코어", "emoji": "🌀", "hp": 1500, "damage": 150, "dodge": 0,
                       "phase2_hp": 1500, "phase2_damage": 180, "skill": "strike", "skill_every": 3, "skill_power": 200}
-FINAL_BOSS_FIELDS = ("name", "emoji", "hp", "damage", "element", "phase2_hp", "phase2_damage", "skill", "skill_every", "skill_power", "skill_turns")
+FINAL_BOSS_FIELDS = ("name", "emoji", "hp", "damage", "element", "phase2_hp", "phase2_damage", "skill", "skill_every", "skill_power", "skill_turns",
+                     "skill_name")
 FINAL_RULES_DEFAULT = {"floor": 100, "reward": 50000, "tickets": 1}
 FINAL_LIMITS = {"floor": (0, 1000), "reward": (0, 1_000_000_000), "tickets": (0, 10)}
 

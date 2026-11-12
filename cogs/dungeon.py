@@ -14,7 +14,7 @@ import dungeon_service as service
 import theme
 from owner import owner_only
 from paging import chunks, split_pages
-from balance import BOSS_SKILLS, DEFAULT, WEAPON_SKILLS, item_summary
+from balance import DEFAULT, boss_skill_name, item_summary, weapon_skill_name
 from dungeon import ROOMS, Run
 
 BAR = 10
@@ -125,11 +125,11 @@ def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=No
         if weapon_now and weapon_now.ult:
             status.append(f"🟡 궁극기 게이지 {gauge(run.ult_gauge)} {run.ult_gauge}%")
         if run.awakened:
-            status.append(f"⚡ **각성 중!** 특수 스킬 [{WEAPON_SKILLS[bal.special][0]}]을(를) 쓸 수 있어요" + (f" · 피해 +{bal.awaken_bonus}%" if bal.awaken_bonus else ""))
+            status.append(f"⚡ **각성 중!** 특수 스킬 [{weapon_skill_name(bal.special, bal.special_name)}]을(를) 쓸 수 있어요" + (f" · 피해 +{bal.awaken_bonus}%" if bal.awaken_bonus else ""))
         elif run.awaken_gauge:
             status.append(f"⚡ 각성 게이지 {gauge(run.awaken_gauge)} {run.awaken_gauge}%")
         if weapon_now and weapon_now.skill and run.skill_cd > 0:
-            status.append(f"✨ 스킬 [{WEAPON_SKILLS[weapon_now.skill][0]}] 쿨타임 {run.skill_cd}턴")
+            status.append(f"✨ 스킬 [{weapon_skill_name(weapon_now.skill, weapon_now.skill_name)}] 쿨타임 {run.skill_cd}턴")
         if run.burn_turns:
             status.append(f"🔥 과열: 턴마다 {run.burn_amount:,} 피해 (남은 {run.burn_turns}턴)")
         if run.enemy and run.enemy.get("barrier_turns"):
@@ -137,7 +137,8 @@ def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=No
         skill = (run.enemy or {}).get("skill")
         if run.in_battle and skill and skill.get("every"):
             left = skill["every"] - run.enemy.get("turn", 0) % skill["every"]
-            status.append(f"🌀 다음 스킬 [{BOSS_SKILLS[skill['kind']][0]}]: {left}번째 공격 뒤" if left > 1 else f"🌀 다음 공격이 스킬 [{BOSS_SKILLS[skill['kind']][0]}]이에요!")
+            shown = boss_skill_name(skill["kind"], skill.get("name"))
+            status.append(f"🌀 다음 스킬 [{shown}]: {left}번째 공격 뒤" if left > 1 else f"🌀 다음 공격이 스킬 [{shown}]이에요!")
         if run.enemy and run.enemy.get("dot_turns"):
             status.append(f"🌡️ 몬스터가 턴마다 {run.enemy['dot']} 피해 (남은 {run.enemy['dot_turns']}턴)")
         if status:
@@ -266,13 +267,13 @@ class DungeonView(discord.ui.View):
         weapon = bal.gear_by_key.get(run.weapon)
         ready = dungeon.skill_ready(run, bal)
         if weapon and weapon.skill:
-            label = f"스킬 {WEAPON_SKILLS[weapon.skill][0]}" + ("" if ready["skill"] else f" ({run.skill_cd}턴)")
+            label = f"스킬 {weapon_skill_name(weapon.skill, weapon.skill_name)}" + ("" if ready["skill"] else f" ({run.skill_cd}턴)")
             self._button(label, "✨", "skill", discord.ButtonStyle.success, row=2, disabled=not ready["skill"])
         if weapon and weapon.ult:
-            label = f"궁극기 {WEAPON_SKILLS[weapon.ult][0]}" + ("" if ready["ult"] else f" ({run.ult_gauge}%)")
+            label = f"궁극기 {weapon_skill_name(weapon.ult, weapon.ult_name)}" + ("" if ready["ult"] else f" ({run.ult_gauge}%)")
             self._button(label, "🟡", "ult", discord.ButtonStyle.success, row=2, disabled=not ready["ult"])
         if run.awakened:
-            self._button(f"각성 특수 스킬 {WEAPON_SKILLS[bal.special][0]}", "⚡", "special", discord.ButtonStyle.danger, row=2)
+            self._button(f"각성 특수 스킬 {weapon_skill_name(bal.special, bal.special_name)}"[:80], "⚡", "special", discord.ButtonStyle.danger, row=2)
 
     def _item_pager(self, page: int, pages: int) -> None:
         for step, label, emoji in ((-1, "아이템 이전", "◀️"), (+1, "아이템 다음", "▶️")):

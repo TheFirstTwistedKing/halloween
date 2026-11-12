@@ -12,7 +12,8 @@ from discord.ext import commands
 
 import theme
 from access import require_admin
-from balance import BOSS_SKILLS, FINAL_LIMITS, PHASE2_HP_MAX, SKILL_EVERY_MAX, SKILL_TURNS_MAX, check_final, skill_text
+from balance import (BOSS_SKILLS, FINAL_LIMITS, PHASE2_HP_MAX, RESET_NAME, SKILL_EVERY_MAX, SKILL_NAME_MAX, SKILL_TURNS_MAX, check_final, name_change,
+                     skill_text)
 from cogs.elements import elements, find_element
 from store import valid_emoji
 
@@ -21,6 +22,7 @@ PERMS = dict(guild_only=True, default_permissions=discord.Permissions(administra
 SKILL_CHOICES = [Choice(name=f"{name} — {meaning}", value=key) for key, (name, meaning, _r, _t) in BOSS_SKILLS.items()] + \
     [Choice(name="없음 (스킬 지우기)", value="none")]
 CLEAR_ELEMENT = "없음"
+NAME_HELP = f"스킬의 보이는 이름(1~{SKILL_NAME_MAX}자). 비우면 그대로, '{RESET_NAME}'이면 종류의 기본 이름"
 REWARD_MAX = FINAL_LIMITS["reward"][1]
 FLOOR_MAX = FINAL_LIMITS["floor"][1]
 TICKETS_MAX = FINAL_LIMITS["tickets"][1]
@@ -33,7 +35,7 @@ def final_text(bal, cur=None) -> str:
              f"❤️ HP {boss.hp:,} · ⚔️ 공격 {boss.damage:,} (1층 기준, 층이 오를수록 강해져요)"]
     lines.append(f"🔴 2페이즈: HP **{boss.phase2_hp:,}**" + (f" · 공격 **{boss.phase2_damage:,}**" if boss.phase2_damage else " · 공격은 그대로")
                  if boss.phase2_hp else "🔴 2페이즈: 없음")
-    skill = skill_text(boss.skill, boss.skill_every, boss.skill_power, boss.skill_turns)
+    skill = skill_text(boss.skill, boss.skill_every, boss.skill_power, boss.skill_turns, boss.skill_name)
     lines.append(f"🌀 스킬: {skill}" if skill else "🌀 스킬: 없음")
     if bal.final_floor <= 0:
         lines.append("📍 등장: **꺼져 있어요** (층 0)")
@@ -115,18 +117,48 @@ class FinalBoss(commands.Cog):
                          "🔴 최종보스의 2페이즈를 정했어요." if hp else "🔴 최종보스의 2페이즈를 없앴어요.")
 
     @group.command(name="스킬", description="최종보스가 N번째 공격마다 쓰는 스킬을 정해요. '없음'이면 지워요 (관리자)")
-    @app_commands.rename(kind="종류", every="주기", power="세기", turns="턴")
+    @app_commands.rename(kind="종류", every="주기", power="세기", turns="턴", name="이름")
     @app_commands.describe(kind="스킬 종류", every=f"몇 번째 공격마다 쓸까요(1~{SKILL_EVERY_MAX})",
                            power="세기: 강타는 공격의 %(100~1000), 자가 수리는 최대 체력의 %(1~100), 방어막은 피해 감소 %(1~100), 과열은 턴마다 피해",
-                           turns=f"방어막·과열이 이어지는 턴(1~{SKILL_TURNS_MAX})")
+                           turns=f"방어막·과열이 이어지는 턴(1~{SKILL_TURNS_MAX})", name=NAME_HELP)
     @app_commands.choices(kind=SKILL_CHOICES)
     async def skill(self, interaction: discord.Interaction, kind: Choice[str], every: app_commands.Range[int, 1, SKILL_EVERY_MAX] = 3,
-                    power: app_commands.Range[int, 1, 100000] = 150, turns: app_commands.Range[int, 0, SKILL_TURNS_MAX] = 0):
+                    power: app_commands.Range[int, 1, 100000] = 150, turns: app_commands.Range[int, 0, SKILL_TURNS_MAX] = 0,
+                    name: str | None = None):
         if kind.value == "none":
-            await self._save(interaction, {"skill": "none", "skill_every": 0, "skill_power": 0, "skill_turns": 0}, "🌀 최종보스의 스킬을 지웠어요.")
+            await self._save(interaction, {"skill": "none", "skill_every": 0, "skill_power": 0, "skill_turns": 0, "skill_name": None},
+                             "🌀 최종보스의 스킬을 지웠어요.")
             return
-        await self._save(interaction, {"skill": kind.value, "skill_every": every, "skill_power": power, "skill_turns": turns},
-                         "🌀 최종보스의 스킬을 정했어요.")
+        changes = {"skill": kind.value, "skill_every": every, "skill_power": power, "skill_turns": turns}
+        if not await self._name_into(interaction, name, changes):
+            return
+        await self._save(interaction, changes, "🌀 최종보스의 스킬을 정했어요.")
+
+    @group.command(name="스킬이름", description="최종보스 스킬의 이름만 바꿔요. '기본'이면 원래 이름 (관리자)")
+    @app_commands.rename(name="이름")
+    @app_commands.describe(name=NAME_HELP)
+    async def skill_rename(self, interaction: discord.Interaction, name: str):
+        if not await require_admin(interaction):
+            return
+        if self.bot.store.balance(interaction.guild_id).final_boss.skill is None:
+            await self._say(interaction, "최종보스에 스킬이 없어요. 먼저 `/최종보스 스킬`로 붙여 주세요.", False)
+            return
+        changes = {}
+        if not await self._name_into(interaction, name, changes):
+            return
+        await self._save(interaction, changes, "🏷️ 최종보스의 스킬 이름을 바꿨어요.")
+
+    async def _name_into(self, interaction, name: str | None, changes: dict) -> bool:
+        """'이름' 칸을 changes에 넣는다. 잘못된 이름이면 이유를 보여 주고 False."""
+        if not await require_admin(interaction):
+            return False
+        rename, value, problem = name_change(name)
+        if problem:
+            await self._say(interaction, problem, False)
+            return False
+        if rename:
+            changes["skill_name"] = value                    # None이면 저장에서 빠져 기본 이름이 된다
+        return True
 
     @group.command(name="보기", description="지금 최종보스 설정을 봐요 (관리자)")
     async def show(self, interaction: discord.Interaction):

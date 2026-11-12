@@ -13,7 +13,7 @@ from balance import (BASE_DAMAGE, BASE_DODGE, BOSSES, CLEAR_CANDY, CONSUMABLES, 
                      GEAR, GUARD_BASE, GUARD_CHANCE, GUARD_HEAL, MAX_HP, MONSTERS, REFLECT_BASE, ROOM_PLAN, ROOMS,
                      TICKET_CHANCE, TIER_ORDER, Balance, Consumable, EVENT_TAG, Gear, Monster, SecretBoss, condition_text, candidates_for_floor, floor_scaled,
                      monsters_for_floor, reduce_damage, shop_price, BOSS_SKILLS, WEAPON_SKILLS, GEAR_SLOTS, SLOT_NAMES, SHOP_SLOTS, ARMOR_MAX,
-                     GUILD_GEAR_ATTACK, GUILD_GEAR_GUARD, GUILD_GEAR_REDUCTION, GUILD_RAM_PERCENT)
+                     GUILD_GEAR_ATTACK, GUILD_GEAR_GUARD, GUILD_GEAR_REDUCTION, GUILD_RAM_PERCENT, boss_skill_name, weapon_skill_name)
 from josa import eul_reul, i_ga
 
 BARE = {"weapon": "맨손", "shield": "맨몸 가드", "armor": "맨몸"}       # 그 칸이 비었을 때 부르는 말
@@ -258,7 +258,8 @@ def _spawn(monster: Monster, floor: int = 1, bal: Balance | None = None) -> dict
              "phase2_damage": floor_scaled(monster.phase2_damage, floor, percent) if getattr(monster, "phase2_damage", 0) else 0}
     if getattr(monster, "skill", None):
         power = floor_scaled(monster.skill_power, floor, percent) if monster.skill == "burn" else monster.skill_power
-        enemy["skill"] = {"kind": monster.skill, "every": monster.skill_every, "power": power, "turns": monster.skill_turns}
+        enemy["skill"] = {"kind": monster.skill, "every": monster.skill_every, "power": power, "turns": monster.skill_turns,
+                          "name": getattr(monster, "skill_name", None)}
     if isinstance(monster, SecretBoss):                  # 시크릿 보스: 드롭·연출 정보를 같이 담는다(싸우는 도중 설정이 바뀌어도 이 싸움은 그대로).
         enemy.update(secret=True, intro=monster.intro, image=monster.image,
                      drops={"gear": monster.drop_gear, "gear_chance": monster.drop_gear_chance, "item": monster.drop_item,
@@ -506,7 +507,7 @@ def _enemy_attack(run: Run, reduction: int, bal: Balance | None = None, guarded:
     if skill and skill.get("every", 0) > 0:
         enemy["turn"] = enemy.get("turn", 0) + 1
         if enemy["turn"] % skill["every"] == 0:
-            name = BOSS_SKILLS[skill["kind"]][0]
+            name = boss_skill_name(skill["kind"], skill.get("name"))            # 관리자가 붙인 이름(없으면 기본 이름)
             if skill["kind"] == "heal":
                 gained = min(enemy["max_hp"], enemy["hp"] + enemy["max_hp"] * skill["power"] // 100) - enemy["hp"]
                 enemy["hp"] += gained
@@ -685,7 +686,7 @@ def _charge_ult(run: Run, bal: Balance) -> list[str]:
     if not weapon or not weapon.ult or run.ult_gauge >= 100:
         return []
     run.ult_gauge = min(100, run.ult_gauge + bal.ult_charge)
-    return [f"🟡 궁극기 게이지 **100%**! [{WEAPON_SKILLS[weapon.ult][0]}]을(를) 쓸 수 있어요."] if run.ult_gauge >= 100 else []
+    return [f"🟡 궁극기 게이지 **100%**! [{weapon_skill_name(weapon.ult, weapon.ult_name)}]을(를) 쓸 수 있어요."] if run.ult_gauge >= 100 else []
 
 
 def skill_ready(run: Run, bal: Balance | None = None) -> dict:
@@ -698,10 +699,11 @@ def skill_ready(run: Run, bal: Balance | None = None) -> dict:
             "special": fighting and run.awakened}
 
 
-def _technique(run: Run, rng, bal: Balance, kind: str, power: int, title: str) -> list[str]:
-    """스킬·궁극기·특수 스킬 한 번: 종류대로 몬스터에게 피해를 주고(속성·각성 보너스 적용), 흡혈·기절 같은 덧붙은 효과를 낸다."""
+def _technique(run: Run, rng, bal: Balance, kind: str, power: int, title: str, custom: str | None = None) -> list[str]:
+    """스킬·궁극기·특수 스킬 한 번: 종류대로 몬스터에게 피해를 주고(속성·각성 보너스 적용), 흡혈·기절 같은 덧붙은 효과를 낸다.
+    custom은 관리자가 붙인 이름(없으면 종류의 기본 이름)."""
     enemy = run.enemy
-    name = WEAPON_SKILLS[kind][0]
+    name = weapon_skill_name(kind, custom)
     if kind != "pierce" and rng.random() * 100 < enemy_dodge(run, bal):
         run.last.append("attack_miss")
         return [f"{title} **[{name}]**! 💨 {enemy['name']}이(가) 피했어요!"]
@@ -749,10 +751,10 @@ def use_technique(run: Run, which: str, rng, bal: Balance | None = None) -> list
         raise DungeonError(f"각성 중에만 쓸 수 있어요. 각성 게이지 {run.awaken_gauge}% (궁극기를 쓰면 차요).")
     run.last = []
     if which == "skill":
-        events = _technique(run, rng, bal, weapon.skill, weapon.skill_power, "✨ 스킬")
+        events = _technique(run, rng, bal, weapon.skill, weapon.skill_power, "✨ 스킬", weapon.skill_name)
         run.skill_cd = weapon.skill_cooldown + 1                 # 이번 턴 끝에 하나 줄어서, 쿨타임만큼의 턴을 쉰다
     elif which == "ult":
-        events = _technique(run, rng, bal, weapon.ult, weapon.ult_power, "🟡 궁극기")
+        events = _technique(run, rng, bal, weapon.ult, weapon.ult_power, "🟡 궁극기", weapon.ult_name)
         run.ult_gauge = 0
         run.awaken_gauge = min(100, run.awaken_gauge + bal.awaken_charge)
         if run.awaken_gauge >= 100 and not run.awakened:
@@ -761,7 +763,7 @@ def use_technique(run: Run, which: str, rng, bal: Balance | None = None) -> list
         else:
             events.append(f"⚡ 각성 게이지 {run.awaken_gauge}%")
     else:
-        events = _technique(run, rng, bal, bal.special, bal.special_power, "⚡ 각성 특수 스킬")
+        events = _technique(run, rng, bal, bal.special, bal.special_power, "⚡ 각성 특수 스킬", bal.special_name)
         if bal.special_ends:
             run.awakened, run.awaken_gauge = False, 0
             events.append("⚡ 각성이 끝났어요. 각성 게이지가 0%로 돌아갔어요.")

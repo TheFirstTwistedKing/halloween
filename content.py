@@ -103,7 +103,7 @@ def edit(store: Store, guild: int, sections, name: str, changes: dict):
     if hit is None:
         raise ContentError("그런 항목이 없어요. 이름은 자동완성에서 골라 주세요.")
     section, data = hit
-    changes = {k: v for k, v in changes.items() if v is not None or k in ("dodge", "guard", "reflect", "guard_chance", "modify", "drop_gear", "drop_item", "item", "shop_price", "element", "skill", "ult")}
+    changes = {k: v for k, v in changes.items() if v is not None or k in ("dodge", "guard", "reflect", "guard_chance", "modify", "drop_gear", "drop_item", "item", "shop_price", "element", "skill", "ult", "skill_name", "ult_name")}
     if not changes:
         raise ContentError("바꿀 내용을 하나 이상 적어 주세요.")
     new = {**data, **changes}

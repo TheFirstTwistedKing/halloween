@@ -13,11 +13,12 @@ import balance
 import content
 import theme
 from access import require_admin
-from balance import BOSS_SKILLS, PHASE2_HP_MAX, SKILL_EVERY_MAX, SKILL_TURNS_MAX, skill_text
+from balance import BOSS_SKILLS, PHASE2_HP_MAX, RESET_NAME, SKILL_EVERY_MAX, SKILL_NAME_MAX, SKILL_TURNS_MAX, name_change, skill_text
 
 Choice = app_commands.Choice
 PERMS = dict(guild_only=True, default_permissions=discord.Permissions(administrator=True))
 SECTIONS = ("bosses", "secrets")
+NAME_HELP = f"스킬의 보이는 이름(1~{SKILL_NAME_MAX}자). 비우면 그대로, '{RESET_NAME}'이면 종류의 기본 이름"
 SKILL_CHOICES = [Choice(name=f"{name} — {meaning}", value=key) for key, (name, meaning, _r, _t) in BOSS_SKILLS.items()] + \
     [Choice(name="없음 (스킬 지우기)", value="none")]
 
@@ -30,7 +31,7 @@ def pattern_text(data: dict) -> str:
                      + (f" · 공격 {data['damage']:,} → **{data['phase2_damage']:,}**" if data.get("phase2_damage") else " · 공격은 그대로"))
     else:
         lines.append("🔴 2페이즈: 없음")
-    skill = skill_text(data.get("skill"), data.get("skill_every", 0), data.get("skill_power", 0), data.get("skill_turns", 0))
+    skill = skill_text(data.get("skill"), data.get("skill_every", 0), data.get("skill_power", 0), data.get("skill_turns", 0), data.get("skill_name"))
     lines.append(f"🌀 스킬: {skill}" if skill else "🌀 스킬: 없음")
     lines.append("(체력·공격·과열 피해는 층이 오를수록 몬스터처럼 강해져요)")
     return "\n".join(lines)
@@ -53,9 +54,15 @@ class BossPatterns(commands.Cog):
             raise content.ContentError("그런 보스가 없어요. 보스·시크릿 보스 이름은 자동완성에서 골라 주세요.")
         return hit
 
-    async def _apply(self, interaction, target: str, changes: dict, head: str):
+    async def _apply(self, interaction, target: str, changes: dict, head: str, name: str | None = None):
         if not await require_admin(interaction):
             return
+        rename, value, problem = name_change(name)
+        if problem:
+            await self._say(interaction, problem, False)
+            return
+        if rename:
+            changes = dict(changes, skill_name=value)
         try:
             section, data = self._find(interaction.guild_id, target)
             content.edit(self.bot.store, interaction.guild_id, (section,), data["name"], changes)
@@ -75,19 +82,35 @@ class BossPatterns(commands.Cog):
                           "🔴 2페이즈를 정했어요." if hp else "🔴 2페이즈를 없앴어요.")
 
     @group.command(name="스킬", description="보스가 N번째 공격마다 쓰는 스킬을 정해요. 종류를 '없음'으로 하면 지워요 (관리자)")
-    @app_commands.rename(target="대상", kind="종류", every="주기", power="세기", turns="턴")
+    @app_commands.rename(target="대상", kind="종류", every="주기", power="세기", turns="턴", name="이름")
     @app_commands.describe(target="보스·시크릿 보스(자동완성)", kind="스킬 종류", every=f"몇 번째 공격마다 쓸까요(1~{SKILL_EVERY_MAX}). 3이면 3·6·9번째",
                            power="세기: 강타는 공격의 %(100~1000), 자가 수리는 최대 체력의 %(1~100), 방어막은 피해 감소 %(1~100), 과열은 턴마다 피해",
-                           turns=f"방어막·과열이 이어지는 턴(1~{SKILL_TURNS_MAX})")
+                           turns=f"방어막·과열이 이어지는 턴(1~{SKILL_TURNS_MAX})", name=NAME_HELP)
     @app_commands.choices(kind=SKILL_CHOICES)
     async def skill(self, interaction: discord.Interaction, target: str, kind: Choice[str],
                     every: app_commands.Range[int, 1, SKILL_EVERY_MAX] = 3, power: app_commands.Range[int, 1, 100000] = 150,
-                    turns: app_commands.Range[int, 0, SKILL_TURNS_MAX] = 0):
+                    turns: app_commands.Range[int, 0, SKILL_TURNS_MAX] = 0, name: str | None = None):
         if kind.value == "none":
-            await self._apply(interaction, target, {"skill": None}, "🌀 스킬을 지웠어요.")
+            await self._apply(interaction, target, {"skill": None, "skill_name": None}, "🌀 스킬을 지웠어요.")
             return
         await self._apply(interaction, target, {"skill": kind.value, "skill_every": every, "skill_power": power, "skill_turns": turns},
-                          "🌀 스킬을 정했어요.")
+                          "🌀 스킬을 정했어요.", name)
+
+    @group.command(name="이름", description="보스 스킬의 이름만 바꿔요(주기·세기는 그대로). '기본'이면 원래 이름 (관리자)")
+    @app_commands.rename(target="대상", name="이름")
+    @app_commands.describe(target="보스·시크릿 보스(자동완성)", name=NAME_HELP)
+    async def rename(self, interaction: discord.Interaction, target: str, name: str):
+        if not await require_admin(interaction):
+            return
+        try:
+            _section, data = self._find(interaction.guild_id, target)
+        except content.ContentError as exc:
+            await self._say(interaction, str(exc), False)
+            return
+        if not data.get("skill"):
+            await self._say(interaction, "이 보스에는 스킬이 없어요. 먼저 `/보스패턴 스킬`로 붙여 주세요.", False)
+            return
+        await self._apply(interaction, target, {}, "🏷️ 스킬 이름을 바꿨어요.", name)
 
     @group.command(name="보기", description="보스의 2페이즈·스킬을 봐요 (관리자)")
     @app_commands.rename(target="대상")
@@ -104,6 +127,7 @@ class BossPatterns(commands.Cog):
 
     @phase.autocomplete("target")
     @skill.autocomplete("target")
+    @rename.autocomplete("target")
     @show.autocomplete("target")
     async def boss_names(self, interaction: discord.Interaction, current: str):
         if interaction.guild_id is None:
@@ -114,7 +138,7 @@ class BossPatterns(commands.Cog):
             for d in content.current(self.bot.store, interaction.guild_id, section):
                 if needle in d["name"].lower():
                     tag = "시크릿 보스" if section == "secrets" else "보스"
-                    mark = (" · 2페이즈" if d.get("phase2_hp") else "") + (f" · {balance.BOSS_SKILLS[d['skill']][0]}" if d.get("skill") else "")
+                    mark = (" · 2페이즈" if d.get("phase2_hp") else "") + (f" · {balance.boss_skill_name(d['skill'], d.get('skill_name'))}" if d.get("skill") else "")
                     out.append(Choice(name=f"{d['emoji']} {d['name']} ({tag}{mark})"[:100], value=d["name"]))
         return out[:25]
 

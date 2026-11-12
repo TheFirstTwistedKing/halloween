@@ -79,6 +79,8 @@ DEFAULT_SETTINGS = {
     "clear_rewards": [],         # 던전 클리어 때 추가로 주는 물품 [{id, item, amount, chance(%)}]. 재화·획득권은 /던전설정의 보상.* 항목
     "dungeon_content": {},       # 던전 콘텐츠 {monsters|bosses|gear|consumables: [...]}. 없는 항목은 기본값 (balance.py)
     "weapon_mods": [],           # 장비 개조 레시피 [{id, weapon, item, result}] (무기·재료·결과 무기의 key). balance.clean_mods가 쓸 수 있는 것만 고른다
+    "elements": [],              # 속성 [{key, name, emoji}] (/속성 추가)
+    "affinity": [],              # 상성표 [{atk, def, percent}] (/속성 상성). 없는 조합은 100%
     "dungeon": {},               # 던전 밸런스 중 관리자가 바꾼 값 {항목 이름: 숫자}. 비어 있으면 모두 기본값 (balance.py)
 }
 
@@ -138,6 +140,16 @@ def validate_settings(cfg: dict) -> None:
             not isinstance(m, dict) or isinstance(m.get("id"), bool) or not isinstance(m.get("id"), int)
             or any(not isinstance(m.get(k), str) for k in ("weapon", "item", "result")) for m in mods):
         raise ValueError("장비 개조 설정이 올바르지 않아요.")
+    elements = cfg["elements"]
+    if not isinstance(elements, list) or len(elements) > balance_rules.MAX_ELEMENTS or any(
+            not isinstance(e, dict) or any(not isinstance(e.get(k), str) for k in ("key", "name", "emoji")) for e in elements):
+        raise ValueError("속성 설정이 올바르지 않아요.")
+    affinity = cfg["affinity"]
+    if not isinstance(affinity, list) or len(affinity) > balance_rules.MAX_ELEMENTS ** 2 or any(
+            not isinstance(r, dict) or not isinstance(r.get("atk"), str) or not isinstance(r.get("def"), str)
+            or isinstance(r.get("percent"), bool) or not isinstance(r.get("percent"), int) or not 0 <= r["percent"] <= balance_rules.AFFINITY_MAX
+            for r in affinity):
+        raise ValueError("상성표 설정이 올바르지 않아요.")
     channels = cfg["channels"]
     if not isinstance(channels, list) or len(channels) > 100 or any(isinstance(c, bool) or not isinstance(c, int) for c in channels):
         raise ValueError("이벤트 채널 목록이 올바르지 않아요.")
@@ -385,7 +397,8 @@ class Store:
         cached = self._balances.get(guild)
         if cached is None:
             cfg = self.settings(guild)
-            cached = self._balances[guild] = balance_rules.Balance.build(cfg["dungeon"], cfg["dungeon_content"], cfg["weapon_mods"])
+            cached = self._balances[guild] = balance_rules.Balance.build(cfg["dungeon"], cfg["dungeon_content"], cfg["weapon_mods"],
+                                                                         cfg["elements"], cfg["affinity"])
         return cached
 
     # ---- 지갑 ----

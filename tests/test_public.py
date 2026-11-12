@@ -27,7 +27,7 @@ from tests.helpers import Scripted, World, sent_embed
 from views import BagView, DetailView, QuantityModal, send_bag
 
 ROOT = Path(__file__).resolve().parent.parent
-COMMAND_MODULES = ["access", "cogs/admin", "cogs/announce", "cogs/content_admin", "cogs/dungeon_admin", "cogs/economy", "cogs/rules_admin", "cogs/shop"]
+COMMAND_MODULES = ["access", "cogs/admin", "cogs/announce", "cogs/elements", "cogs/content_admin", "cogs/dungeon_admin", "cogs/economy", "cogs/rules_admin", "cogs/shop"]
 G, U, OTHER = 100, 7, 8
 
 

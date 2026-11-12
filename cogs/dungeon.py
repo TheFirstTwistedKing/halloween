@@ -100,6 +100,8 @@ def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=No
         passive = {"attack": run.base_attack, "guard": run.base_guard, "reflect": run.base_reflect, "reduction": run.base_reduction}
         if any(passive.values()):                         # 기지에 전시한 장비의 패시브(들어올 때 정해졌다)
             embed.add_field(name="🏠 기지 패시브", value=service.passive_text(passive), inline=False)
+        if run.guild_buff:                                # 길드 버프(들어올 때 정해졌다)
+            embed.add_field(name="🛡️ 길드 버프", value=service.guilds.buff_text(run.guild_buff), inline=False)
         spare = [bal.gear_by_key.get(run.spare_weapon), bal.gear_by_key.get(run.spare_shield), bal.gear_by_key.get(run.spare_armor)]
         if any(spare):                                    # 예비 칸은 비어 있으면 보여 주지 않는다.
             embed.add_field(name="📦 예비", inline=False,

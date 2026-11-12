@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 
 import dungeon
 import dungeon_auto
+import guilds
 import balance as balance_rules
 from balance import VAULT_GEAR_MAX, VAULT_ITEM_MAX
 from dungeon import DungeonError, Run
@@ -120,6 +121,7 @@ async def enter(store: Store, locks, guild_id: int, user_id: int, auto_running: 
         for slot, key in gear.items():
             setattr(fresh, slot, key)
         fresh.items = dict(items)
+        fresh.guild_buff = guilds.buff_of(store, guild_id, user_id)                   # 길드 버프도 들어갈 때 정해진다
         bonus = balance_rules.base_bonus(store.base(guild_id, user_id), bal)          # 기지 패시브는 들어갈 때 정해진다
         fresh.base_attack, fresh.base_guard, fresh.base_reflect, fresh.base_reduction = (bonus["attack"], bonus["guard"], bonus["reflect"],
                                                                                          bonus["reduction"])
@@ -138,6 +140,8 @@ async def enter(store: Store, locks, guild_id: int, user_id: int, auto_running: 
                       else ["📖 진행 중이던 던전을 이어서 해요. (입장 물품은 쓰지 않아요)"])
         if started and brought:
             run.events.append("📦 보관함에서 가져왔어요: " + ", ".join(brought))
+        if started and run.guild_buff:
+            run.events.append(f"🛡️ 길드 버프: {guilds.buff_text(run.guild_buff)}")
         if started and any(bonus.values()):
             run.events.append("🏠 기지 패시브: " + passive_text(bonus))
         if was_auto:
@@ -212,18 +216,19 @@ def _save_with_rewards(store: Store, rng, guild_id: int, user_id: int, run: Run,
     candy_total, ticket, given, lines = 0, False, [], []
     if clear_reward:
         candy, ticket, given = _roll_clear(store, rng, guild_id, bal)
+        candy = dungeon.ram_gain(run, candy)                          # 길드 버프 'RAM 증가'
         got = min(candy, room)
         room -= got
         candy_total += candy
         lines.append(f"🏆 **클리어 보상**을 받았어요! {cur.money(got)}" + (" · 🎟️ 히든 칭호 획득권 +1" if ticket else "")
                      + "".join(f" · {item['emoji']} {item['name']} ×{amount:,}" for item, amount in given))
-    bonus, run.bonus = run.bonus, 0
+    bonus, run.bonus = dungeon.ram_gain(run, run.bonus), 0
     if bonus:
         got = min(bonus, room)
         room -= got
         candy_total += bonus
         lines.append(f"♾️ 무한 **{run.floor}층** 보너스! {cur.money(got)}")
-    gift, run.room_candy = run.room_candy, 0
+    gift, run.room_candy = dungeon.ram_gain(run, run.room_candy), 0
     if gift:
         got = min(gift, room)
         candy_total += gift
@@ -422,6 +427,8 @@ def _finish(store: Store, rng, guild_id: int, user_id: int, run: Run, bal) -> Ou
     candy, ticket, given = _roll_clear(store, rng, guild_id, bal) if ended == "clear" else (0, False, [])
     final = ended == "clear" and run.final_clear          # 최종보스 완전 클리어: 클리어 보상에 최종보스 보상을 더한다
     extra_candy, extra_tickets = (bal.final_reward, bal.final_tickets) if final else (0, 0)
+    candy, extra_candy = dungeon.ram_gain(run, candy), dungeon.ram_gain(run, extra_candy)        # 길드 버프 'RAM 증가'
+
     put, saved, lost = vault_fit(store, guild_id, user_id, run, bal) if ended == "clear" else ([], [], [])   # 클리어하면 들고 있던 것은 보관함으로
     done = store.end_dungeon(guild_id, user_id, candy=candy + extra_candy, tickets=(1 if ticket else 0) + extra_tickets,
                              items=[(item["id"], amount) for item, amount in given], vault=put)

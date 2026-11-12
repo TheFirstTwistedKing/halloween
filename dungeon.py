@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass, field
 from balance import (BASE_DAMAGE, BASE_DODGE, BOSSES, CLEAR_CANDY, CONSUMABLES, DEFAULT, FLOOR_HEAL, FLOOR_SCALE, FLOORS,  # noqa: F401  (다시 내보냄)
                      GEAR, GUARD_BASE, GUARD_CHANCE, GUARD_HEAL, MAX_HP, MONSTERS, REFLECT_BASE, ROOM_PLAN, ROOMS,
                      TICKET_CHANCE, TIER_ORDER, Balance, Consumable, EVENT_TAG, Gear, Monster, SecretBoss, condition_text, candidates_for_floor, floor_scaled,
-                     monsters_for_floor, reduce_damage, shop_price, GEAR_SLOTS, SLOT_NAMES, SHOP_SLOTS)
+                     monsters_for_floor, reduce_damage, shop_price, BOSS_SKILLS, GEAR_SLOTS, SLOT_NAMES, SHOP_SLOTS)
 from josa import eul_reul, i_ga
 
 BARE = {"weapon": "맨손", "shield": "맨몸 가드", "armor": "맨몸"}       # 그 칸이 비었을 때 부르는 말
@@ -53,6 +53,8 @@ class Run:
     spare_armor: str | None = None                  # 예비 갑옷 1개
     regen_amount: int = 0
     regen_turns: int = 0
+    burn_amount: int = 0                            # 보스 스킬 [과열]: 턴마다 받는 피해와 남은 턴(갑옷·피해 감소·무적은 적용, 쓰러질 수 있다)
+    burn_turns: int = 0
     drain_amount: int = 0                           # 턴마다 내 HP가 줄어드는 양(자해 소모품)과 남은 턴. HP는 1 밑으로 내려가지 않는다.
     drain_turns: int = 0
     invuln_turns: int = 0                           # 남은 무적 턴: 이 동안 몬스터의 공격 피해를 받지 않는다.
@@ -230,7 +232,12 @@ def _spawn(monster: Monster, floor: int = 1, bal: Balance | None = None) -> dict
     hp = max(1, floor_scaled(monster.hp, floor, percent))
     enemy = {"key": monster.key, "name": monster.name, "emoji": monster.emoji, "hp": hp, "max_hp": hp,
              "damage": floor_scaled(monster.damage, floor, percent), "dodge": monster.dodge, "boss": monster.boss, "stunned": False,
-             "element": getattr(monster, "element", None)}
+             "element": getattr(monster, "element", None), "phase": 1, "turn": 0,
+             "phase2_hp": max(1, floor_scaled(monster.phase2_hp, floor, percent)) if getattr(monster, "phase2_hp", 0) else 0,
+             "phase2_damage": floor_scaled(monster.phase2_damage, floor, percent) if getattr(monster, "phase2_damage", 0) else 0}
+    if getattr(monster, "skill", None):
+        power = floor_scaled(monster.skill_power, floor, percent) if monster.skill == "burn" else monster.skill_power
+        enemy["skill"] = {"kind": monster.skill, "every": monster.skill_every, "power": power, "turns": monster.skill_turns}
     if isinstance(monster, SecretBoss):                  # 시크릿 보스: 드롭·연출 정보를 같이 담는다(싸우는 도중 설정이 바뀌어도 이 싸움은 그대로).
         enemy.update(secret=True, intro=monster.intro, image=monster.image,
                      drops={"gear": monster.drop_gear, "gear_chance": monster.drop_gear_chance, "item": monster.drop_item,
@@ -461,18 +468,40 @@ def incoming_damage(run: Run, raw: int, reduction: int = 0, bal: Balance | None 
 def _enemy_attack(run: Run, reduction: int, bal: Balance | None = None, guarded: bool = False) -> list[str]:
     if run.enemy.get("stunned"):                         # 가드 성공의 충격으로 이번 공격은 건너뛴다.
         run.enemy["stunned"] = False
+        run.enemy["last_action"] = "none"
         return [f"💫 {run.enemy['name']}은(는) 아직 휘청거려서 공격하지 못했어요!"]
+    enemy, raw, label = run.enemy, run.enemy["damage"], ""
+    enemy["last_action"] = "attack"
+    skill = enemy.get("skill")
+    if skill and skill.get("every", 0) > 0:
+        enemy["turn"] = enemy.get("turn", 0) + 1
+        if enemy["turn"] % skill["every"] == 0:
+            name = BOSS_SKILLS[skill["kind"]][0]
+            if skill["kind"] == "heal":
+                gained = min(enemy["max_hp"], enemy["hp"] + enemy["max_hp"] * skill["power"] // 100) - enemy["hp"]
+                enemy["hp"] += gained
+                enemy["last_action"] = "skill"
+                return [f"🌀 {enemy['emoji']} {enemy['name']}의 스킬 **[{name}]**! HP +{gained:,}"]
+            if skill["kind"] == "barrier":
+                enemy["barrier"], enemy["barrier_turns"] = skill["power"], skill["turns"]
+                enemy["last_action"] = "skill"
+                return [f"🌀 {enemy['emoji']} {enemy['name']}의 스킬 **[{name}]**! {skill['turns']}턴 동안 받는 피해 {skill['power']}% 감소"]
+            if skill["kind"] == "burn":
+                run.burn_amount, run.burn_turns = skill["power"], skill["turns"]
+                enemy["last_action"] = "skill"
+                return [f"🌀 {enemy['emoji']} {enemy['name']}의 스킬 **[{name}]**! {skill['turns']}턴 동안 턴마다 {skill['power']:,} 피해를 입어요"]
+            raw, label = apply_percent(raw, skill["power"]), f"🌀 스킬 **[{name}]**! "      # 강타: 이번 공격만 세게
     percent = defend_element_percent(run, bal or DEFAULT)
-    damage = incoming_damage(run, apply_percent(run.enemy["damage"], percent), reduction, bal, guarded)
+    damage = incoming_damage(run, apply_percent(raw, percent), reduction, bal, guarded)
     run.hp = max(0, run.hp - damage)
     if run.invuln_turns > 0:
-        events = [f"{run.enemy['emoji']} {run.enemy['name']}의 공격! ✨ **무적**이라 피해를 받지 않았어요."]
+        events = [f"{label}{run.enemy['emoji']} {run.enemy['name']}의 공격! ✨ **무적**이라 피해를 받지 않았어요."]
     else:
         armor = 0 if guarded else armor_percent(run, bal)           # 가드 중에는 방패의 감소만 적용된다
         buff = run.reduce_turns > 0 and run.reduce_percent and not guarded
         notes = ([f"가드로 {reduction}% 줄였어요"] if reduction else []) + ([f"갑옷으로 {armor}% 줄였어요"] if armor else []) \
             + ([f"피해 감소 {run.reduce_percent}%"] if buff else [])
-        events = [f"{run.enemy['emoji']} {run.enemy['name']}의 공격! **{damage}** 피해를 입었어요." + (f" ({', '.join(notes)})" if notes else "")
+        events = [f"{label}{run.enemy['emoji']} {run.enemy['name']}의 공격! **{damage}** 피해를 입었어요." + (f" ({', '.join(notes)})" if notes else "")
                   + element_note(percent)]
     if run.hp <= 0:
         run.phase = "dead"
@@ -497,6 +526,16 @@ def _end_turn(run: Run, bal: Balance, rng=None) -> list[str]:
         run.drain_turns -= 1
         if run.hp != before:
             events.append(f"🔥 HP -{before - run.hp} (남은 {run.drain_turns}턴)")
+    if run.burn_turns > 0:                               # 보스 스킬 [과열]: 무적·갑옷·피해 감소는 적용되고, 쓰러질 수 있다
+        damage = incoming_damage(run, run.burn_amount, 0, bal)
+        run.hp = max(0, run.hp - damage)
+        run.burn_turns -= 1
+        events.append(f"🔥 과열로 **{damage}** 피해! (남은 {run.burn_turns}턴)")
+        if run.hp <= 0:
+            run.phase = "dead"
+            run.burn_turns = 0
+            events.append("💀 시스템이 다운됐어요…")
+            return events
     if run.invuln_turns > 0:
         run.invuln_turns -= 1
         if run.invuln_turns == 0:
@@ -512,10 +551,11 @@ def _end_turn(run: Run, bal: Balance, rng=None) -> list[str]:
         enemy["dot_turns"] -= 1
         events.append(f"🌡️ {enemy['name']}에게 지속 피해 **{enemy['dot']}**! (남은 {enemy['dot_turns']}턴)")
         if enemy["hp"] <= 0:
-            events.append(f"🎉 **{enemy['name']}**을(를) 무력화했어요!")
-            run.phase = "cleared"
-            if enemy.get("secret"):
-                events += secret_drops(run, rng or random, bal)
+            events += enemy_down(run, bal, rng)[0]
+    if run.in_battle and enemy and enemy.get("barrier_turns", 0) > 0:
+        enemy["barrier_turns"] -= 1
+        if enemy["barrier_turns"] == 0:
+            events.append(f"🛡️ {enemy['name']}의 방어막이 사라졌어요.")
     return events
 
 
@@ -549,14 +589,27 @@ def secret_drops(run: Run, rng, bal: Balance) -> list[str]:
     return ([f"🎁 **시크릿 보스의 드롭!**"] + events) if events else []
 
 
+def enemy_down(run: Run, bal: Balance, rng=None) -> tuple[list[str], bool]:
+    """적의 체력이 0이 됐을 때: 2페이즈가 남아 있으면 체력 바를 새로 채우고 2페이즈로(이번 턴은 공격하지 않는다),
+    아니면 무력화(시크릿 보스면 드롭). (화면에 보일 일, 2페이즈로 넘어갔는지)."""
+    enemy = run.enemy
+    if enemy.get("phase", 1) == 1 and enemy.get("phase2_hp", 0) > 0:
+        enemy.update(phase=2, hp=enemy["phase2_hp"], max_hp=enemy["phase2_hp"], stunned=False, dot_turns=0, barrier_turns=0, turn=0)
+        if enemy.get("phase2_damage"):
+            enemy["damage"] = enemy["phase2_damage"]
+        return [f"⚠️ **{enemy['name']}**의 1페이즈 체력 바가 다 깎였어요… 🔴 **2페이즈 돌입!** (HP {enemy['hp']:,} · 공격 {enemy['damage']:,})"], True
+    events = [f"🎉 **{enemy['name']}**을(를) 무력화했어요!"]
+    run.phase = "cleared"
+    if enemy.get("secret"):
+        events += secret_drops(run, rng or random, bal)
+    return events, False
+
+
 def _after_player_action(run: Run, reduction: int, bal: Balance, rng=None) -> list[str]:
-    """플레이어 행동 뒤: 적이 살아 있으면 적이 공격하고, 턴이 끝난다."""
+    """플레이어 행동 뒤: 적이 살아 있으면 적이 공격하고, 턴이 끝난다. 2페이즈로 넘어간 턴에는 공격하지 않는다."""
     events = []
     if run.enemy["hp"] <= 0:
-        events.append(f"🎉 **{run.enemy['name']}**을(를) 무력화했어요!")
-        run.phase = "cleared"
-        if run.enemy.get("secret"):
-            events += secret_drops(run, rng or random, bal)
+        events += enemy_down(run, bal, rng)[0]
     else:
         events += _enemy_attack(run, reduction, bal)
     return events + _end_turn(run, bal, rng)
@@ -576,8 +629,12 @@ def player_attack(run: Run, rng, bal: Balance | None = None) -> list[str]:
             damage, crit = damage * 2, True
         percent = attack_element_percent(run, bal)
         damage = apply_percent(damage, percent)
+        shield = run.enemy.get("barrier", 0) if run.enemy.get("barrier_turns", 0) > 0 else 0
+        if shield:
+            damage = reduce_damage(damage, shield)
         run.enemy["hp"] = max(0, run.enemy["hp"] - damage)
-        events = [f"{'💥 크리티컬! ' if crit else '⚔️ '}{run.enemy['name']}에게 **{damage}** 피해를 줬어요.{element_note(percent)}"]
+        events = [f"{'💥 크리티컬! ' if crit else '⚔️ '}{run.enemy['name']}에게 **{damage}** 피해를 줬어요.{element_note(percent)}"
+                  + (f" (방어막 {shield}%)" if shield else "")]
     events += _after_player_action(run, 0, bal, rng)
     run.events = events
     return events
@@ -595,17 +652,14 @@ def player_defend(run: Run, guard_ok: bool, bal: Balance | None = None, rng=None
         events = [("🛡️ 가드 성공!" if guard_ok else "❌ 가드 실패…")]
         run.last.append("guard_success" if guard_ok else "guard_fail")
         events += _enemy_attack(run, guard_percent(run, bal) if guard_ok else 0, bal, guarded=bool(guard_ok))
-        if guard_ok and run.phase != "dead":
+        if guard_ok and run.phase != "dead" and enemy.get("last_action", "attack") == "attack":     # 스킬(회복·방어막·과열)은 막아 낼 공격이 아니다
             healed = min(bal.max_hp, run.hp + raw * bal.guard_heal // 100) - run.hp
             run.hp += max(0, healed)
             reflected = raw * reflect_percent(run, bal) // 100
             enemy["hp"] = max(0, enemy["hp"] - reflected)
             events.append(f"💚 막아 낸 힘으로 HP +{max(0, healed)} · 🔁 **{reflected}** 피해를 되돌려 줬어요.")
             if enemy["hp"] <= 0:
-                events.append(f"🎉 **{enemy['name']}**을(를) 무력화했어요!")
-                run.phase = "cleared"
-                if enemy.get("secret"):
-                    events += secret_drops(run, rng or random, bal)
+                events += enemy_down(run, bal, rng)[0]
             else:
                 enemy["stunned"] = True
                 events.append(f"💫 {enemy['name']}이(가) 충격으로 다음 공격을 하지 못해요!")

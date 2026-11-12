@@ -110,6 +110,12 @@ class Monster:
     weight: float = 1            # 같은 방 종류(잡몹끼리, 보스끼리)에서 나올 가중치(소수 가능). 기본은 모두 1 = 같은 확률
     floors: tuple = ()           # 이 몬스터가 나올 수 있는 층(비어 있으면 모든 층)
     element: str | None = None   # 속성(key): 내 공격을 받을 때와 나를 때릴 때 상성표(/속성 상성)를 따른다
+    phase2_hp: int = 0           # 보스 2페이즈: 1페이즈 체력 바를 다 깎으면 이 체력으로 다시 일어난다(층마다 강해진다). 0이면 2페이즈 없음
+    phase2_damage: int = 0       # 2페이즈의 공격(0이면 1페이즈와 같다)
+    skill: str | None = None     # 보스 스킬 종류(BOSS_SKILLS). 없으면 일반 공격만
+    skill_every: int = 0         # 몇 번째 공격마다 스킬을 쓰는지(3이면 3·6·9번째)
+    skill_power: int = 0         # 스킬 세기(종류마다 뜻이 다르다: BOSS_SKILLS 참고)
+    skill_turns: int = 0         # 방어막·화상이 이어지는 턴 수
 
 
 @dataclass(frozen=True)
@@ -134,6 +140,12 @@ class SecretBoss:
     floors: tuple = ()                 # 이 시크릿 보스가 나올 수 있는 층(비어 있으면 모든 층). 보스를 이긴 그 층의 11번째 방에 나온다.
     nothing_chance: float = 0          # 무력화해도 아무것도 떨어뜨리지 않을 확률(%). 0이면 늘 하나는 떨어뜨린다.
     element: str | None = None         # 속성(key)
+    phase2_hp: int = 0           # 보스 2페이즈: 1페이즈 체력 바를 다 깎으면 이 체력으로 다시 일어난다(층마다 강해진다). 0이면 2페이즈 없음
+    phase2_damage: int = 0       # 2페이즈의 공격(0이면 1페이즈와 같다)
+    skill: str | None = None     # 보스 스킬 종류(BOSS_SKILLS). 없으면 일반 공격만
+    skill_every: int = 0         # 몇 번째 공격마다 스킬을 쓰는지(3이면 3·6·9번째)
+    skill_power: int = 0         # 스킬 세기(종류마다 뜻이 다르다: BOSS_SKILLS 참고)
+    skill_turns: int = 0         # 방어막·화상이 이어지는 턴 수
 
 
 @dataclass(frozen=True)
@@ -497,6 +509,55 @@ def _check_floors(data: dict):
     return tuple(sorted(set(floors))), None
 
 
+# 보스 스킬: 종류 → (이름, 세기의 뜻, 세기 범위, 턴이 필요한지)
+BOSS_SKILLS = {
+    "strike": ("강타", "일반 공격의 몇 %로 때리는지", (100, 1000), False),
+    "heal": ("자가 수리", "최대 체력의 몇 %를 회복하는지", (1, 100), False),
+    "barrier": ("방어막", "내 공격 피해를 몇 % 줄이는지", (1, 100), True),
+    "burn": ("과열", "턴마다 주는 피해(층마다 강해진다)", (1, 100000), True),
+}
+SKILL_EVERY_MAX = 20
+SKILL_TURNS_MAX = 20
+PHASE2_HP_MAX = 1000000
+
+
+def _check_boss_pattern(data: dict):
+    """보스 2페이즈·스킬 칸. (값 사전, None) 또는 (None, 이유). 예전 저장에는 없어서 모두 0(없음)이다."""
+    out = {}
+    for field_name, high in (("phase2_hp", PHASE2_HP_MAX), ("phase2_damage", 100000), ("skill_every", SKILL_EVERY_MAX),
+                             ("skill_power", 100000), ("skill_turns", SKILL_TURNS_MAX)):
+        out[field_name], problem = _num(data, field_name, 0, high, 0)
+        if problem:
+            return None, problem
+    skill = data.get("skill")
+    if skill in (None, ""):
+        out.update(skill=None, skill_every=0, skill_power=0, skill_turns=0)
+        return out, None
+    if skill not in BOSS_SKILLS:
+        return None, "보스 스킬 종류가 올바르지 않아요."
+    name, meaning, (low, high), needs_turns = BOSS_SKILLS[skill]
+    if out["skill_every"] < 1:
+        return None, f"스킬 [{name}]에는 주기(몇 번째 공격마다, 1~{SKILL_EVERY_MAX})가 필요해요."
+    if not low <= out["skill_power"] <= high:
+        return None, f"스킬 [{name}]의 세기는 {meaning}이고 {low}~{high:,} 사이여야 해요."
+    if needs_turns and out["skill_turns"] < 1:
+        return None, f"스킬 [{name}]에는 턴 수(1~{SKILL_TURNS_MAX})가 필요해요."
+    if not needs_turns:
+        out["skill_turns"] = 0
+    out["skill"] = skill
+    return out, None
+
+
+def skill_text(skill: str | None, every: int, power: int, turns: int) -> str:
+    """보스 스킬 한 줄 설명. 없으면 빈 문자열."""
+    if not skill:
+        return ""
+    name = BOSS_SKILLS[skill][0]
+    detail = {"strike": f"공격의 {power}%", "heal": f"최대 체력의 {power}% 회복", "barrier": f"{turns}턴 동안 받는 피해 {power}% 감소",
+              "burn": f"{turns}턴 동안 턴마다 {power:,} 피해"}[skill]
+    return f"[{name}] {every}번째 공격마다 · {detail}"
+
+
 def _check_element(data: dict):
     """속성(key) 하나. 없으면 None. (값, None) 또는 (None, 이유). 그 속성이 실제로 있는지는 명령어 쪽에서 본다(없어진 속성은 무속성으로 친다)."""
     value = data.get("element")
@@ -543,6 +604,9 @@ def _check_secret(data: dict, key: str, name: str, emoji: str, numbers):
     element, problem = _check_element(data)
     if problem:
         return None, problem
+    pattern, problem = _check_boss_pattern(data)
+    if problem:
+        return None, problem
     floors, problem = _check_floors(data)
     if problem:
         return None, problem
@@ -552,7 +616,7 @@ def _check_secret(data: dict, key: str, name: str, emoji: str, numbers):
     if not isinstance(image, str) or len(image) > 300 or (image and (not image.startswith(("http://", "https://")) or any(c.isspace() for c in image))):
         return None, "그림은 공백 없는 http:// 또는 https:// 주소(300자까지)여야 해요."
     boss = SecretBoss(key, name, emoji, n["hp"], n["damage"], weight, drops["drop_gear"], chances["drop_gear_chance"], drops["drop_item"],
-                      chances["drop_item_chance"], n["drop_item_amount"], intro.strip(), image, floors=floors, nothing_chance=nothing, element=element)
+                      chances["drop_item_chance"], n["drop_item_amount"], intro.strip(), image, floors=floors, nothing_chance=nothing, element=element, **pattern)
     return boss, None
 
 
@@ -629,7 +693,10 @@ def check_entity(section: str, data) -> tuple[object | None, str | None]:
         element, problem = _check_element(data)
         if problem:
             return None, problem
-        return Monster(key, name, emoji, n["hp"], n["damage"], 0 if boss else n["dodge"], boss, weight, floors, element), None
+        pattern, problem = _check_boss_pattern(data)
+        if problem:
+            return None, problem
+        return Monster(key, name, emoji, n["hp"], n["damage"], 0 if boss else n["dodge"], boss, weight, floors, element, **pattern), None
     tier = data.get("tier", "일반")
     if tier not in TIER_ORDER:
         return None, "등급은 일반·희귀·전설 중 하나여야 해요."

@@ -14,7 +14,7 @@ import dungeon_service as service
 import theme
 from owner import owner_only
 from paging import chunks, split_pages
-from balance import DEFAULT, item_summary
+from balance import BOSS_SKILLS, DEFAULT, item_summary
 from dungeon import ROOMS, Run
 
 BAR = 10
@@ -75,7 +75,8 @@ def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=No
         enemy = run.enemy
         if enemy.get("image"):
             embed.set_image(url=enemy["image"])                # 시크릿 보스의 그림(움직이는 gif도 돼요)
-        embed.add_field(name=f"{enemy['emoji']} {enemy['name']}" + (f" [{bal.element_label(enemy.get('element'))}]" if bal.element_label(enemy.get("element")) else "") + (" 🌌 SECRET" if enemy.get("secret") else " 👑" if enemy["boss"] else "") + (" 💫 기절(다음 공격 못 함)" if enemy.get("stunned") else ""), inline=False,
+        embed.add_field(name=f"{enemy['emoji']} {enemy['name']}" + (f" [{bal.element_label(enemy.get('element'))}]" if bal.element_label(enemy.get("element")) else "") + (" 🌌 SECRET" if enemy.get("secret") else " 👑" if enemy["boss"] else "")
+                        + (f" [{enemy.get('phase', 1)}/2페이즈]" if enemy.get("phase2_hp") or enemy.get("phase", 1) == 2 else "") + (" 💫 기절(다음 공격 못 함)" if enemy.get("stunned") else ""), inline=False,
                         value=f"{bar(enemy['hp'], enemy['max_hp'], '🟥')} {enemy['hp']}/{enemy['max_hp']}")
     if run.phase == "shop" and run.shop and not ended:
         embed.add_field(name="🛒 상품 (재화로 사요)", inline=False, value=shop_text(run, bal, cur))
@@ -105,6 +106,14 @@ def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=No
             status.append(f"🛡️ 받는 피해 {run.reduce_percent}% 감소 (남은 {run.reduce_turns}턴)")
         if run.drain_turns:
             status.append(f"🔥 턴마다 HP -{run.drain_amount} (남은 {run.drain_turns}턴)")
+        if run.burn_turns:
+            status.append(f"🔥 과열: 턴마다 {run.burn_amount:,} 피해 (남은 {run.burn_turns}턴)")
+        if run.enemy and run.enemy.get("barrier_turns"):
+            status.append(f"🛡️ 몬스터 방어막: 받는 피해 {run.enemy['barrier']}% 감소 (남은 {run.enemy['barrier_turns']}턴)")
+        skill = (run.enemy or {}).get("skill")
+        if run.in_battle and skill and skill.get("every"):
+            left = skill["every"] - run.enemy.get("turn", 0) % skill["every"]
+            status.append(f"🌀 다음 스킬 [{BOSS_SKILLS[skill['kind']][0]}]: {left}번째 공격 뒤" if left > 1 else f"🌀 다음 공격이 스킬 [{BOSS_SKILLS[skill['kind']][0]}]이에요!")
         if run.enemy and run.enemy.get("dot_turns"):
             status.append(f"🌡️ 몬스터가 턴마다 {run.enemy['dot']} 피해 (남은 {run.enemy['dot_turns']}턴)")
         if status:

@@ -12,6 +12,7 @@ from discord.ext import commands
 
 import dungeon_service as service
 import theme
+import workshop
 from balance import base_bonus
 from cogs.vault import SLOTS, contents
 from owner import owner_only
@@ -64,6 +65,16 @@ class BaseView(discord.ui.View):
             select = discord.ui.Select(placeholder=f"{emoji} {label} 전시하기 (보관함에서)", options=options, row=row)
             select.callback = self._slot_callback(slot)
             self.add_item(select)
+        for kind, (emoji, verb, _what) in workshop.KINDS.items():         # 요리·제작은 기지에서만 한다
+            button = discord.ui.Button(label=verb, emoji=emoji, style=discord.ButtonStyle.primary, row=3)
+            button.callback = self._workshop_callback(kind)
+            self.add_item(button)
+
+    def _workshop_callback(self, kind: str):
+        async def callback(interaction: discord.Interaction):
+            await interaction.response.edit_message(embed=workshop_embed(self.client.store, self.guild_id, self.user_id, kind),
+                                                    view=WorkshopView(self.client, self.user_id, self.guild_id, kind))
+        return callback
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return await owner_only(interaction, self.user_id)
@@ -86,6 +97,73 @@ class BaseView(discord.ui.View):
             await interaction.response.edit_message(embed=base_embed(store, self.guild_id, self.user_id, note),
                                                     view=BaseView(self.client, self.user_id, self.guild_id))
         return callback
+
+
+def workshop_embed(store, guild_id: int, user_id: int, kind: str, note: str | None = None) -> discord.Embed:
+    emoji, verb, what = workshop.KINDS[kind]
+    found = workshop.recipes(store, guild_id, kind)
+    lines = ([note, ""] if note else []) + [f"가방 물품과 {store.currency(guild_id).name}로 던전 {what}을 만들어요. 만든 것은 **📦 보관함**에 들어가요."]
+    if found:
+        lines += [("✅ " if workshop.can_make(store, guild_id, user_id, r) else "▫️ ") + workshop.recipe_line(store, guild_id, r, user_id)
+                  for r in found[:OPTION_MAX]]
+    else:
+        lines.append(f"아직 {verb} 레시피가 없어요. 관리자가 `/기지레시피`로 만들어요.")
+    return theme.make_embed(f"{emoji} 기지 {verb}", "\n".join(lines)[:4000], color=theme.ORANGE)
+
+
+class WorkshopView(discord.ui.View):
+    """요리·제작 화면: 레시피를 골라 [만들기]. 연 사람만 누를 수 있다."""
+
+    def __init__(self, client, user_id: int, guild_id: int, kind: str, picked: int | None = None):
+        super().__init__(timeout=900)
+        self.client, self.user_id, self.guild_id, self.kind, self.picked = client, user_id, guild_id, kind, picked
+        store = client.store
+        bal = store.balance(guild_id)
+        found = [r for r in workshop.recipes(store, guild_id, kind) if workshop.result_of(bal, r) is not None][:OPTION_MAX]
+        if found:
+            options = []
+            for r in found:
+                result = workshop.result_of(bal, r)
+                options.append(discord.SelectOption(label=f"#{r['id']} {result.name}" + (f" ×{r['amount']}" if r["amount"] > 1 else ""),
+                                                    value=str(r["id"]), emoji=result.emoji, default=r["id"] == picked,
+                                                    description=workshop.ingredient_text(store, guild_id, r)[:100]))
+            select = discord.ui.Select(placeholder=f"{workshop.KINDS[kind][0]} 만들 것을 골라요", options=options, row=0)
+            select.callback = self.on_pick
+            self.add_item(select)
+            make = discord.ui.Button(label=f"{workshop.KINDS[kind][1]}하기", emoji=workshop.KINDS[kind][0], style=discord.ButtonStyle.success,
+                                     row=1, disabled=picked is None)
+            make.callback = self.make
+            self.add_item(make)
+        back = discord.ui.Button(label="기지로", emoji="🏠", style=discord.ButtonStyle.secondary, row=1)
+        back.callback = self.back
+        self.add_item(back)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await owner_only(interaction, self.user_id)
+
+    async def _redraw(self, interaction, note=None):
+        await interaction.response.edit_message(embed=workshop_embed(self.client.store, self.guild_id, self.user_id, self.kind, note),
+                                                view=WorkshopView(self.client, self.user_id, self.guild_id, self.kind, self.picked))
+
+    async def on_pick(self, interaction: discord.Interaction):
+        self.picked = int((interaction.data.get("values") or ["0"])[0])
+        await self._redraw(interaction)
+
+    async def make(self, interaction: discord.Interaction):
+        store = self.client.store
+        async with self.client.locks.get(self.guild_id, self.user_id):     # 던전 입장·보관함 팔기·전시와 겹치지 않게
+            try:
+                recipe, result = workshop.make(store, self.guild_id, self.user_id, self.picked or 0)
+            except StoreError as exc:
+                note = f"⚠️ {exc}"
+            else:
+                note = (f"{workshop.KINDS[self.kind][0]} {result.emoji} **{result.name}**" + (f" ×{recipe['amount']}" if recipe["amount"] > 1 else "")
+                        + "을(를) 만들어 📦 보관함에 넣었어요!")
+        await self._redraw(interaction, note)
+
+    async def back(self, interaction: discord.Interaction):
+        await interaction.response.edit_message(embed=base_embed(self.client.store, self.guild_id, self.user_id),
+                                                view=BaseView(self.client, self.user_id, self.guild_id))
 
 
 class Base(commands.Cog):

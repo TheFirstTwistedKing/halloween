@@ -76,6 +76,7 @@ DEFAULT_SETTINGS = {
     "entry_item": None,          # 던전에 들어갈 때 내는 물품 id. None이면 무료 입장
     "entry_cost": 1,             # 입장에 필요한 개수
     "package_table": [],         # 패키지 결과표 [{id, kind(none|candy|item), item, amount, weight, emoji, title}]
+    "workshop": [],              # 기지의 요리·제작 레시피(/기지레시피) [{id, kind: cook|craft, result: 던전 key, amount, ingredients: [[물품 id, 개수], ...], cost}]
     "clear_rewards": [],         # 던전 클리어 때 추가로 주는 물품 [{id, item, amount, chance(%)}]. 재화·획득권은 /던전설정의 보상.* 항목
     "dungeon_content": {},       # 던전 콘텐츠 {monsters|bosses|gear|consumables: [...]}. 없는 항목은 기본값 (balance.py)
     "weapon_mods": [],           # 장비 개조 레시피 [{id, weapon, item, result}] (무기·재료·결과 무기의 key). balance.clean_mods가 쓸 수 있는 것만 고른다
@@ -135,6 +136,7 @@ def validate_settings(cfg: dict) -> None:
     number("seed_version", 0, 10**6, True)
     check_package_table(cfg["package_table"])
     check_clear_rewards(cfg["clear_rewards"])
+    check_workshop(cfg["workshop"])
     if not isinstance(cfg["dungeon_content"], dict):
         raise ValueError("던전 콘텐츠 설정이 올바르지 않아요.")
     mods = cfg["weapon_mods"]
@@ -224,6 +226,35 @@ def check_clear_rewards(rewards) -> None:
             raise ValueError("클리어 보상의 개수는 1~99,999여야 해요.")
         if isinstance(chance, bool) or not isinstance(chance, (int, float)) or not 0 <= chance <= 100 or chance != chance:
             raise ValueError("클리어 보상의 확률은 0~100(%)이어야 해요.")
+
+
+WORKSHOP_MAX = 50                # 서버마다 요리·제작 레시피 수 한도
+WORKSHOP_INGREDIENTS = 3         # 레시피 하나의 재료(가방 물품) 종류 수 한도
+WORKSHOP_COST_MAX = 1_000_000_000
+
+
+def check_workshop(recipes) -> None:
+    """요리·제작 레시피 목록 검사. 잘못됐으면 ValueError."""
+    if not isinstance(recipes, list) or len(recipes) > WORKSHOP_MAX:
+        raise ValueError(f"요리·제작 레시피가 올바르지 않아요. (최대 {WORKSHOP_MAX}개)")
+    ids = set()
+
+    def whole(value, low, high):
+        return not isinstance(value, bool) and isinstance(value, int) and low <= value <= high
+    for r in recipes:
+        if not isinstance(r, dict) or not whole(r.get("id"), 1, 10 ** 9) or r["id"] in ids:
+            raise ValueError("요리·제작 레시피가 올바르지 않아요.")
+        ids.add(r["id"])
+        if r.get("kind") not in ("cook", "craft") or not isinstance(r.get("result"), str) or not r["result"]:
+            raise ValueError("요리·제작 레시피의 종류·결과가 올바르지 않아요.")
+        if not whole(r.get("amount"), 1, 99) or not whole(r.get("cost"), 0, WORKSHOP_COST_MAX):
+            raise ValueError("요리·제작 레시피의 개수·비용이 올바르지 않아요.")
+        parts = r.get("ingredients")
+        if not isinstance(parts, list) or len(parts) > WORKSHOP_INGREDIENTS or any(
+                not isinstance(p, list) or len(p) != 2 or not whole(p[0], 1, 10 ** 12) or not whole(p[1], 1, 999) for p in parts):
+            raise ValueError("요리·제작 레시피의 재료가 올바르지 않아요.")
+        if len({p[0] for p in parts}) != len(parts) or (not parts and r["cost"] == 0):
+            raise ValueError("요리·제작 레시피의 재료가 올바르지 않아요.")
 
 
 def roll_package_result(table, rng) -> dict:
@@ -682,6 +713,8 @@ class Store:
             out.append("던전 클리어 보상(`/던전보상 목록`)")
         if any(item_id == r["result"] or item_id in r["ingredients"] for r in self.recipes(guild)):
             out.append("연금술 레시피(`/연금술레시피 목록`)")
+        if any(item_id == p[0] for r in cfg["workshop"] for p in r["ingredients"]):
+            out.append("기지 요리·제작 레시피(`/기지레시피 목록`)")
         return out
 
     # ---- 연금술 ----
@@ -1147,6 +1180,35 @@ class Store:
             else:
                 self.db.execute("INSERT INTO base_display VALUES(?,?,?,?) ON CONFLICT(guild,user,slot) DO UPDATE SET key=excluded.key",
                                 (guild, user, slot, key))
+
+    def workshop_make(self, guild: int, user: int, ingredients, cost: int, kind: str, key: str, amount: int) -> int:
+        """기지에서 요리·제작한다: 가방 물품 [(물품 id, 개수)]과 재화 cost를 내고, 보관함에 (kind, key)를 amount개 넣는다(한 덩어리).
+        재료·재화가 모자라거나 보관함이 가득 차면 StoreError이고 아무것도 바꾸지 않는다. 지금 가진 재화를 돌려준다."""
+        cur = self.currency(guild)
+        with self.db:
+            self._ensure_wallet(guild, user)
+            for item_id, need in ingredients:
+                have = self.qty(guild, user, item_id)
+                if have < need:
+                    row = self.item(guild, item_id)
+                    label = f"{row['emoji']} {row['name']}" if row else "재료"
+                    raise StoreError(f"{i_ga(label)} 모자라요. (필요 {need}개, 보유 {have}개)")
+            old = self.wallet(guild, user)
+            if old < cost:
+                raise StoreError(f"{i_ga(cur.name)} 모자라요. 가진 것 {cur.money(old)}, 필요한 것 {cur.money(cost)}.")
+            held = self.vault(guild, user)
+            if kind == "gear" and sum(held["gear"].values()) + amount > balance_rules.VAULT_GEAR_MAX:
+                raise StoreError(f"보관함에 장비 자리가 없어요(최대 {balance_rules.VAULT_GEAR_MAX}개). 먼저 보관함에서 팔아 주세요.")
+            if kind == "item" and held["item"].get(key, 0) + amount > balance_rules.VAULT_ITEM_MAX:
+                raise StoreError(f"보관함에 그 소모품을 더 넣을 수 없어요(종류마다 최대 {balance_rules.VAULT_ITEM_MAX}개).")
+            for item_id, need in ingredients:
+                if self.db.execute("UPDATE inventory SET qty=qty-? WHERE guild=? AND user=? AND item=? AND qty>?",
+                                   (need, guild, user, item_id, need)).rowcount == 0:
+                    self.db.execute("DELETE FROM inventory WHERE guild=? AND user=? AND item=? AND qty=?", (guild, user, item_id, need))
+            if cost:
+                self.db.execute("UPDATE wallets SET candy=candy-? WHERE guild=? AND user=?", (cost, guild, user))
+            self._vault_put(guild, user, kind, key, amount)
+        return old - cost
 
     def loadout(self, guild: int, user: int) -> dict:
         """다음 던전에 보관함에서 가져갈 것 {'weapon','shield','armor': key|None, 'items': [key, ...]}."""

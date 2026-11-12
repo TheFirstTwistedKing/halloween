@@ -14,7 +14,7 @@ import dungeon_service as service
 import theme
 from owner import owner_only
 from paging import chunks, split_pages
-from balance import BOSS_SKILLS, DEFAULT, item_summary
+from balance import BOSS_SKILLS, DEFAULT, WEAPON_SKILLS, item_summary
 from dungeon import ROOMS, Run
 
 BAR = 10
@@ -34,6 +34,12 @@ def _ready_mark(run: Run, item, bal) -> str:
     if not item.conditions and not item.material and not item.damage and not item.dot:         # 몬스터에게 쓰는 소모품은 싸울 때만 쓸 수 있어서 표시한다.
         return ""
     return " ✨" if dungeon.can_use_now(run, item, bal) else " 🔒"
+
+
+def gauge(percent: int, width: int = 10) -> str:
+    """게이지 막대(10칸)."""
+    filled = max(0, min(width, percent * width // 100))
+    return "🟨" * filled + "⬛" * (width - filled)
 
 
 def shop_text(run: Run, bal, cur=None) -> str:
@@ -106,6 +112,15 @@ def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=No
             status.append(f"🛡️ 받는 피해 {run.reduce_percent}% 감소 (남은 {run.reduce_turns}턴)")
         if run.drain_turns:
             status.append(f"🔥 턴마다 HP -{run.drain_amount} (남은 {run.drain_turns}턴)")
+        weapon_now = bal.gear_by_key.get(run.weapon)
+        if weapon_now and weapon_now.ult:
+            status.append(f"🟡 궁극기 게이지 {gauge(run.ult_gauge)} {run.ult_gauge}%")
+        if run.awakened:
+            status.append(f"⚡ **각성 중!** 특수 스킬 [{WEAPON_SKILLS[bal.special][0]}]을(를) 쓸 수 있어요" + (f" · 피해 +{bal.awaken_bonus}%" if bal.awaken_bonus else ""))
+        elif run.awaken_gauge:
+            status.append(f"⚡ 각성 게이지 {gauge(run.awaken_gauge)} {run.awaken_gauge}%")
+        if weapon_now and weapon_now.skill and run.skill_cd > 0:
+            status.append(f"✨ 스킬 [{WEAPON_SKILLS[weapon_now.skill][0]}] 쿨타임 {run.skill_cd}턴")
         if run.burn_turns:
             status.append(f"🔥 과열: 턴마다 {run.burn_amount:,} 피해 (남은 {run.burn_turns}턴)")
         if run.enemy and run.enemy.get("barrier_turns"):
@@ -177,6 +192,7 @@ class DungeonView(discord.ui.View):
         if run.phase == "battle":
             self._button("공격", "⚔️", "attack", discord.ButtonStyle.danger)
             self._button("방어", "🛡️", "defend", discord.ButtonStyle.primary)
+            self._technique_buttons(run, bal)
         elif run.phase == "chest":
             self._button("상자 열기", "🎁", "chest", discord.ButtonStyle.success)
         elif run.pending_gear:
@@ -213,6 +229,19 @@ class DungeonView(discord.ui.View):
             self._button("빠른진행", "⏩", "ask_auto", discord.ButtonStyle.secondary, row=common)
         self._button("나가기", "🏃", "ask_quit", discord.ButtonStyle.secondary, row=common)
 
+    def _technique_buttons(self, run: Run, bal) -> None:
+        """무기 스킬·궁극기·각성 특수 스킬 버튼(3번째 줄). 무기에 없는 기술은 버튼이 없고, 아직 못 쓰면 흐리게 보인다."""
+        weapon = bal.gear_by_key.get(run.weapon)
+        ready = dungeon.skill_ready(run, bal)
+        if weapon and weapon.skill:
+            label = f"스킬 {WEAPON_SKILLS[weapon.skill][0]}" + ("" if ready["skill"] else f" ({run.skill_cd}턴)")
+            self._button(label, "✨", "skill", discord.ButtonStyle.success, row=2, disabled=not ready["skill"])
+        if weapon and weapon.ult:
+            label = f"궁극기 {WEAPON_SKILLS[weapon.ult][0]}" + ("" if ready["ult"] else f" ({run.ult_gauge}%)")
+            self._button(label, "🟡", "ult", discord.ButtonStyle.success, row=2, disabled=not ready["ult"])
+        if run.awakened:
+            self._button(f"각성 특수 스킬 {WEAPON_SKILLS[bal.special][0]}", "⚡", "special", discord.ButtonStyle.danger, row=2)
+
     def _item_pager(self, page: int, pages: int) -> None:
         for step, label, emoji in ((-1, "아이템 이전", "◀️"), (+1, "아이템 다음", "▶️")):
             button = discord.ui.Button(label=f"{label} ({page + 1}/{pages})" if step > 0 else label, emoji=emoji, style=discord.ButtonStyle.secondary,
@@ -229,8 +258,8 @@ class DungeonView(discord.ui.View):
             button.callback = callback
             self.add_item(button)
 
-    def _button(self, label, emoji, action, style, row=None):
-        button = discord.ui.Button(label=label, emoji=emoji, style=style, row=row)
+    def _button(self, label, emoji, action, style, row=None, disabled=False):
+        button = discord.ui.Button(label=label, emoji=emoji, style=style, row=row, disabled=disabled)
 
         async def callback(interaction: discord.Interaction):
             if action == "ask_quit":

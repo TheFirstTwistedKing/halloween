@@ -20,7 +20,7 @@ class RealPathTests(unittest.IsolatedAsyncioTestCase):
         self.state.user = discord.ClientUser(state=self.state, data={
             "id": "999", "username": "bot", "discriminator": "0", "avatar": None, "bot": True})
         self.bot._ready = asyncio.Event()
-        for extension in ("cogs.economy", "cogs.admin", "cogs.shop", "cogs.dungeon_admin", "cogs.rules_admin", "cogs.content_admin", "cogs.alchemy", "cogs.announce", "cogs.elements", "cogs.boss_patterns"):
+        for extension in ("cogs.economy", "cogs.admin", "cogs.shop", "cogs.dungeon_admin", "cogs.rules_admin", "cogs.content_admin", "cogs.alchemy", "cogs.announce", "cogs.elements", "cogs.boss_patterns", "cogs.weapon_skills"):
             await self.bot.load_extension(extension)
         self.sent = {}
         for name in ("send_message", "defer", "autocomplete"):
@@ -223,7 +223,7 @@ class RealPathTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_all_commands_serialize_for_discord(self):
         commands = self.bot.tree.get_commands()
-        self.assertEqual(len(commands), 44)
+        self.assertEqual(len(commands), 46)
         for command in commands:
             payload = command.to_dict(self.bot.tree)
             self.assertLessEqual(len(payload["description"]), 100, command.name)

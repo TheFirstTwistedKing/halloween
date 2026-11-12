@@ -9,8 +9,11 @@ from dataclasses import dataclass, field
 
 import dungeon
 import dungeon_auto
+from balance import VAULT_GEAR_MAX, VAULT_ITEM_MAX
 from dungeon import DungeonError, Run
 from store import Store, StoreError
+
+GEAR_SLOTS = ("weapon", "shield", "armor", "spare_weapon", "spare_shield", "spare_armor")
 
 AUTO_REFUSE = "⏩ 빠른진행 중이에요. ⏹ 멈추기를 누르면 직접 진행할 수 있어요."
 ACTIONS = ("advance", "attack", "defend", "item", "chest", "equip", "stash", "swap_weapon", "swap_shield", "swap_armor", "discard", "quit", "finish", "infinite", "buy", "skill", "ult", "special")
@@ -25,6 +28,8 @@ class Reward:
     final: bool = False           # 무한모드 최종보스를 쓰러뜨린 완전 클리어인지
     final_candy: int = 0          # 그중 최종보스 보상 재화(정한 값. 최대 보유량에 막히면 실제로는 덜 받는다)
     final_tickets: int = 0        # 최종보스 보상 획득권
+    vault: list = field(default_factory=list)       # 보관함에 넣은 것 [(이모지, 이름, 개수)]
+    vault_lost: list = field(default_factory=list)  # 보관함이 가득 차서 못 넣은 것 [(이모지, 이름, 개수)]
 
 
 @dataclass
@@ -46,13 +51,69 @@ def entry_label(store: Store, guild_id: int) -> str:
     return f"{item['emoji']} {item['name']} {cfg['entry_cost']}개" if item else ""
 
 
+def loadout_plan(store: Store, guild_id: int, user_id: int, bal):
+    """다음 입장 때 보관함에서 가져갈 것(/보관함에서 고른 것 중 지금 보관함에 있고, 던전에 있는 장비·소모품만).
+    (장비 {칸: key}, 소모품 {key: 1}, 보관함에서 뺄 것 [(kind, key, 개수)], 이름 목록)."""
+    vault, plan = store.vault(guild_id, user_id), store.loadout(guild_id, user_id)
+    gear, items, take, names = {}, {}, [], []
+    for slot in ("weapon", "shield", "armor"):
+        found = bal.gear_by_key.get(plan[slot])
+        if found and found.slot == slot and vault["gear"].get(found.key, 0) > 0:
+            gear[slot] = found.key
+            take.append(("gear", found.key, 1))
+            names.append(f"{found.emoji} {found.name}")
+    for key in plan["items"]:
+        found = bal.item_by_key.get(key)
+        if len(items) < bal.vault_items and found and key not in items and vault["item"].get(key, 0) > 0:
+            items[key] = 1
+            take.append(("item", key, 1))
+            names.append(f"{found.emoji} {found.name}")
+    return gear, items, take, names
+
+
+def vault_fit(store: Store, guild_id: int, user_id: int, run: Run, bal):
+    """클리어한 던전에서 들고 있던 장비(장착·예비)와 소모품을 보관함에 넣을 계획. 장비는 모두 합쳐 VAULT_GEAR_MAX개,
+    소모품은 종류마다 VAULT_ITEM_MAX개까지(넘는 것은 버려진다). 관리자가 지운 장비·소모품은 넣지 않는다.
+    (넣을 것 [(kind, key, 개수)], 넣은 것 [(이모지, 이름, 개수)], 못 넣은 것 [(이모지, 이름, 개수)])."""
+    vault = store.vault(guild_id, user_id)
+    room = VAULT_GEAR_MAX - sum(vault["gear"].values())
+    put: dict[tuple[str, str], int] = {}
+    lost: dict[tuple[str, str], int] = {}
+    for slot in GEAR_SLOTS:
+        key = getattr(run, slot)
+        if key in bal.gear_by_key:
+            target = put if room > 0 else lost
+            target[("gear", key)] = target.get(("gear", key), 0) + 1
+            room -= 1
+    for key, qty in run.items.items():
+        if key in bal.item_by_key and qty > 0:
+            fits = max(0, min(qty, VAULT_ITEM_MAX - vault["item"].get(key, 0)))
+            if fits:
+                put[("item", key)] = fits
+            if qty > fits:
+                lost[("item", key)] = qty - fits
+
+    def label(pairs):
+        out = []
+        for (kind, key), qty in pairs.items():
+            thing = (bal.gear_by_key if kind == "gear" else bal.item_by_key)[key]
+            out.append((thing.emoji, thing.name, qty))
+        return out
+    return [(kind, key, qty) for (kind, key), qty in put.items()], label(put), label(lost)
+
+
 async def enter(store: Store, locks, guild_id: int, user_id: int, auto_running: bool = False) -> Outcome:
     """던전에 들어간다. 진행 중인 던전이 있으면 입장 물품 없이 이어서 하고, 없으면 입장 물품을 낸다.
     빠른진행이 켜져 있는데 그걸 돌리는 작업이 없다면(auto_running=False: 봇이 다시 켜졌거나 끊겼다) 빠른진행을 끄고 이어서 한다."""
     async with locks.get(guild_id, user_id):
         bal = store.balance(guild_id)
+        fresh = dungeon.new_run(bal=bal)
+        gear, items, take, brought = loadout_plan(store, guild_id, user_id, bal)      # 새로 시작할 때만 실제로 꺼낸다
+        for slot, key in gear.items():
+            setattr(fresh, slot, key)
+        fresh.items = dict(items)
         try:
-            data, started = store.enter_dungeon(guild_id, user_id, dungeon.new_run(bal=bal).to_json())
+            data, started = store.enter_dungeon(guild_id, user_id, fresh.to_json(), take)
         except StoreError as exc:
             return Outcome(False, str(exc))
         run = Run.from_json(data)
@@ -64,6 +125,8 @@ async def enter(store: Store, locks, guild_id: int, user_id: int, auto_running: 
         entry = entry_label(store, guild_id)
         run.events = ([f"🏭 {entry + '을(를) 내고 ' if entry else ''}던전에 들어왔어요! {bal.floors}층까지 올라가야 해요. (한 층에 방이 {dungeon.ROOMS}개)"] if started
                       else ["📖 진행 중이던 던전을 이어서 해요. (입장 물품은 쓰지 않아요)"])
+        if started and brought:
+            run.events.append("📦 보관함에서 가져왔어요: " + ", ".join(brought))
         if was_auto:
             run.events.append("⏸ 빠른진행이 멈춰 있어요(봇이 다시 켜졌거나 중간에 끊겼어요). 다시 켜도 이 던전에서는 입장 물품을 더 내지 않아요.")
         store.save_dungeon(guild_id, user_id, run.to_json())
@@ -346,11 +409,12 @@ def _finish(store: Store, rng, guild_id: int, user_id: int, run: Run, bal) -> Ou
     candy, ticket, given = _roll_clear(store, rng, guild_id, bal) if ended == "clear" else (0, False, [])
     final = ended == "clear" and run.final_clear          # 최종보스 완전 클리어: 클리어 보상에 최종보스 보상을 더한다
     extra_candy, extra_tickets = (bal.final_reward, bal.final_tickets) if final else (0, 0)
+    put, saved, lost = vault_fit(store, guild_id, user_id, run, bal) if ended == "clear" else ([], [], [])   # 클리어하면 들고 있던 것은 보관함으로
     done = store.end_dungeon(guild_id, user_id, candy=candy + extra_candy, tickets=(1 if ticket else 0) + extra_tickets,
-                             items=[(item["id"], amount) for item, amount in given])
+                             items=[(item["id"], amount) for item, amount in given], vault=put)
     if done is None:                                  # 이미 끝난 던전(겹친 요청): 보상은 이미 나갔다.
         return Outcome(False, "이미 끝난 던전이에요.", stale=True)
     reward = Reward(candy=done[0], ticket=ticket, tickets_total=done[1],
                     items=[(item["emoji"], item["name"], amount) for item, amount in given],
-                    final=final, final_candy=extra_candy, final_tickets=extra_tickets) if ended == "clear" else None
+                    final=final, final_candy=extra_candy, final_tickets=extra_tickets, vault=saved, vault_lost=lost) if ended == "clear" else None
     return Outcome(True, run=run, ended=ended, reward=reward)

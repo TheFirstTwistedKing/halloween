@@ -164,6 +164,9 @@ def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=No
         embed.add_field(name="입장 물품", value="입장에 쓴 물품은 돌아오지 않아요. 새로 도전하려면 입장 물품이 다시 필요해요.", inline=False)
         if run.infinite:                                  # 클리어 보상과 층 보너스는 이미 받았다.
             embed.add_field(name="♾️ 무한모드 기록", value=f"**{run.floor}층**까지 올랐어요! (클리어 보상과 층 보너스는 이미 받았어요)", inline=False)
+    war = next((int(n[4:]) for n in (outcome.notes if outcome else []) if n.startswith("war:")), 0)
+    if war and ended:                                     # 길드전 중에 끝낸 던전: 우리 길드 점수가 올랐다
+        embed.add_field(name="⚔️ 길드전", value=f"우리 길드 점수 **+{war}** (`/길드전 현황`)", inline=False)
     if run.loot and ended:
         embed.add_field(name="🧾 이번에 얻은 것", value=", ".join(run.loot[-10:]), inline=False)
     return embed

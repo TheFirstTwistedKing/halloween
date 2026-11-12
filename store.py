@@ -77,6 +77,7 @@ DEFAULT_SETTINGS = {
     "entry_cost": 1,             # 입장에 필요한 개수
     "package_table": [],         # 패키지 결과표 [{id, kind(none|candy|item), item, amount, weight, emoji, title}]
     "guild_cost": 1000,          # 길드를 만드는 데 드는 재화(/길드 만들기)
+    "war_hours": 24,             # 길드전 기간(시간). 선전포고는 이 시간 안에 받지 않으면 사라진다
     "guild_size": 20,            # 길드 인원 한도(길드장 포함)
     "workshop": [],              # 기지의 요리·제작 레시피(/기지레시피) [{id, kind: cook|craft, result: 던전 key, amount, ingredients: [[물품 id, 개수], ...], cost}]
     "clear_rewards": [],         # 던전 클리어 때 추가로 주는 물품 [{id, item, amount, chance(%)}]. 재화·획득권은 /던전설정의 보상.* 항목
@@ -141,6 +142,7 @@ def validate_settings(cfg: dict) -> None:
     check_workshop(cfg["workshop"])
     number("guild_cost", 0, 1_000_000_000, True)
     number("guild_size", 2, 100, True)
+    number("war_hours", 1, 168, True)
     if not isinstance(cfg["dungeon_content"], dict):
         raise ValueError("던전 콘텐츠 설정이 올바르지 않아요.")
     mods = cfg["weapon_mods"]
@@ -411,6 +413,15 @@ class Store:
                 guild INTEGER, user INTEGER, gid INTEGER NOT NULL, PRIMARY KEY(guild, user));
             CREATE TABLE IF NOT EXISTS guild_requests(
                 guild INTEGER, user INTEGER, gid INTEGER, at REAL NOT NULL DEFAULT 0, PRIMARY KEY(guild, user, gid));
+            CREATE TABLE IF NOT EXISTS guild_wars(
+                id INTEGER PRIMARY KEY AUTOINCREMENT, guild INTEGER NOT NULL, attacker INTEGER NOT NULL, defender INTEGER NOT NULL,
+                attacker_name TEXT NOT NULL DEFAULT '', defender_name TEXT NOT NULL DEFAULT '',
+                state TEXT NOT NULL CHECK(state IN ('pending','active','done','declined','cancelled')),
+                created REAL NOT NULL DEFAULT 0, started REAL NOT NULL DEFAULT 0, ends REAL NOT NULL DEFAULT 0,
+                attacker_score INTEGER NOT NULL DEFAULT 0, defender_score INTEGER NOT NULL DEFAULT 0,
+                winner INTEGER, moved INTEGER NOT NULL DEFAULT 0, channel INTEGER);
+            CREATE TABLE IF NOT EXISTS guild_war_points(
+                war INTEGER, user INTEGER, gid INTEGER NOT NULL, points INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(war, user));
             CREATE TABLE IF NOT EXISTS vault_loadout(
                 guild INTEGER, user INTEGER, data TEXT NOT NULL, PRIMARY KEY(guild, user));
         """)

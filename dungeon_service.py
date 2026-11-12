@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 
 import dungeon
 import dungeon_auto
+import guild_war
 import guilds
 import balance as balance_rules
 from balance import VAULT_GEAR_MAX, VAULT_ITEM_MAX
@@ -437,4 +438,5 @@ def _finish(store: Store, rng, guild_id: int, user_id: int, run: Run, bal) -> Ou
     reward = Reward(candy=done[0], ticket=ticket, tickets_total=done[1],
                     items=[(item["emoji"], item["name"], amount) for item, amount in given],
                     final=final, final_candy=extra_candy, final_tickets=extra_tickets, vault=saved, vault_lost=lost) if ended == "clear" else None
-    return Outcome(True, run=run, ended=ended, reward=reward)
+    war = guild_war.add_points(store, guild_id, user_id, guild_war.points_for(run))      # 길드전 중이면 점수(오른 층 + 클리어·최종보스)
+    return Outcome(True, run=run, ended=ended, reward=reward, notes=[f"war:{war}"] if war else [])

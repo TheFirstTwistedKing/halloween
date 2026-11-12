@@ -103,7 +103,7 @@ def edit(store: Store, guild: int, sections, name: str, changes: dict):
     if hit is None:
         raise ContentError("그런 항목이 없어요. 이름은 자동완성에서 골라 주세요.")
     section, data = hit
-    changes = {k: v for k, v in changes.items() if v is not None or k in ("dodge", "guard", "reflect", "guard_chance", "modify", "drop_gear", "drop_item", "item", "shop_price")}
+    changes = {k: v for k, v in changes.items() if v is not None or k in ("dodge", "guard", "reflect", "guard_chance", "modify", "drop_gear", "drop_item", "item", "shop_price", "element")}
     if not changes:
         raise ContentError("바꿀 내용을 하나 이상 적어 주세요.")
     new = {**data, **changes}
@@ -255,6 +255,9 @@ def describe(section: str, data: dict, bal=None) -> str:
     """목록에 보여줄 한 줄. bal(밸런스)을 주면 개조 목표 무기·조건의 소모품 이름까지 보여 준다."""
     entity, _ = check_entity(section, data)
     head = f"{entity.emoji} **{entity.name}**"
+    element = bal.element_label(getattr(entity, "element", None)) if bal is not None else ""
+    if element:
+        head += f" [{element}]"
     if section == "secrets":
         gear = bal.gear_by_key.get(entity.drop_gear) if bal is not None else None
         item = bal.item_by_key.get(entity.drop_item) if bal is not None else None

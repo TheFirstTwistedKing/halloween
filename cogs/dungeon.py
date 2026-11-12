@@ -75,15 +75,16 @@ def run_embed(run: Run, outcome: service.Outcome | None = None, bal=None, cur=No
         enemy = run.enemy
         if enemy.get("image"):
             embed.set_image(url=enemy["image"])                # 시크릿 보스의 그림(움직이는 gif도 돼요)
-        embed.add_field(name=f"{enemy['emoji']} {enemy['name']}" + (" 🌌 SECRET" if enemy.get("secret") else " 👑" if enemy["boss"] else "") + (" 💫 기절(다음 공격 못 함)" if enemy.get("stunned") else ""), inline=False,
+        embed.add_field(name=f"{enemy['emoji']} {enemy['name']}" + (f" [{bal.element_label(enemy.get('element'))}]" if bal.element_label(enemy.get("element")) else "") + (" 🌌 SECRET" if enemy.get("secret") else " 👑" if enemy["boss"] else "") + (" 💫 기절(다음 공격 못 함)" if enemy.get("stunned") else ""), inline=False,
                         value=f"{bar(enemy['hp'], enemy['max_hp'], '🟥')} {enemy['hp']}/{enemy['max_hp']}")
     if run.phase == "shop" and run.shop and not ended:
         embed.add_field(name="🛒 상품 (재화로 사요)", inline=False, value=shop_text(run, bal, cur))
     embed.add_field(name="❤️ HP", inline=False, value=f"{bar(run.hp, bal.max_hp, '🟩')} {run.hp}/{bal.max_hp}")
     if not ended:
         weapon, shield, armor = bal.gear_by_key.get(run.weapon), bal.gear_by_key.get(run.shield), dungeon._armor(run, bal)
-        gear = [f"{weapon.emoji} {weapon.name}" if weapon else "👊 맨손", f"{shield.emoji} {shield.name}" if shield else "✋ 맨몸 가드",
-                f"{armor.emoji} {armor.name}" if armor else "🧥 맨몸"]
+        tag = lambda g: f" [{bal.element_label(g.element)}]" if bal.element_label(g.element) else ""     # 무기·갑옷의 속성
+        gear = [f"{weapon.emoji} {weapon.name}{tag(weapon)}" if weapon else "👊 맨손", f"{shield.emoji} {shield.name}" if shield else "✋ 맨몸 가드",
+                f"{armor.emoji} {armor.name}{tag(armor)}" if armor else "🧥 맨몸"]
         embed.add_field(name="🎒 장비", value=" · ".join(gear), inline=False)
         spare = [bal.gear_by_key.get(run.spare_weapon), bal.gear_by_key.get(run.spare_shield), bal.gear_by_key.get(run.spare_armor)]
         if any(spare):                                    # 예비 칸은 비어 있으면 보여 주지 않는다.

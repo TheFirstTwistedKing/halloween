@@ -139,6 +139,32 @@ def armor_percent(run: Run, bal: Balance | None = None) -> int:
     return armor.reduction if armor else 0
 
 
+def apply_percent(value: int, percent: int) -> int:
+    """value의 percent%(반올림)."""
+    return (value * percent + 50) // 100
+
+
+def element_note(percent: int) -> str:
+    """상성 배율 안내. 100%면 빈 문자열."""
+    if percent > 100:
+        return f" 🔺 상성 우위! (×{percent / 100:g})"
+    if percent < 100:
+        return f" 🔻 상성 열세 (×{percent / 100:g})"
+    return ""
+
+
+def attack_element_percent(run: Run, bal: Balance) -> int:
+    """내 무기 속성이 몬스터 속성을 때릴 때의 배율(%)."""
+    weapon = _weapon(run, bal)
+    return bal.element_percent(weapon.element if weapon else None, (run.enemy or {}).get("element"))
+
+
+def defend_element_percent(run: Run, bal: Balance) -> int:
+    """몬스터 속성이 내 갑옷 속성을 때릴 때의 배율(%)."""
+    armor = _armor(run, bal)
+    return bal.element_percent((run.enemy or {}).get("element"), armor.element if armor else None)
+
+
 def player_damage(run: Run, bal: Balance | None = None) -> int:
     bal = bal or DEFAULT
     weapon = _weapon(run, bal)
@@ -203,7 +229,8 @@ def _spawn(monster: Monster, floor: int = 1, bal: Balance | None = None) -> dict
     percent = (bal or DEFAULT).floor_scale
     hp = max(1, floor_scaled(monster.hp, floor, percent))
     enemy = {"key": monster.key, "name": monster.name, "emoji": monster.emoji, "hp": hp, "max_hp": hp,
-             "damage": floor_scaled(monster.damage, floor, percent), "dodge": monster.dodge, "boss": monster.boss, "stunned": False}
+             "damage": floor_scaled(monster.damage, floor, percent), "dodge": monster.dodge, "boss": monster.boss, "stunned": False,
+             "element": getattr(monster, "element", None)}
     if isinstance(monster, SecretBoss):                  # 시크릿 보스: 드롭·연출 정보를 같이 담는다(싸우는 도중 설정이 바뀌어도 이 싸움은 그대로).
         enemy.update(secret=True, intro=monster.intro, image=monster.image,
                      drops={"gear": monster.drop_gear, "gear_chance": monster.drop_gear_chance, "item": monster.drop_item,
@@ -435,7 +462,8 @@ def _enemy_attack(run: Run, reduction: int, bal: Balance | None = None, guarded:
     if run.enemy.get("stunned"):                         # 가드 성공의 충격으로 이번 공격은 건너뛴다.
         run.enemy["stunned"] = False
         return [f"💫 {run.enemy['name']}은(는) 아직 휘청거려서 공격하지 못했어요!"]
-    damage = incoming_damage(run, run.enemy["damage"], reduction, bal, guarded)
+    percent = defend_element_percent(run, bal or DEFAULT)
+    damage = incoming_damage(run, apply_percent(run.enemy["damage"], percent), reduction, bal, guarded)
     run.hp = max(0, run.hp - damage)
     if run.invuln_turns > 0:
         events = [f"{run.enemy['emoji']} {run.enemy['name']}의 공격! ✨ **무적**이라 피해를 받지 않았어요."]
@@ -444,7 +472,8 @@ def _enemy_attack(run: Run, reduction: int, bal: Balance | None = None, guarded:
         buff = run.reduce_turns > 0 and run.reduce_percent and not guarded
         notes = ([f"가드로 {reduction}% 줄였어요"] if reduction else []) + ([f"갑옷으로 {armor}% 줄였어요"] if armor else []) \
             + ([f"피해 감소 {run.reduce_percent}%"] if buff else [])
-        events = [f"{run.enemy['emoji']} {run.enemy['name']}의 공격! **{damage}** 피해를 입었어요." + (f" ({', '.join(notes)})" if notes else "")]
+        events = [f"{run.enemy['emoji']} {run.enemy['name']}의 공격! **{damage}** 피해를 입었어요." + (f" ({', '.join(notes)})" if notes else "")
+                  + element_note(percent)]
     if run.hp <= 0:
         run.phase = "dead"
         events.append("💀 시스템이 다운됐어요…")
@@ -545,8 +574,10 @@ def player_attack(run: Run, rng, bal: Balance | None = None) -> list[str]:
         damage, crit = player_damage(run, bal), False
         if weapon and weapon.crit and rng.random() * 100 < weapon.crit:
             damage, crit = damage * 2, True
+        percent = attack_element_percent(run, bal)
+        damage = apply_percent(damage, percent)
         run.enemy["hp"] = max(0, run.enemy["hp"] - damage)
-        events = [f"{'💥 크리티컬! ' if crit else '⚔️ '}{run.enemy['name']}에게 **{damage}** 피해를 줬어요."]
+        events = [f"{'💥 크리티컬! ' if crit else '⚔️ '}{run.enemy['name']}에게 **{damage}** 피해를 줬어요.{element_note(percent)}"]
     events += _after_player_action(run, 0, bal, rng)
     run.events = events
     return events

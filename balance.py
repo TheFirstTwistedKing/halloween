@@ -62,6 +62,7 @@ class Gear:
     floors: tuple = ()           # 이 장비가 상자에서 나올 수 있는 층(비어 있으면 모든 층)
     reduction: int = 0           # 갑옷: 몬스터에게 받는 모든 피해를 이 %만큼 줄인다(가드에 성공한 공격에는 적용되지 않는다)
     shop_price: int | None = None  # 상점에서 팔 때 값(재화). 없으면 판매가 × 상점.가격배율
+    element: str | None = None   # 속성(key). 무기는 공격 속성, 갑옷은 몬스터 공격을 받을 때의 방어 속성. 방패는 쓰지 않는다.
 
 
 GEAR_SLOTS = ("weapon", "shield", "armor")
@@ -108,6 +109,7 @@ class Monster:
     boss: bool = False
     weight: float = 1            # 같은 방 종류(잡몹끼리, 보스끼리)에서 나올 가중치(소수 가능). 기본은 모두 1 = 같은 확률
     floors: tuple = ()           # 이 몬스터가 나올 수 있는 층(비어 있으면 모든 층)
+    element: str | None = None   # 속성(key): 내 공격을 받을 때와 나를 때릴 때 상성표(/속성 상성)를 따른다
 
 
 @dataclass(frozen=True)
@@ -131,6 +133,7 @@ class SecretBoss:
     dodge: int = 0
     floors: tuple = ()                 # 이 시크릿 보스가 나올 수 있는 층(비어 있으면 모든 층). 보스를 이긴 그 층의 11번째 방에 나온다.
     nothing_chance: float = 0          # 무력화해도 아무것도 떨어뜨리지 않을 확률(%). 0이면 늘 하나는 떨어뜨린다.
+    element: str | None = None         # 속성(key)
 
 
 @dataclass(frozen=True)
@@ -494,6 +497,16 @@ def _check_floors(data: dict):
     return tuple(sorted(set(floors))), None
 
 
+def _check_element(data: dict):
+    """속성(key) 하나. 없으면 None. (값, None) 또는 (None, 이유). 그 속성이 실제로 있는지는 명령어 쪽에서 본다(없어진 속성은 무속성으로 친다)."""
+    value = data.get("element")
+    if value in (None, ""):
+        return None, None
+    if not isinstance(value, str) or not 1 <= len(value) <= 40:
+        return None, "속성이 올바르지 않아요."
+    return value, None
+
+
 def candidates_for_floor(table, floor: int) -> list:
     """이 층에 나올 수 있는 것들(몬스터·보스·상자의 장비·소모품): 층 제한이 없거나 이 층이 들어 있는 것, 등장 비율 0은 뺀다.
     하나도 없으면(무한모드의 높은 층 등) 층 제한을 무시하고 비율이 0이 아닌 모두에서 고른다."""
@@ -527,6 +540,9 @@ def _check_secret(data: dict, key: str, name: str, emoji: str, numbers):
     nothing, problem = _decimal(data, "nothing_chance", 100, 0)       # 예전에 저장된 시크릿 보스에는 없어서 0(늘 하나는 떨어뜨림)
     if problem:
         return None, problem
+    element, problem = _check_element(data)
+    if problem:
+        return None, problem
     floors, problem = _check_floors(data)
     if problem:
         return None, problem
@@ -536,7 +552,7 @@ def _check_secret(data: dict, key: str, name: str, emoji: str, numbers):
     if not isinstance(image, str) or len(image) > 300 or (image and (not image.startswith(("http://", "https://")) or any(c.isspace() for c in image))):
         return None, "그림은 공백 없는 http:// 또는 https:// 주소(300자까지)여야 해요."
     boss = SecretBoss(key, name, emoji, n["hp"], n["damage"], weight, drops["drop_gear"], chances["drop_gear_chance"], drops["drop_item"],
-                      chances["drop_item_chance"], n["drop_item_amount"], intro.strip(), image, floors=floors, nothing_chance=nothing)
+                      chances["drop_item_chance"], n["drop_item_amount"], intro.strip(), image, floors=floors, nothing_chance=nothing, element=element)
     return boss, None
 
 
@@ -610,7 +626,10 @@ def check_entity(section: str, data) -> tuple[object | None, str | None]:
         floors, problem = _check_floors(data)                  # 예전에 저장된 몬스터에는 층 제한이 없어서 모든 층
         if problem:
             return None, problem
-        return Monster(key, name, emoji, n["hp"], n["damage"], 0 if boss else n["dodge"], boss, weight, floors), None
+        element, problem = _check_element(data)
+        if problem:
+            return None, problem
+        return Monster(key, name, emoji, n["hp"], n["damage"], 0 if boss else n["dodge"], boss, weight, floors, element), None
     tier = data.get("tier", "일반")
     if tier not in TIER_ORDER:
         return None, "등급은 일반·희귀·전설 중 하나여야 해요."
@@ -649,9 +668,14 @@ def check_entity(section: str, data) -> tuple[object | None, str | None]:
         shop, problem = _num(data, "shop_price", 1, SELL_MAX, None, none_ok=True)
         if problem:
             return None, problem
+        element, problem = _check_element(data)
+        if problem:
+            return None, problem
+        if slot == "shield":                               # 방패는 속성을 쓰지 않는다(공격은 무기, 받는 피해는 갑옷의 속성)
+            element = None
         gear = Gear(key, name, emoji, slot, tier, n["weight"], attack=n["attack"], crit=n["crit"], dodge=extra["dodge"],
                     guard=extra["guard"], reflect=extra["reflect"], sell_price=n["sell_price"],
-                    guard_chance=extra["guard_chance"], floors=floors, reduction=n["reduction"], shop_price=shop)
+                    guard_chance=extra["guard_chance"], floors=floors, reduction=n["reduction"], shop_price=shop, element=element)
         return replace(gear, description=describe_gear(gear)), None
     n, problem = numbers(("heal", 0, 100000, 0), ("regen", 0, 100000, 0), ("regen_turns", 0, 1000, 0),
                          ("sell_price", 0, SELL_MAX, SELL_DEFAULT[tier]), ("damage", 0, 1000000, 0), ("dot", 0, 1000000, 0),
@@ -908,24 +932,41 @@ class Balance:
     trap_damage: int = TRAP_DAMAGE
     shop_interval: int = SHOP_INTERVAL
     shop_markup: int = SHOP_MARKUP
+    elements: tuple = ()         # 관리자가 만든 속성 ((key, 이름, 이모지), ...)
+    affinity: tuple = ()         # 상성표 ((공격 속성, 방어 속성, 배율 %), ...). 없는 조합은 100%
     mods: tuple = ()             # 장비 개조 레시피 ((무기 key, 재료 key, 결과 무기 key), ...). 만든 쪽에서 쓸 수 있는 것만 남긴다(build).
     gear_by_key: dict = field(init=False, repr=False, compare=False)
     item_by_key: dict = field(init=False, repr=False, compare=False)
     monster_by_key: dict = field(init=False, repr=False, compare=False)
     mod_by_pair: dict = field(init=False, repr=False, compare=False)
+    element_by_key: dict = field(init=False, repr=False, compare=False)
+    affinity_map: dict = field(init=False, repr=False, compare=False)
 
     def __post_init__(self):
         object.__setattr__(self, "gear_by_key", {g.key: g for g in self.gear})
         object.__setattr__(self, "item_by_key", {c.key: c for c in self.consumables})
         object.__setattr__(self, "monster_by_key", {m.key: m for m in self.monsters + self.bosses + self.secrets})
         object.__setattr__(self, "mod_by_pair", {(w, i): r for w, i, r in self.mods})
+        object.__setattr__(self, "element_by_key", {k: (k, n, e) for k, n, e in self.elements})
+        object.__setattr__(self, "affinity_map", {(a, d): p for a, d, p in self.affinity})
+
+    def element_percent(self, attack: str | None, defend: str | None) -> int:
+        """공격 속성이 방어 속성을 때릴 때의 피해 배율(%). 어느 쪽이든 속성이 없거나(지워진 속성 포함) 상성표에 없는 조합이면 100."""
+        if attack not in self.element_by_key or defend not in self.element_by_key:
+            return 100
+        return self.affinity_map.get((attack, defend), 100)
+
+    def element_label(self, key: str | None) -> str:
+        """속성 표시('⚡ 전기'). 없거나 지워진 속성이면 빈 문자열."""
+        found = self.element_by_key.get(key)
+        return f"{found[2]} {found[1]}" if found else ""
 
     def mod_result(self, weapon_key: str | None, item_key: str) -> str | None:
         """이 장비(무기나 방패. 안 든 칸이면 None)를 든 채 이 재료를 쓰면 바뀌는 장비의 key. 레시피가 없으면 None."""
         return self.mod_by_pair.get((weapon_key, item_key))
 
     @classmethod
-    def build(cls, overrides=None, content=None, mods=None) -> "Balance":
+    def build(cls, overrides=None, content=None, mods=None, elements=None, affinity=None) -> "Balance":
         """기본값 위에 숫자 덮어쓰기(overrides)를 얹고, 관리자가 만든 콘텐츠(content)가 있는 구역은 그것으로 통째로 바꾼다.
         mods는 장비 개조 레시피 [{weapon, item, result}, ...]: 무기·재료·결과가 지금 실제로 있는 것만 남긴다."""
         o = clean(overrides)
@@ -971,7 +1012,33 @@ class Balance:
             guard_base=get("방어.기본피해감소"), guard_heal=get("방어.회복률"), reflect_base=get("방어.기본반사"),
             clear_candy=(get("보상.최소"), get("보상.최대")), ticket_chance=get("보상.획득권확률"), room_plan=plan,
             monsters=custom.get("monsters", monsters), bosses=custom.get("bosses", bosses),
-            gear=final_gear, consumables=final_items, mods=clean_mods(mods, final_gear, final_items))
+            gear=final_gear, consumables=final_items, mods=clean_mods(mods, final_gear, final_items),
+            **clean_elements(elements, affinity))
+
+
+MAX_ELEMENTS = 20               # 서버마다 속성 수 한도
+AFFINITY_MAX = 1000             # 상성 배율의 상한(%)
+
+
+def clean_elements(elements, affinity) -> dict:
+    """저장된 속성·상성표에서 쓸 수 있는 것만 꺼낸다: {'elements': ((key, 이름, 이모지), ...), 'affinity': ((공격, 방어, %), ...)}.
+    상성표는 두 속성이 다 있는 칸만, 같은 칸이 겹치면 앞의 것만 쓴다."""
+    out_elements, keys = [], set()
+    for entry in (elements if isinstance(elements, (list, tuple)) else [])[:MAX_ELEMENTS]:
+        if isinstance(entry, dict) and isinstance(entry.get("key"), str) and isinstance(entry.get("name"), str) and isinstance(entry.get("emoji"), str) \
+                and entry["key"] not in keys:
+            keys.add(entry["key"])
+            out_elements.append((entry["key"], entry["name"], entry["emoji"]))
+    out_affinity, pairs = [], set()
+    for row in (affinity if isinstance(affinity, (list, tuple)) else []):
+        if not isinstance(row, dict):
+            continue
+        attack, defend, percent = row.get("atk"), row.get("def"), row.get("percent")
+        if attack in keys and defend in keys and (attack, defend) not in pairs and not isinstance(percent, bool) \
+                and isinstance(percent, int) and 0 <= percent <= AFFINITY_MAX:
+            pairs.add((attack, defend))
+            out_affinity.append((attack, defend, percent))
+    return {"elements": tuple(out_elements), "affinity": tuple(out_affinity)}
 
 
 MAX_MODS = 50                    # 서버마다 장비 개조 레시피 수 한도

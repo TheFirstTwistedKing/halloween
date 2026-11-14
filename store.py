@@ -77,6 +77,7 @@ DEFAULT_SETTINGS = {
     "entry_cost": 1,             # 입장에 필요한 개수
     "package_table": [],         # 패키지 결과표 [{id, kind(none|candy|item), item, amount, weight, emoji, title}]
     "guild_cost": 1000,          # 길드를 만드는 데 드는 재화(/길드 만들기)
+    "raid_items": [{"id": 1, "name": "응급 배터리", "emoji": "🔋", "heal": 300, "amount": 2}],   # 레이드 회복 아이템(/레이드아이템): 시작할 때 참가자 모두에게
     "war_hours": 24,             # 길드전 기간(시간). 선전포고는 이 시간 안에 받지 않으면 사라진다
     "guild_size": 20,            # 길드 인원 한도(길드장 포함)
     "workshop": [],              # 기지의 요리·제작 레시피(/기지레시피) [{id, kind: cook|craft, result: 던전 key, amount, ingredients: [[물품 id, 개수], ...], cost}]
@@ -143,6 +144,7 @@ def validate_settings(cfg: dict) -> None:
     number("guild_cost", 0, 1_000_000_000, True)
     number("guild_size", 2, 100, True)
     number("war_hours", 1, 168, True)
+    check_raid_items(cfg["raid_items"])
     if not isinstance(cfg["dungeon_content"], dict):
         raise ValueError("던전 콘텐츠 설정이 올바르지 않아요.")
     mods = cfg["weapon_mods"]
@@ -232,6 +234,31 @@ def check_clear_rewards(rewards) -> None:
             raise ValueError("클리어 보상의 개수는 1~99,999여야 해요.")
         if isinstance(chance, bool) or not isinstance(chance, (int, float)) or not 0 <= chance <= 100 or chance != chance:
             raise ValueError("클리어 보상의 확률은 0~100(%)이어야 해요.")
+
+
+RAID_ITEMS_MAX = 5               # 레이드 회복 아이템 종류 한도
+RAID_HEAL_MAX = 100000
+RAID_ITEM_AMOUNT_MAX = 99
+
+
+def check_raid_items(items) -> None:
+    """레이드 회복 아이템 목록 검사 [{id, name, emoji, heal, amount}]. 잘못됐으면 ValueError."""
+    if not isinstance(items, list) or len(items) > RAID_ITEMS_MAX:
+        raise ValueError(f"레이드 회복 아이템이 올바르지 않아요. (최대 {RAID_ITEMS_MAX}종)")
+    ids, names = set(), set()
+
+    def whole(value, low, high):
+        return not isinstance(value, bool) and isinstance(value, int) and low <= value <= high
+    for item in items:
+        if not isinstance(item, dict) or not whole(item.get("id"), 1, 10 ** 9) or item["id"] in ids:
+            raise ValueError("레이드 회복 아이템이 올바르지 않아요.")
+        name, emoji = item.get("name"), item.get("emoji")
+        if not isinstance(name, str) or not 1 <= len(name) <= 30 or name.lower() in names or not isinstance(emoji, str) or not valid_emoji(emoji):
+            raise ValueError("레이드 회복 아이템의 이름·이모지가 올바르지 않아요.")
+        if not whole(item.get("heal"), 1, RAID_HEAL_MAX) or not whole(item.get("amount"), 1, RAID_ITEM_AMOUNT_MAX):
+            raise ValueError(f"레이드 회복 아이템의 회복량은 1~{RAID_HEAL_MAX:,}, 개수는 1~{RAID_ITEM_AMOUNT_MAX}이어야 해요.")
+        ids.add(item["id"])
+        names.add(name.lower())
 
 
 WORKSHOP_MAX = 50                # 서버마다 요리·제작 레시피 수 한도

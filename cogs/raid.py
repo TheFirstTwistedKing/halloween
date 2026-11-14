@@ -25,8 +25,11 @@ Choice = app_commands.Choice
 PERMS = dict(guild_only=True, default_permissions=discord.Permissions(administrator=True))
 SKILL_CHOICES = [Choice(name=f"{name} — {meaning}", value=key) for key, (name, meaning, _r, _t) in raid.BOSS_SKILLS.items()]
 EDIT_GAP = 2.5                   # 버튼을 눌러 화면을 바로 고치는 최소 간격(초). 더 잦으면 다음 정리 때 고친다
-BUTTONS = (("join", "참가", "🙋", discord.ButtonStyle.success), ("attack", "공격", "⚔️", discord.ButtonStyle.danger),
-           ("defend", "방어", "🛡️", discord.ButtonStyle.primary), ("skill", "스킬", "✨", discord.ButtonStyle.secondary))
+BUTTONS = (("join", "참가", "🙋", discord.ButtonStyle.success, 0), ("attack", "공격", "⚔️", discord.ButtonStyle.danger, 0),
+           ("defend", "방어", "🛡️", discord.ButtonStyle.primary, 0), ("skill", "스킬", "✨", discord.ButtonStyle.secondary, 0),
+           ("ult", "궁극기", "🟡", discord.ButtonStyle.secondary, 1), ("special", "각성", "⚡", discord.ButtonStyle.danger, 1),
+           ("status", "내 상태", "📋", discord.ButtonStyle.secondary, 1))
+ITEM_ID = "raid:item"
 
 
 def bar(value: int, maximum: int, width: int = 12) -> str:
@@ -54,32 +57,46 @@ def raid_embed(store, row, now=None) -> discord.Embed:
         lines.append(f"🔥 과열: 보스가 공격할 때마다 모두 {data['burn']:,} 피해 (남은 {data['burn_turns']}번)")
     embed = theme.make_embed("🐉 레이드", "\n".join(lines), color=color)
     embed.add_field(name=f"👥 참가 {len(everyone)}/{raid.MAX_MEMBERS} (살아 있음 {alive})", inline=False,
-                    value=(", ".join(f"<@{m['user']}>" + ("💀" if m["down"] else f" {m['hp']:,}") for m in everyone[:30])
+                    value=(", ".join(f"<@{m['user']}>" + ("💀" if m["down"] else f" {m['hp']:,}" + ("⚡" if m.get("awakened") else "")
+                                                                + (" 🟡" if m.get("ult") and m.get("ult_gauge", 0) >= 100 else ""))
+                                     for m in everyone[:30])
                            + (f" 외 {len(everyone) - 30}명" if len(everyone) > 30 else "") or "아직 없어요")[:1024])
     top = sorted((m for m in everyone if m["damage"]), key=lambda m: -m["damage"])[:5]
     if top:
         embed.add_field(name="🏅 준 피해", inline=True, value="\n".join(f"<@{m['user']}> {m['damage']:,}" for m in top))
     reward = f"{cur.money(data['reward'])}을(를) 준 피해 비율대로" + (f" + 참가 보상 {cur.money(data['min_reward'])}" if data["min_reward"] else "")
     embed.add_field(name="🎁 승리 보상", inline=True, value=reward if data["reward"] or data["min_reward"] else "없음")
+    items = data.get("items") if row["state"] != "open" else store.settings(row["guild"])["raid_items"]
+    embed.add_field(name="🧪 회복 아이템 (시작할 때 모두에게)", inline=False, value=raid.item_list(items or []) or "없음")
     if row["state"] == "won" and data.get("payout"):
         paid = sorted(data["payout"].items(), key=lambda p: -p[1])[:15]
         embed.add_field(name="💰 받은 보상", inline=False, value=", ".join(f"<@{u}> +{cur.money(n)}" for u, n in paid)[:1024] or "없음")
     if data.get("log"):
         embed.add_field(name="📜 기록", inline=False, value="\n".join(data["log"])[-1024:])
-    embed.set_footer(text="기지에 전시한 장비(무기·방패·갑옷)로 싸워요. 장비는 잃지 않아요.")
+    embed.set_footer(text="기지에 전시한 장비(무기·방패·갑옷)로 싸워요. 장비는 잃지 않아요. ⚡ 각성 중 · 🟡 궁극기 준비 · 📋 내 상태로 게이지·아이템 확인")
     return embed
 
 
 class RaidView(discord.ui.View):
     """레이드 화면 버튼(누구나 누른다). 버튼 ID가 고정이라 봇이 다시 켜져도 동작한다."""
 
-    def __init__(self, cog: "Raid | None" = None, ended: bool = False):
+    def __init__(self, cog: "Raid | None" = None, ended: bool = False, items=()):
         super().__init__(timeout=None)
         self.cog = cog
-        for action, label, emoji, style in BUTTONS:
-            button = discord.ui.Button(custom_id=f"raid:{action}", label=label, emoji=emoji, style=style, disabled=ended)
+        for action, label, emoji, style, row in BUTTONS:
+            button = discord.ui.Button(custom_id=f"raid:{action}", label=label, emoji=emoji, style=style, disabled=ended, row=row)
             button.callback = self._callback(action)
             self.add_item(button)
+        options = [discord.SelectOption(label=f"{i['name']} (HP +{i['heal']:,})"[:100], value=str(i["id"]), emoji=i["emoji"]) for i in items]
+        select = discord.ui.Select(custom_id=ITEM_ID, placeholder="🧪 회복 아이템 쓰기", row=2, disabled=ended or not options,
+                                   options=options or [discord.SelectOption(label="회복 아이템 없음", value="0")])
+        select.callback = self._pick
+        self.add_item(select)
+
+    async def _pick(self, interaction: discord.Interaction):
+        cog = self.cog or interaction.client.get_cog("Raid")
+        value = (interaction.data.get("values") or ["0"])[0]
+        await cog.press(interaction, f"item:{value}")
 
     def _callback(self, action: str):
         async def callback(interaction: discord.Interaction):
@@ -106,11 +123,25 @@ class Raid(commands.Cog):
         self.refresh.cancel()
 
     # ---------------------------------------------------------------- 버튼
+    def view_for(self, row) -> RaidView:
+        """그 레이드 화면에 붙일 버튼(회복 아이템 메뉴는 시작했으면 그 레이드의 것, 모집 중이면 지금 설정)."""
+        data = raid.boss(row)
+        items = data.get("items") if row["state"] != "open" else self.bot.store.settings(row["guild"])["raid_items"]
+        return RaidView(self, ended=row["state"] not in raid.OPEN, items=items or ())
+
     async def press(self, interaction: discord.Interaction, action: str):
         store, gid = self.bot.store, interaction.guild_id
         row = raid.by_message(store, interaction.message.id) if interaction.message else None
         if row is None or row["state"] not in raid.OPEN:
             await self._private(interaction, "이 레이드는 끝났어요.")
+            return
+        if action == "status":                                # 내 상태: 누른 사람에게만 보여 준다(화면은 그대로)
+            try:
+                text = raid.status_text(store, gid, row, interaction.user.id)
+            except RaidError as exc:
+                await self._private(interaction, str(exc))
+                return
+            await interaction.response.send_message(embed=theme.make_embed("📋 내 레이드 상태", text, color=theme.PURPLE), ephemeral=True)
             return
         try:
             if action == "join":
@@ -124,7 +155,7 @@ class Raid(commands.Cog):
         now = time.time()
         if now - self.last_edit.get(row["id"], 0) >= EDIT_GAP or row["state"] not in raid.OPEN:
             self.last_edit[row["id"]] = now
-            await interaction.response.edit_message(embed=raid_embed(store, row), view=RaidView(self, ended=row["state"] not in raid.OPEN))
+            await interaction.response.edit_message(embed=raid_embed(store, row), view=self.view_for(row))
             raid.mark_clean(store, row["id"])
         else:
             await interaction.response.defer()                # 화면은 다음 정리 때(3초 안에) 고친다
@@ -161,7 +192,7 @@ class Raid(commands.Cog):
                 continue
             try:
                 await channel.get_partial_message(fresh["message"]).edit(embed=raid_embed(store, fresh, now),
-                                                                         view=RaidView(self, ended=fresh["state"] not in raid.OPEN))
+                                                                         view=self.view_for(fresh))
             except discord.HTTPException:
                 LOG.warning("레이드 %s 화면을 고치지 못했어요", fresh["id"])
                 continue
@@ -211,7 +242,7 @@ class Raid(commands.Cog):
             await self._say(interaction, str(exc), False)
             return
         row = raid.get(store, raid_id)
-        await interaction.response.send_message(embed=raid_embed(store, row), view=RaidView(self), ephemeral=False)
+        await interaction.response.send_message(embed=raid_embed(store, row), view=self.view_for(row), ephemeral=False)
         try:
             message = await interaction.original_response()
             raid.set_message(store, raid_id, message.id)
@@ -244,5 +275,104 @@ class Raid(commands.Cog):
         await self.refresh_now()
 
 
+class RaidItems(commands.Cog):
+    """🧪 레이드 회복 아이템(관리자): 레이드를 시작할 때 참가자 모두에게 주는 회복 아이템을 만들고 고친다."""
+
+    group = app_commands.Group(name="레이드아이템", description="레이드를 시작할 때 모두에게 주는 회복 아이템을 정해요 (관리자)", **PERMS)
+
+    def __init__(self, bot):
+        self.bot = bot
+
+    async def _say(self, interaction, text: str, ok: bool = True):
+        await interaction.response.send_message(embed=theme.notice(text, ok), ephemeral=False)
+
+    def _items(self, gid: int) -> list[dict]:
+        return [dict(i) for i in self.bot.store.settings(gid)["raid_items"]]
+
+    def _find(self, items, name: str):
+        needle = (name or "").strip().lower()
+        return next((i for i in items if i["name"].lower() == needle), None)
+
+    async def _store(self, interaction, items, text: str):
+        try:
+            self.bot.store.update_settings(interaction.guild_id, raid_items=items)
+        except ValueError as exc:
+            await self._say(interaction, str(exc), False)
+            return
+        await self._say(interaction, f"{text}\n지금 목록: {raid.item_list(items) or '없음'}\n다음에 시작하는 레이드부터 적용돼요(진행 중인 레이드는 그대로).")
+
+    @group.command(name="추가", description="회복 아이템을 더해요(최대 5종) (관리자)")
+    @app_commands.rename(name="이름", emoji="이모지", heal="회복량", amount="개수")
+    @app_commands.describe(name="아이템 이름", emoji="이모지", heal="한 번에 회복하는 HP(1~100,000)", amount="레이드마다 한 사람이 받는 개수(1~99)")
+    async def add(self, interaction: discord.Interaction, name: app_commands.Range[str, 1, 30], emoji: str,
+                  heal: app_commands.Range[int, 1, 100000], amount: app_commands.Range[int, 1, 99] = 1):
+        if not await require_admin(interaction):
+            return
+        items = self._items(interaction.guild_id)
+        if self._find(items, name):
+            await self._say(interaction, f"**{name}**은(는) 이미 있어요. `/레이드아이템 수정`으로 고쳐 주세요.", False)
+            return
+        if not valid_emoji(emoji.strip()):
+            await self._say(interaction, "이모지는 유니코드 이모지나 이 서버의 이모지 하나로 적어 주세요.", False)
+            return
+        items.append({"id": max((i["id"] for i in items), default=0) + 1, "name": name.strip(), "emoji": emoji.strip(), "heal": heal, "amount": amount})
+        await self._store(interaction, items, f"🧪 **{name.strip()}**을(를) 더했어요.")
+
+    @group.command(name="수정", description="회복 아이템의 이름·이모지·회복량·개수를 고쳐요. 비운 칸은 그대로 (관리자)")
+    @app_commands.rename(target="아이템", name="새이름", emoji="이모지", heal="회복량", amount="개수")
+    @app_commands.describe(target="고칠 아이템(자동완성)", name="새 이름", emoji="새 이모지", heal="한 번에 회복하는 HP", amount="한 사람이 받는 개수")
+    async def edit(self, interaction: discord.Interaction, target: str, name: app_commands.Range[str, 1, 30] | None = None,
+                   emoji: str | None = None, heal: app_commands.Range[int, 1, 100000] | None = None,
+                   amount: app_commands.Range[int, 1, 99] | None = None):
+        if not await require_admin(interaction):
+            return
+        items = self._items(interaction.guild_id)
+        item = self._find(items, target)
+        if item is None:
+            await self._say(interaction, "그런 회복 아이템이 없어요. 이름은 자동완성에서 골라 주세요.", False)
+            return
+        if emoji is not None and not valid_emoji(emoji.strip()):
+            await self._say(interaction, "이모지는 유니코드 이모지나 이 서버의 이모지 하나로 적어 주세요.", False)
+            return
+        if name is not None and name.strip().lower() != item["name"].lower() and self._find(items, name):
+            await self._say(interaction, f"**{name}**은(는) 이미 있어요.", False)
+            return
+        changes = {k: v for k, v in dict(name=name.strip() if name else None, emoji=emoji.strip() if emoji else None, heal=heal, amount=amount).items()
+                   if v is not None}
+        if not changes:
+            await self._say(interaction, "바꿀 칸을 하나 이상 골라 주세요.", False)
+            return
+        item.update(changes)
+        await self._store(interaction, items, f"🧪 **{item['name']}**을(를) 고쳤어요.")
+
+    @group.command(name="삭제", description="회복 아이템을 지워요 (관리자)")
+    @app_commands.rename(target="아이템")
+    async def delete(self, interaction: discord.Interaction, target: str):
+        if not await require_admin(interaction):
+            return
+        items = self._items(interaction.guild_id)
+        item = self._find(items, target)
+        if item is None:
+            await self._say(interaction, "그런 회복 아이템이 없어요.", False)
+            return
+        await self._store(interaction, [i for i in items if i["id"] != item["id"]], f"🗑️ **{item['name']}**을(를) 지웠어요.")
+
+    @group.command(name="목록", description="레이드 회복 아이템을 봐요 (관리자)")
+    async def show(self, interaction: discord.Interaction):
+        if not await require_admin(interaction):
+            return
+        items = self._items(interaction.guild_id)
+        await self._say(interaction, "🧪 레이드를 시작하면 참가자 모두에게: " + (raid.item_list(items) or "없음 (`/레이드아이템 추가`로 더해요)"))
+
+    @edit.autocomplete("target")
+    @delete.autocomplete("target")
+    async def item_names(self, interaction: discord.Interaction, current: str):
+        if interaction.guild_id is None:
+            return []
+        needle = current.strip().lower()
+        return [Choice(name=f"{i['emoji']} {i['name']}"[:100], value=i["name"]) for i in self._items(interaction.guild_id) if needle in i["name"].lower()]
+
+
 async def setup(bot):
     await bot.add_cog(Raid(bot))
+    await bot.add_cog(RaidItems(bot))

@@ -24,6 +24,8 @@ LOG = logging.getLogger("halloween")
 Choice = app_commands.Choice
 PERMS = dict(guild_only=True, default_permissions=discord.Permissions(administrator=True))
 SKILL_CHOICES = [Choice(name=f"{name} — {meaning}", value=key) for key, (name, meaning, _r, _t) in raid.BOSS_SKILLS.items()]
+PANEL_TTL = 14 * 60              # 내 상태 창(나에게만 보이는 메시지)은 디스코드에서 15분까지만 고칠 수 있다
+PANEL_EDITS = 10                 # 정리 한 번에 고치는 내 상태 창 수(디스코드 한도를 넘지 않게)
 EDIT_GAP = 2.5                   # 버튼을 눌러 화면을 바로 고치는 최소 간격(초). 더 잦으면 다음 정리 때 고친다
 BUTTONS = (("join", "참가", "🙋", discord.ButtonStyle.success, 0), ("attack", "공격", "⚔️", discord.ButtonStyle.danger, 0),
            ("defend", "방어", "🛡️", discord.ButtonStyle.primary, 0), ("skill", "스킬", "✨", discord.ButtonStyle.secondary, 0),
@@ -35,6 +37,36 @@ ITEM_ID = "raid:item"
 def bar(value: int, maximum: int, width: int = 12) -> str:
     filled = 0 if maximum <= 0 else max(0, min(width, round(value * width / maximum)))
     return "🟥" * filled + "⬛" * (width - filled)
+
+
+def member_entry(m: dict) -> str:
+    """참가자 한 명: '@이름 ❤️820'(다운이면 💀). 각성 중 ⚡, 궁극기 준비 🟡."""
+    if m["down"]:
+        return f"<@{m['user']}> 💀"
+    return (f"<@{m['user']}> ❤️{m['hp']:,}" + ("⚡" if m.get("awakened") else "")
+            + ("🟡" if m.get("ult") and m.get("ult_gauge", 0) >= 100 else ""))
+
+
+def member_chunks(everyone, limit: int = 1000) -> list[list[str]]:
+    """참가자 목록을 디스코드 칸 한도(1024자) 안에 들어가게 나눈다."""
+    chunks, current, size = [], [], 0
+    for m in everyone:
+        entry = member_entry(m)
+        if current and size + len(entry) + 2 > limit:
+            chunks.append(current)
+            current, size = [], 0
+        current.append(entry)
+        size += len(entry) + 2
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def panel_embed(store, guild_id: int, row, user: int, now=None) -> discord.Embed:
+    """나에게만 보이는 내 상태 창: HP 막대 + 쿨타임·게이지·회복 아이템."""
+    mine = next((m for m in raid.members(store, row["id"]) if m["user"] == user), None)
+    top = f"{bar(mine['hp'], mine['max_hp'], 10).replace('🟥', '🟩')} ❤️ **{mine['hp']:,}/{mine['max_hp']:,}**\n" if mine else ""
+    return theme.make_embed("📋 내 레이드 상태 (나에게만 보여요)", top + raid.status_text(store, guild_id, row, user, now), color=theme.PURPLE)
 
 
 def raid_embed(store, row, now=None) -> discord.Embed:
@@ -56,11 +88,9 @@ def raid_embed(store, row, now=None) -> discord.Embed:
     if data["burn_turns"]:
         lines.append(f"🔥 과열: 보스가 공격할 때마다 모두 {data['burn']:,} 피해 (남은 {data['burn_turns']}번)")
     embed = theme.make_embed("🐉 레이드", "\n".join(lines), color=color)
-    embed.add_field(name=f"👥 참가 {len(everyone)}/{raid.MAX_MEMBERS} (살아 있음 {alive})", inline=False,
-                    value=(", ".join(f"<@{m['user']}>" + ("💀" if m["down"] else f" {m['hp']:,}" + ("⚡" if m.get("awakened") else "")
-                                                                + (" 🟡" if m.get("ult") and m.get("ult_gauge", 0) >= 100 else ""))
-                                     for m in everyone[:30])
-                           + (f" 외 {len(everyone) - 30}명" if len(everyone) > 30 else "") or "아직 없어요")[:1024])
+    head = f"👥 참가 {len(everyone)}/{raid.MAX_MEMBERS} (살아 있음 {alive}) · ❤️ HP"
+    for number, chunk in enumerate(member_chunks(everyone) or [["아직 없어요"]]):          # 50명 모두의 HP가 보이게 칸을 나눈다
+        embed.add_field(name=head if number == 0 else "👥 (이어서)", inline=False, value=", ".join(chunk))
     top = sorted((m for m in everyone if m["damage"]), key=lambda m: -m["damage"])[:5]
     if top:
         embed.add_field(name="🏅 준 피해", inline=True, value="\n".join(f"<@{m['user']}> {m['damage']:,}" for m in top))
@@ -114,6 +144,7 @@ class Raid(commands.Cog):
         self.bot = bot
         self.rng = rng or random.Random()
         self.last_edit: dict[int, float] = {}
+        self.panels: dict[tuple[int, int], dict] = {}    # (레이드, 사람) → 내 상태 창 {message, made, seen}
 
     async def cog_load(self):
         self.bot.add_view(RaidView(self))
@@ -135,13 +166,14 @@ class Raid(commands.Cog):
         if row is None or row["state"] not in raid.OPEN:
             await self._private(interaction, "이 레이드는 끝났어요.")
             return
-        if action == "status":                                # 내 상태: 누른 사람에게만 보여 준다(화면은 그대로)
+        if action == "status":                                # 내 상태: 누른 사람에게만 보이는 창을 새로 띄운다(화면은 그대로)
             try:
-                text = raid.status_text(store, gid, row, interaction.user.id)
+                panel_embed(store, gid, row, interaction.user.id)
             except RaidError as exc:
                 await self._private(interaction, str(exc))
                 return
-            await interaction.response.send_message(embed=theme.make_embed("📋 내 레이드 상태", text, color=theme.PURPLE), ephemeral=True)
+            await interaction.response.defer()
+            await self.show_panel(interaction, row, interaction.user.id, new=True)
             return
         try:
             if action == "join":
@@ -159,6 +191,59 @@ class Raid(commands.Cog):
             raid.mark_clean(store, row["id"])
         else:
             await interaction.response.defer()                # 화면은 다음 정리 때(3초 안에) 고친다
+        await self.show_panel(interaction, row, interaction.user.id)
+
+    def _seen(self, row, user: int):
+        """내 상태 창에 보여 준 값(바뀌었을 때만 다시 고친다)."""
+        mine = next((m for m in raid.members(self.bot.store, row["id"]) if m["user"] == user), None)
+        if mine is None:
+            return None
+        return (mine["hp"], mine["down"], mine.get("ult_gauge", 0), mine.get("awaken_gauge", 0), mine.get("awakened"),
+                tuple(sorted(mine.get("items", {}).items())), row["state"])
+
+    async def show_panel(self, interaction, row, user: int, new: bool = False) -> None:
+        """누른 사람에게만 보이는 내 상태 창을 고친다. 없거나 15분이 지나 못 고치면(또는 new면) 새로 띄운다."""
+        store = self.bot.store
+        try:
+            embed = panel_embed(store, row["guild"], row, user)
+        except RaidError:
+            return
+        key, entry = (row["id"], user), self.panels.get((row["id"], user))
+        if entry and not new and time.time() - entry["made"] < PANEL_TTL:
+            try:
+                await entry["message"].edit(embed=embed)
+                entry["seen"] = self._seen(row, user)
+                return
+            except discord.HTTPException:
+                pass
+        try:
+            message = await interaction.followup.send(embed=embed, ephemeral=True, wait=True)
+        except discord.HTTPException:
+            return
+        self.panels[key] = {"message": message, "made": time.time(), "seen": self._seen(row, user)}
+
+    async def refresh_panels(self, row) -> int:
+        """보스에게 맞는 등으로 바뀐 사람의 내 상태 창을 고친다(정리 한 번에 PANEL_EDITS개까지). 고친 수."""
+        done = 0
+        for (raid_id, user), entry in list(self.panels.items()):
+            if raid_id != row["id"] or done >= PANEL_EDITS:
+                continue
+            if time.time() - entry["made"] >= PANEL_TTL:
+                del self.panels[(raid_id, user)]
+                continue
+            seen = self._seen(row, user)
+            if seen == entry["seen"]:
+                continue
+            try:
+                await entry["message"].edit(embed=panel_embed(self.bot.store, row["guild"], row, user))
+                entry["seen"] = seen
+                done += 1
+            except (discord.HTTPException, RaidError):
+                del self.panels[(raid_id, user)]
+        if row["state"] not in raid.OPEN:                     # 끝난 레이드의 창은 마지막으로 고친 뒤 잊는다
+            for key in [k for k in self.panels if k[0] == row["id"]]:
+                del self.panels[key]
+        return done
 
     async def _private(self, interaction, text: str):
         """레이드 화면 안에서 안 되는 행동은 누른 사람에게만 알린다(공용 화면을 어지럽히지 않게)."""
@@ -185,6 +270,7 @@ class Raid(commands.Cog):
         for row in raid.running(store):
             raid.tick(store, row["guild"], self.rng, now)
             fresh = raid.get(store, row["id"])
+            await self.refresh_panels(fresh)
             if not raid.boss(fresh).get("dirty") or not fresh["message"]:
                 continue
             channel = self.bot.get_channel(fresh["channel"])

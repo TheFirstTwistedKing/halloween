@@ -244,8 +244,8 @@ class ScreenTests(unittest.IsolatedAsyncioTestCase):
         await self.open_and_join()
         i = self.press(A)
         await self.cog.press(i, "status")
-        self.assertTrue(i.response.send_message.call_args.kwargs["ephemeral"])
-        self.assertIn("HP", i.response.send_message.call_args.kwargs["embed"].description)
+        self.assertTrue(i.followup.send.call_args.kwargs["ephemeral"])                  # 나에게만 보이는 창
+        self.assertIn("HP", i.followup.send.call_args.kwargs["embed"].description)
         i = self.w.interaction(admin=True)
         await Raid.begin.callback(self.cog, i)
         row = raid.current(self.store, G)

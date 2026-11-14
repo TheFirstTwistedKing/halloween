@@ -16,6 +16,7 @@ from cogs.admin import Admin, ConfirmRoleGrant
 from cogs.dungeon import ConfirmQuit, DungeonView, SellView
 from cogs.dungeon_admin import ConfirmResetAll
 from cogs.economy import Economy
+from cogs.raid import RaidView
 from cogs.rules_admin import RulesAdmin
 from cogs.shop import ConfirmDelete, Shop
 from confirm import Confirm
@@ -42,7 +43,7 @@ class PublicByDefaultTests(unittest.TestCase):
 
     def test_only_the_dungeons_in_screen_buttons_and_the_shop_flows_and_packages_stay_private(self):
         """남아 있는 비공개 응답은 버튼·선택창을 눌렀을 때의 개인 안내(던전·연금술 화면 안), 공용 상점 패널 쪽, 패키지뿐이다."""
-        allowed = {"cogs/dungeon.py", "cogs/alchemy.py", "packages.py", "panel.py", "views.py", "owner.py", "bulk.py"}
+        allowed = {"cogs/dungeon.py", "cogs/raid.py", "cogs/alchemy.py", "packages.py", "panel.py", "views.py", "owner.py", "bulk.py"}
         found = set()
         for path in list(ROOT.glob("*.py")) + list((ROOT / "cogs").glob("*.py")):
             if "ephemeral=True" in path.read_text(encoding="utf-8"):
@@ -51,16 +52,17 @@ class PublicByDefaultTests(unittest.TestCase):
         self.assertIn("packages.py", found)                                         # 패키지는 그대로다.
 
     def test_every_screen_a_command_opens_is_locked_to_who_opened_it(self):
-        open_to_all = {ShopPanelView, PackageView}                                   # 공용 패널과 패키지: 누구나 누른다(각자 자기 몫).
+        open_to_all = {ShopPanelView, PackageView, RaidView}                         # 공용 패널·패키지·레이드 화면: 누구나 누른다(각자 자기 몫).
         views = []
-        for module in ("confirm", "views", "panel", "packages", "paging", "bulk", "cogs.admin", "cogs.dungeon", "cogs.dungeon_admin", "cogs.shop", "cogs.vault", "cogs.base"):
+        for module in ("confirm", "views", "panel", "packages", "paging", "bulk", "cogs.admin", "cogs.dungeon", "cogs.dungeon_admin", "cogs.shop", "cogs.vault", "cogs.base", "cogs.raid"):
             mod = importlib.import_module(module)
             views += [cls for _, cls in inspect.getmembers(mod, inspect.isclass)
                       if issubclass(cls, discord.ui.View) and cls.__module__ == mod.__name__]
         self.assertGreaterEqual(len(views), 9)
         for cls in views:
             locked = cls.interaction_check is not discord.ui.View.interaction_check
-            self.assertEqual(locked, cls not in open_to_all, cls.__name__)
+            public = cls in open_to_all or f"{cls.__module__}.{cls.__qualname__}" == "cogs.raid.RaidView"   # 확장은 다시 불러오면 클래스가 새로 생긴다
+            self.assertEqual(locked, not public, cls.__name__)
 
 
 class FakeWorld(unittest.IsolatedAsyncioTestCase):

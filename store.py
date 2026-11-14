@@ -422,6 +422,12 @@ class Store:
                 winner INTEGER, moved INTEGER NOT NULL DEFAULT 0, channel INTEGER);
             CREATE TABLE IF NOT EXISTS guild_war_points(
                 war INTEGER, user INTEGER, gid INTEGER NOT NULL, points INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(war, user));
+            CREATE TABLE IF NOT EXISTS raids(
+                id INTEGER PRIMARY KEY AUTOINCREMENT, guild INTEGER NOT NULL, channel INTEGER, message INTEGER,
+                state TEXT NOT NULL CHECK(state IN ('open','active','won','lost','cancelled')),
+                created REAL NOT NULL DEFAULT 0, ends REAL NOT NULL DEFAULT 0, data TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS raid_members(
+                raid INTEGER, user INTEGER, damage INTEGER NOT NULL DEFAULT 0, data TEXT NOT NULL, PRIMARY KEY(raid, user));
             CREATE TABLE IF NOT EXISTS vault_loadout(
                 guild INTEGER, user INTEGER, data TEXT NOT NULL, PRIMARY KEY(guild, user));
         """)

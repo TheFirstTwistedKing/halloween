@@ -1196,6 +1196,17 @@ class Store:
             for kind, key, qty in entries:
                 self._vault_put(guild, user, kind, key, qty)
 
+    def vault_give(self, guild: int, user: int, key: str, qty: int) -> int:
+        """관리자가 보관함에 장비 key를 qty개 넣어 준다. 장비 한도(VAULT_GEAR_MAX)를 넘으면 StoreError이고 아무것도 넣지 않는다.
+        지금 보관함의 장비 수(전부 합친 것)를 돌려준다."""
+        with self.db:
+            held = self.db.execute("SELECT COALESCE(SUM(qty), 0) AS n FROM vault WHERE guild=? AND user=? AND kind='gear'",
+                                   (guild, user)).fetchone()["n"]
+            if held + qty > balance_rules.VAULT_GEAR_MAX:
+                raise StoreError(f"보관함 장비 자리가 모자라요. (지금 {held}/{balance_rules.VAULT_GEAR_MAX}개, 넣으려는 것 {qty}개)")
+            self._vault_put(guild, user, "gear", key, qty)
+        return held + qty
+
     def vault_sell(self, guild: int, user: int, entries, total: int) -> int:
         """보관함 물건을 판다 [(kind, key, 개수)] → 재화 total을 받는다(한 덩어리). 지금 가진 재화를 돌려준다.
         물건이 모자라거나 재화가 최대 보유량을 넘으면 거절하고 아무것도 바꾸지 않는다."""

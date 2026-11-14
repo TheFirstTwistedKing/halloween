@@ -10,7 +10,8 @@ import theme
 from owner import owner_only
 from access import require_admin
 from josa import eun_neun, i_ga
-from store import TICKET_MAX
+from balance import VAULT_GEAR_MAX
+from store import TICKET_MAX, StoreError
 
 LOG = logging.getLogger("halloween")
 NO_MEMBERS_INTENT = ("이 명령어는 봇이 서버 멤버 목록을 볼 수 있어야 해요. 설정 방법:\n"
@@ -308,7 +309,37 @@ class Admin(commands.Cog):
             f"🎁 {target.mention}의 던전에 {hit[1]['emoji']} **{hit[1]['name']}**을(를) 줬어요.\n"
             "받은 사람이 `/던전`을 열어 **장착 / 예비에 넣기 / 버리기**를 정하면 돼요. (빠른진행 중이면 컴퓨터가 알아서 정해요)"), ephemeral=False)
 
+    @app_commands.command(name="보관함지급", description="다른 사람이나 나의 📦 보관함에 장비를 넣어 줘요. 던전 밖에서 언제든 돼요 (관리자)")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.rename(target="대상", gear="장비", amount="개수")
+    @app_commands.describe(target="장비를 받을 사람(나 자신도 돼요)", gear="줄 장비 (자동완성에서 골라요)",
+                           amount=f"몇 개 줄까요(1~{VAULT_GEAR_MAX}, 기본 1)")
+    async def give_vault_gear(self, interaction: discord.Interaction, target: discord.Member, gear: str,
+                              amount: app_commands.Range[int, 1, VAULT_GEAR_MAX] = 1):
+        if not await require_admin(interaction):
+            return
+        store, gid = self.bot.store, interaction.guild_id
+        hit = content.find(store, gid, ("gear",), gear)
+        problem = self._bad_target(target) or (None if hit else "그런 장비가 없어요. 이름은 자동완성에서 골라 주세요.")
+        if problem:
+            await interaction.response.send_message(embed=theme.notice(problem, False), ephemeral=False)
+            return
+        data = hit[1]
+        try:
+            async with self.bot.locks.get(gid, target.id):        # 그 사람의 던전 입장·보관함 팔기·전시와 겹치지 않게
+                total = store.vault_give(gid, target.id, data["key"], amount)
+        except StoreError as exc:
+            await interaction.response.send_message(embed=theme.notice(str(exc), False), ephemeral=False)
+            return
+        LOG.info("보관함 지급: 관리자 %s → 대상 %s, 장비 %s ×%d (서버 %s)", interaction.user.id, target.id, data["key"], amount, gid)
+        await interaction.response.send_message(embed=theme.notice(
+            f"🎁 {target.mention}의 📦 보관함에 {data['emoji']} **{data['name']}**" + (f" ×{amount}" if amount > 1 else "")
+            + f"을(를) 넣었어요. (보관함 장비 {total}/{VAULT_GEAR_MAX}개)\n"
+            "받은 사람은 `/보관함`에서 다음 던전에 가져가거나 `/기지`에 전시할 수 있어요."), ephemeral=False)
+
     @give_gear.autocomplete("gear")
+    @give_vault_gear.autocomplete("gear")
     async def give_gear_autocomplete(self, interaction: discord.Interaction, current: str):
         if interaction.guild_id is None:
             return []

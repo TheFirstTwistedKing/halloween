@@ -136,9 +136,24 @@ def start(store, guild: int, now=None):
         raise RaidError("아직 참가한 사람이 없어요. [참가] 버튼으로 모인 뒤 시작해 주세요.")
     data, t = boss(row), _now(now)
     data["next_attack"] = t + data["attack_every"]
+    data["items"] = [dict(item) for item in store.settings(guild)["raid_items"]]      # 시작할 때의 회복 아이템(도중에 설정을 바꿔도 이 레이드는 그대로)
+    for member in members(store, row["id"]):
+        _give_items(data, member)
+        _save_member(store, row["id"], member)
     _log(data, f"🔥 **레이드 시작!** {data['emoji']} **{data['name']}**을(를) {data['minutes']}분 안에 쓰러뜨려요!")
+    if data["items"]:
+        _log(data, "🧪 모두에게 회복 아이템을 나눠 줬어요: " + item_list(data["items"]))
     _save(store, row["id"], data, state="active", ends=t + data["minutes"] * 60)
     return get(store, row["id"])
+
+
+def _give_items(data: dict, member: dict) -> None:
+    """참가자에게 이 레이드의 회복 아이템을 준다(종류마다 정한 개수)."""
+    member["items"] = {str(item["id"]): item["amount"] for item in data.get("items", [])}
+
+
+def item_list(items) -> str:
+    return " · ".join(f"{i['emoji']} {i['name']} ×{i['amount']}(HP +{i['heal']:,})" for i in items)
 
 
 def cancel(store, guild: int):
@@ -169,8 +184,10 @@ def member_stats(store, guild: int, user: int) -> dict:
             "guard": min(100, guard), "reflect": min(500, reflect), "reduction": min(balance.ARMOR_MAX, reduction),
             "skill": weapon.skill if weapon else None, "skill_power": weapon.skill_power if weapon else 0,
             "skill_cooldown": weapon.skill_cooldown if weapon else 0, "skill_name": weapon.skill_name if weapon else None,
+            "ult": weapon.ult if weapon else None, "ult_power": weapon.ult_power if weapon else 0, "ult_name": weapon.ult_name if weapon else None,
             "gear": [f"{g.emoji} {g.name}" for g in (weapon, shield, armor) if g is not None],
-            "next_act": 0.0, "next_skill": 0.0, "guarding": False, "down": False}
+            "next_act": 0.0, "next_skill": 0.0, "guarding": False, "down": False,
+            "ult_gauge": 0, "awaken_gauge": 0, "awakened": False, "items": {}}
 
 
 def join(store, guild: int, user: int, now=None) -> dict:
@@ -183,6 +200,8 @@ def join(store, guild: int, user: int, now=None) -> dict:
     if len(members(store, row["id"])) >= MAX_MEMBERS:
         raise RaidError(f"레이드 인원이 꽉 찼어요(최대 {MAX_MEMBERS}명).")
     stats = member_stats(store, guild, user)
+    if row["state"] == "active":                            # 싸우는 중에 들어오면 회복 아이템도 바로 받는다
+        _give_items(boss(row), stats)
     with store.db:
         store.db.execute("INSERT INTO raid_members VALUES(?,?,0,?)", (row["id"], user, json.dumps(stats, ensure_ascii=False)))
     data = boss(row)
@@ -209,7 +228,7 @@ def _hit_boss(data: dict, member: dict, damage: int, *, pierce: bool = False) ->
 
 
 def act(store, guild: int, user: int, action: str, rng, now=None) -> str:
-    """참가자의 행동(attack | defend | skill). 화면 기록에 남고, 누른 사람에게 보여 줄 한 줄을 돌려준다."""
+    """참가자의 행동(attack | defend | skill | ult | special | item:<아이템 id>). 화면 기록에 남고, 누른 사람에게 보여 줄 한 줄을 돌려준다."""
     t = _now(now)
     row = current(store, guild)
     if row is None or row["state"] != "active":
@@ -226,9 +245,11 @@ def act(store, guild: int, user: int, action: str, rng, now=None) -> str:
     if t < mine["next_act"]:
         raise RaidError(f"{math.ceil(mine['next_act'] - t)}초 뒤에 다시 행동할 수 있어요.")
     data = boss(row)
+    bal = store.balance(guild)                               # 궁극기·각성 수치는 /각성설정을 따른다
+    awake = bal.awaken_bonus if mine.get("awakened") else 0
     who = f"<@{user}>"
     if action == "attack":
-        damage = mine["attack"]
+        damage = mine["attack"] * (100 + awake) // 100
         crit = mine["crit"] and rng.random() * 100 < mine["crit"]
         dealt, extra = _hit_boss(data, mine, damage * 2 if crit else damage)
         line = f"{'💥 크리티컬! ' if crit else '⚔️ '}{who} → **{dealt:,}** 피해"
@@ -241,21 +262,45 @@ def act(store, guild: int, user: int, action: str, rng, now=None) -> str:
             raise RaidError("기지에 전시한 무기에 스킬이 없어요.")
         if t < mine["next_skill"]:
             raise RaidError(f"스킬은 {math.ceil(mine['next_skill'] - t)}초 뒤에 쓸 수 있어요.")
-        kind, power, base = mine["skill"], mine["skill_power"], mine["attack"]
-        damage = {"power": base * power // 100, "multi": base * power, "drain": base, "stun": base * power // 100, "pierce": base * power // 100}[kind]
-        dealt, extra = _hit_boss(data, mine, damage, pierce=kind == "pierce")
-        name = balance.weapon_skill_name(kind, mine.get("skill_name"))
-        line = f"✨ {who}의 **[{name}]** → **{dealt:,}** 피해"
-        if kind == "drain":
-            healed = min(mine["max_hp"], mine["hp"] + dealt * power // 100) - mine["hp"]
-            mine["hp"] += healed
-            line += f" · 🩸 HP +{healed:,}"
-        if kind == "stun" and data["hp"] > 0:
-            data["stunned"] = True
-            line += " · 💫 보스 기절(다음 공격을 못 해요)"
+        extra, line = _technique(data, mine, mine["skill"], mine["skill_power"], mine.get("skill_name"), f"✨ {who}의", awake)
         mine["next_skill"] = t + max(1, mine["skill_cooldown"]) * data["cooldown"] * 2
+    elif action == "ult":
+        if not mine.get("ult"):
+            raise RaidError("기지에 전시한 무기에 궁극기가 없어요.")
+        if mine.get("ult_gauge", 0) < 100:
+            raise RaidError(f"궁극기 게이지가 {mine.get('ult_gauge', 0)}%예요. 공격·방어를 하면 차요.")
+        extra, line = _technique(data, mine, mine["ult"], mine["ult_power"], mine.get("ult_name"), f"🟡 {who}의 궁극기", awake)
+        mine["ult_gauge"] = 0
+        mine["awaken_gauge"] = min(100, mine.get("awaken_gauge", 0) + bal.awaken_charge)
+        if mine["awaken_gauge"] >= 100 and not mine.get("awakened"):
+            mine["awakened"] = True
+            line += " · ⚡ **각성!**"
+    elif action == "special":
+        if not mine.get("awakened"):
+            raise RaidError(f"각성 중에만 쓸 수 있어요. 각성 게이지 {mine.get('awaken_gauge', 0)}% (궁극기를 쓰면 차요).")
+        extra, line = _technique(data, mine, bal.special, bal.special_power, bal.special_name, f"⚡ {who}의 각성 특수 스킬", awake)
+        if bal.special_ends:
+            mine["awakened"], mine["awaken_gauge"] = False, 0
+            line += " · 각성 끝"
+    elif action.startswith("item:"):
+        item = next((i for i in data.get("items", []) if str(i["id"]) == action[5:]), None)
+        if item is None:
+            raise RaidError("이 레이드에 없는 아이템이에요.")
+        left = mine.get("items", {}).get(action[5:], 0)
+        if left <= 0:
+            raise RaidError(f"{item['emoji']} {item['name']}이(가) 남아 있지 않아요.")
+        if mine["hp"] >= mine["max_hp"]:
+            raise RaidError("HP가 이미 가득 차 있어요.")
+        healed = min(mine["max_hp"], mine["hp"] + item["heal"]) - mine["hp"]
+        mine["hp"] += healed
+        mine["items"][action[5:]] = left - 1
+        extra, line = [], f"🧪 {who} {item['emoji']} {item['name']} → HP +{healed:,} (남은 {left - 1}개)"
     else:
         raise RaidError("알 수 없는 행동이에요.")
+    if action in ("attack", "defend") and mine.get("ult") and mine.get("ult_gauge", 0) < 100:     # 궁극기 게이지: 공격·방어 한 번마다
+        mine["ult_gauge"] = min(100, mine.get("ult_gauge", 0) + bal.ult_charge)
+        if mine["ult_gauge"] >= 100:
+            line += " · 🟡 궁극기 준비!"
     mine["next_act"] = t + data["cooldown"]
     _log(data, line)
     for e in extra:
@@ -264,6 +309,22 @@ def act(store, guild: int, user: int, action: str, rng, now=None) -> str:
     _save(store, row["id"], data)
     _check_end(store, guild, row["id"], t)
     return line
+
+
+def _technique(data: dict, mine: dict, kind: str, power: int, custom: str | None, title: str, awake: int) -> tuple[list[str], str]:
+    """스킬·궁극기·각성 특수 스킬 한 번(종류는 무기 스킬과 같다). 각성 중이면 피해 보너스. (일어난 일, 기록 한 줄)."""
+    base = mine["attack"] * (100 + awake) // 100
+    damage = {"power": base * power // 100, "multi": base * power, "drain": base, "stun": base * power // 100, "pierce": base * power // 100}[kind]
+    dealt, extra = _hit_boss(data, mine, damage, pierce=kind == "pierce")
+    line = f"{title} **[{balance.weapon_skill_name(kind, custom)}]** → **{dealt:,}** 피해"
+    if kind == "drain":
+        healed = min(mine["max_hp"], mine["hp"] + dealt * power // 100) - mine["hp"]
+        mine["hp"] += healed
+        line += f" · 🩸 HP +{healed:,}"
+    if kind == "stun" and data["hp"] > 0:
+        data["stunned"] = True
+        line += " · 💫 보스 기절(다음 공격을 못 해요)"
+    return extra, line
 
 
 def _boss_attack(store, raid_id: int, data: dict, rng) -> None:
@@ -413,6 +474,26 @@ def mark_clean(store, raid_id: int) -> None:
     data["dirty"] = False
     with store.db:
         store.db.execute("UPDATE raids SET data=? WHERE id=?", (json.dumps(data, ensure_ascii=False), raid_id))
+
+
+def status_text(store, guild: int, row, user: int, now=None) -> str:
+    """참가자 본인의 상태(누른 사람에게만 보여 준다): HP·쿨타임·궁극기·각성 게이지·회복 아이템."""
+    mine = next((m for m in members(store, row["id"]) if m["user"] == user), None)
+    if mine is None:
+        raise RaidError("아직 참가하지 않았어요. [참가]를 눌러 주세요.")
+    t, data = _now(now), boss(row)
+    lines = [f"❤️ HP {mine['hp']:,}/{mine['max_hp']:,}" + (" 💀 다운" if mine["down"] else ""),
+             f"🎒 {' · '.join(mine['gear']) or '👊 맨손'} · 공격 {mine['attack']:,}",
+             "⏱️ 지금 행동할 수 있어요" if t >= mine["next_act"] else f"⏱️ {math.ceil(mine['next_act'] - t)}초 뒤에 행동"]
+    if mine["skill"]:
+        name = balance.weapon_skill_name(mine["skill"], mine.get("skill_name"))
+        lines.append(f"✨ [{name}] " + ("준비됨" if t >= mine["next_skill"] else f"{math.ceil(mine['next_skill'] - t)}초 뒤"))
+    if mine.get("ult"):
+        lines.append(f"🟡 궁극기 [{balance.weapon_skill_name(mine['ult'], mine.get('ult_name'))}] 게이지 {mine.get('ult_gauge', 0)}%")
+    lines.append("⚡ **각성 중!** [⚡ 각성] 버튼을 쓸 수 있어요" if mine.get("awakened") else f"⚡ 각성 게이지 {mine.get('awaken_gauge', 0)}%")
+    items = [f"{i['emoji']} {i['name']} ×{mine.get('items', {}).get(str(i['id']), 0)}" for i in data.get("items", [])]
+    lines.append("🧪 " + (" · ".join(items) if items else ("시작하면 받아요" if row["state"] == "open" else "없음")))
+    return "\n".join(lines)
 
 
 def time_left(row, now=None) -> str:

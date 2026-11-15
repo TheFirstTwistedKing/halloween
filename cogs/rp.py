@@ -66,6 +66,20 @@ class Roleplay(commands.Cog):
         if result and result[1] > result[0]:                       # 레벨이 오르면 레벨업 채널(없으면 채팅한 채널)에 알리고 레벨 보상을 준다
             await self.level_up(message.author, cfg, *result, origin=message.channel, shown=False)
 
+    @commands.Cog.listener()
+    async def on_raw_member_remove(self, payload: discord.RawMemberRemoveEvent):
+        """서버를 나가면(추방·차단 포함) '나간 유저 경험치 초기화'가 켜져 있을 때 경험치를 0으로 만든다. 멤버 인텐트가 있어야 온다."""
+        user = payload.user
+        if getattr(user, "bot", False):
+            return
+        if hasattr(self.bot, "allowed_guild") and not self.bot.allowed_guild(payload.guild_id):
+            return
+        if not self.cfg(payload.guild_id)["reset_on_leave"]:
+            return
+        old = rp.reset_exp(self.bot.store, payload.guild_id, user.id)
+        if old:
+            LOG.info("나간 유저 경험치 초기화: %s (서버 %s, 경험치 %d → 0)", user.id, payload.guild_id, old)
+
     @tasks.loop(minutes=VOICE_MINUTES)
     async def voice_loop(self):
         try:
@@ -122,7 +136,8 @@ class Roleplay(commands.Cog):
             return ""
         lines = [f"🎉 **{cfg['label']} {before} → {cfg['label']} {after}**!"]
         guild = getattr(member, "guild", None)
-        for reward in rp.rewards_between(cfg, before, after):
+        give, drop = rp.reward_plan(cfg, before, after)
+        for reward in give:
             role = guild.get_role(reward["role"]) if guild else None
             if role is None:
                 lines.append(f"⚠️ LV {reward['level']} 보상 역할이 지워졌어요(관리자에게 알려 주세요).")
@@ -132,6 +147,13 @@ class Roleplay(commands.Cog):
                 lines.append(f"🎁 LV {reward['level']} 보상: {role.mention} 역할을 받았어요!")
             except (discord.HTTPException, AttributeError):
                 lines.append(f"⚠️ LV {reward['level']} 보상 {role.mention}을(를) 주지 못했어요(봇 권한·역할 순서를 확인해 주세요).")
+        lower = [role for role in getattr(member, "roles", []) if role.id in drop]       # '최고 역할만': 하위 보상 역할 정리
+        if lower:
+            try:
+                await member.remove_roles(*lower, reason="롤플레잉 최고 역할만: 하위 레벨 보상 역할 정리")
+                lines.append("🧹 하위 레벨 보상 " + ", ".join(role.mention for role in lower) + " 역할을 뺐어요.")
+            except (discord.HTTPException, AttributeError):
+                lines.append("⚠️ 하위 레벨 보상 역할을 빼지 못했어요(봇 권한·역할 순서를 확인해 주세요).")
         text = "\n".join(lines)
         await self.announce(member, cfg, text, origin, shown)
         return text
@@ -842,6 +864,27 @@ class Roleplay(commands.Cog):
         head = {"add": f"🚫 {channel.mention if channel else ''}에서는 이제 경험치가 오르지 않아요.",
                 "remove": f"✅ {channel.mention if channel else ''}에서 다시 경험치가 올라요.", "list": "🚫 경험치 제외 채널"}[action.value]
         await self._say(interaction, f"{head}\n목록: {shown}\n(채팅·음성 경험치만 막아요. 출석체크·일하기 같은 명령어는 그대로예요)")
+
+    @admin.command(name="레벨옵션", description="레벨 보상 '최고 역할만'과 '나간 유저 경험치 초기화'를 켜고 꺼요. 비운 칸은 그대로 (관리자)")
+    @app_commands.rename(top_only="최고역할만", reset_on_leave="나간유저초기화")
+    @app_commands.describe(top_only="켜면 레벨업 때 가장 높은 레벨 보상 역할만 남기고 하위 보상 역할은 빼요",
+                           reset_on_leave="켜면 서버를 나간 사람(추방·차단 포함)의 경험치를 0으로 만들어요(COM·금고는 그대로)")
+    async def level_options(self, interaction: discord.Interaction, top_only: bool | None = None, reset_on_leave: bool | None = None):
+        if not await require_admin(interaction):
+            return
+        cfg = self.cfg(interaction.guild_id)
+        if top_only is not None:
+            cfg["top_role_only"] = top_only
+        if reset_on_leave is not None:
+            cfg["reset_on_leave"] = reset_on_leave
+        self.save(interaction.guild_id, cfg)
+        on = lambda flag: "✅ 켜짐" if flag else "⬜ 꺼짐"                                  # noqa: E731
+        text = (f"⚙️ 레벨 옵션\n· 최고 역할만: {on(cfg['top_role_only'])} — 레벨업 때 하위 레벨 보상 역할은 자동으로 빼요\n"
+                f"· 나간 유저 경험치 초기화: {on(cfg['reset_on_leave'])} — 서버를 나가면 경험치(레벨)를 0으로 (COM·금고는 그대로)")
+        if cfg["reset_on_leave"] and not getattr(getattr(self.bot, "intents", None), "members", False):
+            text += ("\n⚠️ 멤버 인텐트가 꺼져 있어서 나간 걸 알 수 없어요. 개발자 포털의 Server Members Intent를 켜고 "
+                     ".env에 `MEMBERS_INTENT=true`를 적은 뒤 봇을 다시 켜 주세요.")
+        await self._say(interaction, text)
 
     @admin.command(name="레벨업채널", description="레벨이 오르면 알림이 올라갈 채널을 정해요. 비우면 채팅한 채널에 알려요 (관리자)")
     @app_commands.rename(channel="채널")

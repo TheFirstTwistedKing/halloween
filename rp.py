@@ -30,6 +30,7 @@ FORMULA_LIMITS = {"mul": (1, 1_000_000), "offset": (0, 1_000_000_000), "div": (1
 MUTE_MODES = ("off", "block", "reduce")           # 음성 마이크/헤드셋 음소거: 제한 없음 · 차단 · 감소
 DEFAULT_CONFIG = {"pay_step": 5, "bet_max": 1000, "spin_cooldown": 10, "label": "LV.", "chat_xp": 30, "voice_xp": 0, "attend_xp": 1000,
                   "chat_cooldown": 1, "mute_mode": "block", "mute_percent": 50, "gift_fee": 50, "shop_channel": None, "level_channel": None,
+                  "top_role_only": False, "reset_on_leave": False,
                   "formula": DEFAULT_FORMULA, "roulette": DEFAULT_ROULETTE, "rewards": [], "jobs": [], "shop": [], "no_xp": []}
 LIMITS = {"pay_step": (0, 1000), "bet_max": (1, COM_MAX), "spin_cooldown": (0, 86400), "chat_xp": (0, 1_000_000), "voice_xp": (0, 1_000_000),
           "attend_xp": (0, 1_000_000_000), "chat_cooldown": (0, 3600), "mute_percent": (0, 100),
@@ -68,6 +69,9 @@ def config(raw) -> dict:
         out["label"] = raw["label"].strip()
     if raw.get("mute_mode") in MUTE_MODES:
         out["mute_mode"] = raw["mute_mode"]
+    for key in ("top_role_only", "reset_on_leave"):
+        if isinstance(raw.get(key), bool):
+            out[key] = raw[key]
     for key in ("shop_channel", "level_channel"):
         if _whole(raw.get(key), 1, 10 ** 20):
             out[key] = raw[key]
@@ -445,3 +449,25 @@ def rewards_between(cfg: dict, before: int, after: int) -> list[dict]:
 
 def rewards_upto(cfg: dict, level: int) -> list[dict]:
     return [r for r in cfg["rewards"] if r["level"] <= level]
+
+
+def reward_plan(cfg: dict, before: int, after: int) -> tuple[list[dict], set[int]]:
+    """LV before → after로 오를 때 (줄 보상, 뺄 역할 id).
+    보통은 그 사이 보상을 모두 주고 아무것도 빼지 않는다. '최고 역할만'이면 닿은 가장 높은 레벨의 보상만 주고,
+    그보다 낮은 레벨의 보상 역할은 뺀다(같은 역할이 높은 레벨 보상이기도 하면 빼지 않는다). 새로 닿은 보상이 없으면 아무것도 안 한다."""
+    reached = rewards_between(cfg, before, after)
+    if not cfg["top_role_only"] or not reached:
+        return reached, set()
+    top_level = max(r["level"] for r in reached)
+    give = [r for r in reached if r["level"] == top_level]
+    keep = {r["role"] for r in give}
+    return give, {r["role"] for r in cfg["rewards"] if r["level"] < top_level} - keep
+
+
+def reset_exp(store, guild: int, user: int) -> int:
+    """경험치를 0으로(서버를 나간 사람). COM·금고·직업은 그대로. 원래 경험치를 돌려준다."""
+    with store.db:
+        old = row(store, guild, user)["exp"]
+        if old:
+            store.db.execute("UPDATE rp SET exp=0 WHERE guild=? AND user=?", (guild, user))
+    return old

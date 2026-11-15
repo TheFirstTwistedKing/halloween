@@ -63,12 +63,8 @@ class Roleplay(commands.Cog):
             return
         self.last_chat[key] = now
         result = rp.gain(self.bot.store, message.guild.id, message.author.id, cfg["chat_xp"], cfg)
-        if result and result[1] > result[0]:                       # 레벨이 오르면 그 채널에 알리고 레벨 보상을 준다
-            text = await self.level_up(message.author, cfg, *result)
-            try:
-                await message.channel.send(embed=theme.notice(f"{message.author.mention} {text}"), allowed_mentions=discord.AllowedMentions.none())
-            except discord.HTTPException:
-                pass
+        if result and result[1] > result[0]:                       # 레벨이 오르면 레벨업 채널(없으면 채팅한 채널)에 알리고 레벨 보상을 준다
+            await self.level_up(message.author, cfg, *result, origin=message.channel, shown=False)
 
     @tasks.loop(minutes=VOICE_MINUTES)
     async def voice_loop(self):
@@ -102,8 +98,8 @@ class Roleplay(commands.Cog):
                     result = rp.gain(self.bot.store, guild.id, member.id, amount, cfg)
                     if result:
                         given += 1
-                        if result[1] > result[0]:
-                            await self.level_up(member, cfg, *result)
+                        if result[1] > result[0]:                 # 레벨업 채널을 정했을 때만 알린다
+                            await self.level_up(member, cfg, *result, shown=False)
         return given
 
     # ---------------------------------------------------------------- 공통
@@ -119,8 +115,9 @@ class Roleplay(commands.Cog):
     async def _say(self, interaction, text: str, ok: bool = True):
         await interaction.response.send_message(embed=theme.notice(text, ok), ephemeral=False)
 
-    async def level_up(self, member, cfg: dict, before: int, after: int) -> str:
-        """LV이 올랐으면 그 사이 레벨 보상 역할을 주고 안내 문장을 돌려준다."""
+    async def level_up(self, member, cfg: dict, before: int, after: int, *, origin=None, shown: bool = True) -> str:
+        """LV이 올랐으면 그 사이 레벨 보상 역할을 주고, 알림을 올리고, 안내 문장을 돌려준다.
+        origin: 일이 일어난 채널(음성이면 None). shown: 명령어 답장에 이 문장이 이미 보이는지."""
         if after <= before:
             return ""
         lines = [f"🎉 **{cfg['label']} {before} → {cfg['label']} {after}**!"]
@@ -135,7 +132,26 @@ class Roleplay(commands.Cog):
                 lines.append(f"🎁 LV {reward['level']} 보상: {role.mention} 역할을 받았어요!")
             except (discord.HTTPException, AttributeError):
                 lines.append(f"⚠️ LV {reward['level']} 보상 {role.mention}을(를) 주지 못했어요(봇 권한·역할 순서를 확인해 주세요).")
-        return "\n".join(lines)
+        text = "\n".join(lines)
+        await self.announce(member, cfg, text, origin, shown)
+        return text
+
+    async def announce(self, member, cfg: dict, text: str, origin, shown: bool) -> None:
+        """레벨업 알림을 올린다.
+        - 레벨업 채널을 정했으면 그 채널에 올린다(명령어를 그 채널에서 썼다면 답장에 이미 보이므로 다시 올리지 않는다).
+        - 정하지 않았거나 그 채널이 지워졌으면: 채팅은 채팅한 채널에, 명령어는 답장으로만, 음성은 알리지 않는다."""
+        guild = getattr(member, "guild", None)
+        target = guild.get_channel(cfg["level_channel"]) if cfg["level_channel"] and guild is not None else None
+        if target is None:
+            if shown or origin is None:
+                return
+            target = origin
+        elif shown and origin is not None and getattr(origin, "id", None) == target.id:
+            return
+        try:
+            await target.send(embed=theme.notice(f"{member.mention} {text}"), allowed_mentions=discord.AllowedMentions.none())
+        except (discord.HTTPException, AttributeError):
+            pass
 
     # ---------------------------------------------------------------- 사람들이 쓰는 명령어
     @app_commands.command(name="프로필", description="롤플레잉 프로필(직업·LV·COM)을 봐요")
@@ -182,7 +198,7 @@ class Roleplay(commands.Cog):
             return
         job = done["job"]
         text = f"{job['emoji']} **{job['name']}**(으)로 일하고 {money(done['pay'])}을(를) 받았어요! (가진 것 {done['com']:,})"
-        extra = await self.level_up(interaction.user, cfg, done["before"], done["after"])
+        extra = await self.level_up(interaction.user, cfg, done["before"], done["after"], origin=interaction.channel)
         await self._say(interaction, text + ("\n" + extra if extra else "") + f"\n다음 일은 {job['cooldown']}분 뒤에 할 수 있어요.")
 
     @app_commands.command(name="환전", description=f"RAM과 COM을 바꿔요. {rp.EXCHANGE_RATE} RAM = 1 COM (양방향)")
@@ -207,7 +223,7 @@ class Roleplay(commands.Cog):
             text = f"💱 {cur.money(done['cost'])}을(를) {money(amount)}(으)로 바꿨어요. (가진 {COM_NAME} {done['com']:,})"
             if done["exp_gain"] < amount:
                 text += f"\n(전에 RAM으로 바꿨던 {amount - done['exp_gain']:,} {COM_NAME}만큼은 EXP로 치지 않아요)"
-            text += "\n" + (await self.level_up(interaction.user, cfg, before, rp.level_of(done["exp"], cfg)[0]))
+            text += "\n" + (await self.level_up(interaction.user, cfg, before, rp.level_of(done["exp"], cfg)[0], origin=interaction.channel))
         else:
             text = f"💱 {money(amount)}을(를) {cur.money(done['gain'])}(으)로 바꿨어요. (가진 {COM_NAME} {done['com']:,}, LV은 그대로예요)"
         await self._say(interaction, text.strip())
@@ -228,7 +244,7 @@ class Roleplay(commands.Cog):
         icon = "💥" if slot["times"] == 0 else ("🌟" if slot["times"] >= 5 else "🎉")
         text = (f"🎰 {money(bet)}을(를) 걸고 돌렸어요… {icon} **{slot['name']}** (x{slot['times']})\n"
                 + (f"{money(done['payout'])}을(를) 받았어요!" if done["payout"] else "아무것도 못 받았어요.") + f" (가진 {COM_NAME} {done['com']:,})")
-        extra = await self.level_up(interaction.user, cfg, done["before"], done["after"])
+        extra = await self.level_up(interaction.user, cfg, done["before"], done["after"], origin=interaction.channel)
         await self._say(interaction, text + ("\n" + extra if extra else ""), slot["times"] > 0)
 
     @app_commands.command(name="출석체크", description="하루 한 번 출석체크하고 경험치(=COM)를 받아요")
@@ -241,7 +257,7 @@ class Roleplay(commands.Cog):
         except RpError as exc:
             await self._say(interaction, str(exc), False)
             return
-        extra = await self.level_up(interaction.user, cfg, before, after)
+        extra = await self.level_up(interaction.user, cfg, before, after, origin=interaction.channel)
         await self._say(interaction, f"📅 출석체크 완료! 경험치 {money(amount)}을(를) 받았어요." + ("\n" + extra if extra else ""))
 
     @app_commands.command(name="com상점", description="COM으로 물품(텍스트·역할)을 사는 상점을 열어요")
@@ -656,7 +672,7 @@ class Roleplay(commands.Cog):
         except RpError as exc:
             await self._say(interaction, str(exc), False)
             return
-        extra = await self.level_up(member, cfg, before, rp.level_of(exp, cfg)[0])
+        extra = await self.level_up(member, cfg, before, rp.level_of(exp, cfg)[0], origin=interaction.channel)
         await self._say(interaction, f"{rp.COM} {member.mention}님에게 {money(amount)}을(를) 줬어요. (가진 {COM_NAME} {com:,})" + ("\n" + extra if extra else ""))
 
     @admin.command(name="com회수", description="사람의 COM을 가져가요. 수량을 비우면 전부, 지갑·금고 중 고를 수 있어요 (관리자)")
@@ -769,6 +785,20 @@ class Roleplay(commands.Cog):
         cfg["shop_channel"] = channel.id
         self.save(interaction.guild_id, cfg)
         await self._say(interaction, f"📨 텍스트 물품을 사면 {channel.mention}에 알림이 올라가요.")
+
+    @admin.command(name="레벨업채널", description="레벨이 오르면 알림이 올라갈 채널을 정해요. 비우면 채팅한 채널에 알려요 (관리자)")
+    @app_commands.rename(channel="채널")
+    @app_commands.describe(channel="레벨업 알림 채널(비우면 원래대로: 채팅은 채팅한 채널, 명령어는 답장, 음성은 알리지 않음)")
+    async def level_channel(self, interaction: discord.Interaction, channel: discord.TextChannel | None = None):
+        if not await require_admin(interaction):
+            return
+        cfg = self.cfg(interaction.guild_id)
+        cfg["level_channel"] = channel.id if channel else None
+        self.save(interaction.guild_id, cfg)
+        if channel is None:
+            await self._say(interaction, "🎉 레벨업 알림을 원래대로 돌렸어요. 채팅으로 오르면 채팅한 채널에, 명령어로 오르면 답장으로 알려요(음성은 알리지 않아요).")
+            return
+        await self._say(interaction, f"🎉 이제 레벨이 오르면 {channel.mention}에 알려요. 채팅·음성·명령어(출석체크·일하기 등) 모두요.")
 
     # ---------------------------------------------------------------- 자동완성
     @job_edit.autocomplete("target")

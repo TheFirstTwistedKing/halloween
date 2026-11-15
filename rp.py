@@ -29,7 +29,7 @@ DEFAULT_FORMULA = {"mul": 1, "offset": 1, "div": 10}  # 누적 경험치 = ((나
 FORMULA_LIMITS = {"mul": (1, 1_000_000), "offset": (0, 1_000_000_000), "div": (1, 10_000)}
 MUTE_MODES = ("off", "block", "reduce")           # 음성 마이크/헤드셋 음소거: 제한 없음 · 차단 · 감소
 DEFAULT_CONFIG = {"pay_step": 5, "bet_max": 1000, "spin_cooldown": 10, "label": "LV.", "chat_xp": 30, "voice_xp": 0, "attend_xp": 1000,
-                  "chat_cooldown": 1, "mute_mode": "block", "mute_percent": 50, "shop_channel": None,
+                  "chat_cooldown": 1, "mute_mode": "block", "mute_percent": 50, "shop_channel": None, "level_channel": None,
                   "formula": DEFAULT_FORMULA, "roulette": DEFAULT_ROULETTE, "rewards": [], "jobs": [], "shop": []}
 LIMITS = {"pay_step": (0, 1000), "bet_max": (1, COM_MAX), "spin_cooldown": (0, 86400), "chat_xp": (0, 1_000_000), "voice_xp": (0, 1_000_000),
           "attend_xp": (0, 1_000_000_000), "chat_cooldown": (0, 3600), "mute_percent": (0, 100)}
@@ -66,8 +66,9 @@ def config(raw) -> dict:
         out["label"] = raw["label"].strip()
     if raw.get("mute_mode") in MUTE_MODES:
         out["mute_mode"] = raw["mute_mode"]
-    if _whole(raw.get("shop_channel"), 1, 10 ** 20):
-        out["shop_channel"] = raw["shop_channel"]
+    for key in ("shop_channel", "level_channel"):
+        if _whole(raw.get(key), 1, 10 ** 20):
+            out[key] = raw[key]
     formula = raw.get("formula") if isinstance(raw.get("formula"), dict) else {}
     out["formula"] = {k: formula[k] if _whole(formula.get(k), low, high) else DEFAULT_FORMULA[k] for k, (low, high) in FORMULA_LIMITS.items()}
     shop = raw.get("shop") if isinstance(raw.get("shop"), list) else []

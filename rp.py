@@ -18,6 +18,7 @@ from store import StoreError
 COM = "🪙"
 COM_NAME = "COM"
 COM_MAX = 9_999_999_999
+BANK_MAX = 100_000_000            # 개인 금고에 넣을 수 있는 COM
 EXCHANGE_RATE = 10                 # 10 RAM = 1 COM
 LV_MAX = 999
 JOBS_MAX = 25
@@ -116,8 +117,8 @@ def level_of(exp: int, cfg: dict) -> tuple[int, int, int]:
 def row(store, guild: int, user: int) -> dict:
     found = store.db.execute("SELECT * FROM rp WHERE guild=? AND user=?", (guild, user)).fetchone()
     if found is None:
-        return {"com": 0, "exp": 0, "credit": 0, "job": None, "last_work": 0.0, "last_spin": 0.0, "last_attend": ""}
-    return {k: found[k] for k in ("com", "exp", "credit", "job", "last_work", "last_spin", "last_attend")}
+        return {"com": 0, "exp": 0, "credit": 0, "job": None, "last_work": 0.0, "last_spin": 0.0, "last_attend": "", "bank": 0}
+    return {k: found[k] for k in ("com", "exp", "credit", "job", "last_work", "last_spin", "last_attend", "bank")}
 
 
 def _ensure(store, guild: int, user: int) -> None:
@@ -343,6 +344,46 @@ def refund(store, guild: int, user: int, price: int) -> None:
     with store.db:
         _ensure(store, guild, user)
         store.db.execute("UPDATE rp SET com=MIN(com+?, ?) WHERE guild=? AND user=?", (price, COM_MAX, guild, user))
+
+
+# ---------------------------------------------------------------- 개인 금고: COM을 보관한다(최대 BANK_MAX). 넣고 빼도 경험치·레벨은 그대로
+def deposit(store, guild: int, user: int, amount: int | None = None) -> tuple[int, int, int]:
+    """금고에 COM을 넣는다. amount가 None이면 넣을 수 있는 만큼 전부. (넣은 양, 지갑 COM, 금고 COM). 못 넣으면 RpError."""
+    with store.db:
+        me = row(store, guild, user)
+        room = BANK_MAX - me["bank"]
+        if amount is None:
+            amount = min(me["com"], room)
+            if amount <= 0:
+                raise RpError("넣을 COM이 없거나 금고가 가득 찼어요." + (f" (금고 {me['bank']:,}/{BANK_MAX:,})" if room <= 0 else ""))
+        if amount < 1:
+            raise RpError("1 이상 넣어 주세요.")
+        if me["com"] < amount:
+            raise RpError(f"{i_ga(COM_NAME)} 모자라요. (가진 것 {me['com']:,})")
+        if amount > room:
+            raise RpError(f"금고에는 {BANK_MAX:,} {COM_NAME}까지 넣을 수 있어요. (지금 {me['bank']:,}, 더 넣을 수 있는 것 {room:,})")
+        _ensure(store, guild, user)
+        store.db.execute("UPDATE rp SET com=com-?, bank=bank+? WHERE guild=? AND user=?", (amount, amount, guild, user))
+    return amount, me["com"] - amount, me["bank"] + amount
+
+
+def withdraw(store, guild: int, user: int, amount: int | None = None) -> tuple[int, int, int]:
+    """금고에서 COM을 뺀다. amount가 None이면 전부(지갑 최대 보유량 안에서). (뺀 양, 지갑 COM, 금고 COM). 못 빼면 RpError."""
+    with store.db:
+        me = row(store, guild, user)
+        room = COM_MAX - me["com"]
+        if amount is None:
+            amount = min(me["bank"], room)
+            if amount <= 0:
+                raise RpError("금고가 비어 있어요." if me["bank"] <= 0 else f"{COM_NAME}이(가) 최대여서 더 뺄 수 없어요.")
+        if amount < 1:
+            raise RpError("1 이상 빼 주세요.")
+        if me["bank"] < amount:
+            raise RpError(f"금고에 그만큼 없어요. (금고 {me['bank']:,})")
+        if amount > room:
+            raise RpError(f"{COM_NAME}은(는) 최대 {COM_MAX:,}개까지 가질 수 있어요.")
+        store.db.execute("UPDATE rp SET com=com+?, bank=bank-? WHERE guild=? AND user=?", (amount, amount, guild, user))
+    return amount, me["com"] + amount, me["bank"] - amount
 
 
 def rewards_between(cfg: dict, before: int, after: int) -> list[dict]:

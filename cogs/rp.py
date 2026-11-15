@@ -35,6 +35,7 @@ def bar(value: int, maximum: int, width: int = 10) -> str:
 class Roleplay(commands.Cog):
     """🎭 롤플레잉."""
 
+    bank = app_commands.Group(name="금고", description=f"내 COM을 보관하는 개인 금고(최대 {rp.BANK_MAX:,} COM)", guild_only=True)
     admin = app_commands.Group(name="롤플관리", description="롤플레잉의 직업·레벨·룰렛·레벨 보상을 정해요 (관리자)", **PERMS)
 
     def __init__(self, bot):
@@ -157,6 +158,7 @@ class Roleplay(commands.Cog):
         embed.add_field(name="✨ 경험치", inline=False,
                         value=f"{bar(have, need)} {have:,}/{need:,} (누적 {me['exp']:,})" if need else f"최고 레벨이에요! (누적 {me['exp']:,})")
         embed.add_field(name=f"{rp.COM} {COM_NAME}", value=f"{me['com']:,}", inline=True)
+        embed.add_field(name="🏦 금고", value=f"{me['bank']:,}", inline=True)
         if job:
             embed.add_field(name="💼 급여", value=f"{money(rp.pay_for(job, level, cfg))} · {job['cooldown']}분마다", inline=True)
             _job, nxt, need_lv = rp.can_promote(store, gid, who.id, cfg)
@@ -304,6 +306,35 @@ class Roleplay(commands.Cog):
         LOG.info("COM 주기: %s → %s, %d (서버 %s)", interaction.user.id, member.id, amount, gid)
         await self._say(interaction, f"🤝 {member.mention}님에게 {money(amount)}을(를) 줬어요. (남은 {COM_NAME} {left:,})\n"
                                      f"받은 COM은 경험치(레벨)로 치지 않아요.")
+
+    # ---------------------------------------------------------------- 개인 금고
+    @bank.command(name="보기", description="내 금고와 지갑의 COM을 봐요")
+    async def bank_show(self, interaction: discord.Interaction):
+        me = rp.row(self.bot.store, interaction.guild_id, interaction.user.id)
+        await interaction.response.send_message(embed=theme.make_embed(
+            "🏦 내 금고", f"🏦 금고 **{me['bank']:,}** / {rp.BANK_MAX:,} {COM_NAME}\n{bar(me['bank'], rp.BANK_MAX)}\n"
+                         f"{rp.COM} 지갑 **{me['com']:,}** {COM_NAME}\n`/금고 넣기`·`/금고 빼기`로 옮겨요(수량을 비우면 전부). 경험치·레벨은 그대로예요.",
+            color=theme.GOLD), ephemeral=False)
+
+    @bank.command(name="넣기", description="지갑의 COM을 금고에 넣어요. 수량을 비우면 넣을 수 있는 만큼 전부")
+    @app_commands.rename(amount="수량")
+    async def bank_deposit(self, interaction: discord.Interaction, amount: app_commands.Range[int, 1, rp.BANK_MAX] | None = None):
+        try:
+            moved, wallet, safe = rp.deposit(self.bot.store, interaction.guild_id, interaction.user.id, amount)
+        except RpError as exc:
+            await self._say(interaction, str(exc), False)
+            return
+        await self._say(interaction, f"🏦 금고에 {money(moved)}을(를) 넣었어요. (금고 {safe:,}/{rp.BANK_MAX:,} · 지갑 {wallet:,})")
+
+    @bank.command(name="빼기", description="금고의 COM을 지갑으로 꺼내요. 수량을 비우면 전부")
+    @app_commands.rename(amount="수량")
+    async def bank_withdraw(self, interaction: discord.Interaction, amount: app_commands.Range[int, 1, rp.BANK_MAX] | None = None):
+        try:
+            moved, wallet, safe = rp.withdraw(self.bot.store, interaction.guild_id, interaction.user.id, amount)
+        except RpError as exc:
+            await self._say(interaction, str(exc), False)
+            return
+        await self._say(interaction, f"🏦 금고에서 {money(moved)}을(를) 꺼냈어요. (금고 {safe:,}/{rp.BANK_MAX:,} · 지갑 {wallet:,})")
 
     @app_commands.command(name="직업목록", description="이 서버의 직업들을 봐요")
     @app_commands.guild_only()

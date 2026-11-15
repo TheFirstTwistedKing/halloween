@@ -464,7 +464,8 @@ class Store:
             CREATE TABLE IF NOT EXISTS rp(
                 guild INTEGER, user INTEGER, com INTEGER NOT NULL DEFAULT 0 CHECK(com >= 0), exp INTEGER NOT NULL DEFAULT 0 CHECK(exp >= 0),
                 credit INTEGER NOT NULL DEFAULT 0 CHECK(credit >= 0), job INTEGER, last_work REAL NOT NULL DEFAULT 0,
-                last_spin REAL NOT NULL DEFAULT 0, last_attend TEXT NOT NULL DEFAULT '', PRIMARY KEY(guild, user));
+                last_spin REAL NOT NULL DEFAULT 0, last_attend TEXT NOT NULL DEFAULT '', bank INTEGER NOT NULL DEFAULT 0 CHECK(bank >= 0),
+                PRIMARY KEY(guild, user));
             CREATE TABLE IF NOT EXISTS vault_loadout(
                 guild INTEGER, user INTEGER, data TEXT NOT NULL, PRIMARY KEY(guild, user));
         """)
@@ -476,6 +477,10 @@ class Store:
         if "pile" not in {row["name"] for row in self.db.execute("PRAGMA table_info(packages)")}:
             with self.db:
                 self.db.execute("ALTER TABLE packages ADD COLUMN pile INTEGER NOT NULL DEFAULT 0")
+        # 금고(bank)가 생기기 전에 만든 롤플레잉(rp) 표에는 칸이 없다. 기존 기록은 그대로 두고 금고는 0으로 더한다.
+        if "bank" not in {row["name"] for row in self.db.execute("PRAGMA table_info(rp)")}:
+            with self.db:
+                self.db.execute("ALTER TABLE rp ADD COLUMN bank INTEGER NOT NULL DEFAULT 0 CHECK(bank >= 0)")
 
     def close(self):
         self.db.close()

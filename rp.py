@@ -30,11 +30,12 @@ FORMULA_LIMITS = {"mul": (1, 1_000_000), "offset": (0, 1_000_000_000), "div": (1
 MUTE_MODES = ("off", "block", "reduce")           # 음성 마이크/헤드셋 음소거: 제한 없음 · 차단 · 감소
 DEFAULT_CONFIG = {"pay_step": 5, "bet_max": 1000, "spin_cooldown": 10, "label": "LV.", "chat_xp": 30, "voice_xp": 0, "attend_xp": 1000,
                   "chat_cooldown": 1, "mute_mode": "block", "mute_percent": 50, "shop_channel": None, "level_channel": None,
-                  "formula": DEFAULT_FORMULA, "roulette": DEFAULT_ROULETTE, "rewards": [], "jobs": [], "shop": []}
+                  "formula": DEFAULT_FORMULA, "roulette": DEFAULT_ROULETTE, "rewards": [], "jobs": [], "shop": [], "no_xp": []}
 LIMITS = {"pay_step": (0, 1000), "bet_max": (1, COM_MAX), "spin_cooldown": (0, 86400), "chat_xp": (0, 1_000_000), "voice_xp": (0, 1_000_000),
           "attend_xp": (0, 1_000_000_000), "chat_cooldown": (0, 3600), "mute_percent": (0, 100)}
 SHOP_MAX = 25
-LIST_KEYS = ("formula", "roulette", "rewards", "jobs", "shop")
+NO_XP_MAX = 50                                    # 경험치가 오르지 않는 채널·카테고리 수 한도
+LIST_KEYS = ("formula", "roulette", "rewards", "jobs", "shop", "no_xp")
 
 
 class RpError(StoreError):
@@ -51,7 +52,7 @@ def _whole(value, low, high) -> bool:
 
 def check_config(raw) -> None:
     """저장 전 검사. 잘못되면 ValueError."""
-    if not isinstance(raw, dict) or len(raw) > 20:
+    if not isinstance(raw, dict) or len(raw) > 30:
         raise ValueError("롤플레잉 설정이 올바르지 않아요.")
 
 
@@ -83,7 +84,20 @@ def config(raw) -> dict:
                             key=lambda r: r["level"])[:REWARDS_MAX]
     jobs = raw.get("jobs") if isinstance(raw.get("jobs"), list) else []
     out["jobs"] = [dict(j) for j in jobs if isinstance(j, dict) and _whole(j.get("id"), 1, 10 ** 9) and isinstance(j.get("name"), str)][:JOBS_MAX]
+    no_xp = raw.get("no_xp") if isinstance(raw.get("no_xp"), list) else []
+    out["no_xp"] = list(dict.fromkeys(c for c in no_xp if _whole(c, 1, 10 ** 20)))[:NO_XP_MAX]
     return out
+
+
+def no_xp(cfg: dict, channel) -> bool:
+    """이 채널에서는 활동 경험치(채팅·음성)가 오르지 않는가. 채널 자체, 스레드의 부모 채널, 그 채널이 든 카테고리 중 하나라도 제외면 참."""
+    ids = set(cfg["no_xp"])
+    if not ids or channel is None:
+        return False
+    parent = getattr(channel, "parent", None)
+    found = {getattr(channel, "id", None), getattr(channel, "parent_id", None), getattr(channel, "category_id", None),
+             getattr(parent, "category_id", None) if parent is not None else None}
+    return bool(ids & (found - {None}))
 
 
 # ---------------------------------------------------------------- 레벨

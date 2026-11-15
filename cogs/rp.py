@@ -314,15 +314,19 @@ class Roleplay(commands.Cog):
         await self._move(interaction, member, amount, "🤝", "줬어요",
                          lambda: rp.transfer(self.bot.store, interaction.guild_id, interaction.user.id, member.id, amount, cfg))
 
-    @app_commands.command(name="com선물", description="다른 사람에게 내 지갑의 COM을 선물해요. 누구나 쓸 수 있어요")
+    @app_commands.command(name="com선물", description="다른 사람에게 내 지갑의 COM을 선물해요. 받는 쪽에서 수수료를 떼요. 누구나 쓸 수 있어요")
     @app_commands.guild_only()
     @app_commands.rename(member="사람", amount="수량")
-    @app_commands.describe(member="선물 받을 사람", amount="선물할 COM(경험치도 같이 옮겨져요)")
+    @app_commands.describe(member="선물 받을 사람", amount="선물할 COM(수수료를 뗀 만큼 받아요. 경험치도 같이 옮겨져요)")
     async def gift(self, interaction: discord.Interaction, member: discord.Member, amount: app_commands.Range[int, 1, rp.COM_MAX]):
+        percent = self.cfg(interaction.guild_id)["gift_fee"]
+        fee = rp.gift_fee(amount, percent)
         await self._move(interaction, member, amount, "🎁", "선물했어요",
-                         lambda: rp.gift(self.bot.store, interaction.guild_id, interaction.user.id, member.id, amount))
+                         lambda: rp.gift(self.bot.store, interaction.guild_id, interaction.user.id, member.id, amount, fee),
+                         fee=fee, percent=percent)
 
-    async def _move(self, interaction: discord.Interaction, member, amount: int, icon: str, verb: str, move) -> None:
+    async def _move(self, interaction: discord.Interaction, member, amount: int, icon: str, verb: str, move, *,
+                    fee: int = 0, percent: int = 0) -> None:
         """COM 주기·선물 공통: COM과 경험치를 옮기고, 받은 사람이 레벨업하면 보상·알림, 준 사람이 레벨다운하면 알려 준다."""
         store, gid = self.bot.store, interaction.guild_id
         if member.bot:
@@ -337,7 +341,10 @@ class Roleplay(commands.Cog):
             await self._say(interaction, str(exc), False)
             return
         LOG.info("COM %s: %s → %s, %d (서버 %s)", verb, interaction.user.id, member.id, amount, gid)
-        text = f"{icon} {member.mention}님에게 {money(amount)}을(를) {verb}. (남은 {COM_NAME} {left:,})\n경험치도 같이 옮겨졌어요."
+        text = f"{icon} {member.mention}님에게 {money(amount)}을(를) {verb}. (남은 {COM_NAME} {left:,})"
+        if fee:
+            text += f"\n💸 수수료 {money(fee)}({percent}%)을(를) 떼고 {member.mention}님은 {money(amount - fee)}을(를) 받았어요."
+        text += "\n경험치도 같이 옮겨졌어요."
         extra = await self.level_up(member, cfg, theirs, level(member.id), origin=interaction.channel)
         if extra:
             text += f"\n{member.mention} {extra}"
@@ -585,6 +592,19 @@ class Roleplay(commands.Cog):
         mute = {"off": "음소거해도 그대로", "block": "음소거하면 받지 않음", "reduce": f"음소거하면 {cfg['mute_percent']}% 줄어듦"}[cfg["mute_mode"]]
         return (f"✨ 경험치 이름 **{cfg['label']}** · 채팅 {cfg['chat_xp']:,}(쿨타임 {cfg['chat_cooldown']}초) · 음성 5분마다 {cfg['voice_xp']:,}({mute}) · "
                 f"출석체크 {cfg['attend_xp']:,}\n받은 경험치는 그대로 {COM_NAME}(으)로 들어와요(경험치 = {COM_NAME}).")
+
+    @admin.command(name="선물수수료", description="/com선물 수수료(%)를 정해요. 받는 쪽에서 떼고, 0이면 수수료 없음 (관리자)")
+    @app_commands.rename(percent="퍼센트")
+    @app_commands.describe(percent="수수료 %(0~99, 기본 50). 소수점은 올림이라 수수료가 있으면 최소 1 COM")
+    async def gift_fee(self, interaction: discord.Interaction, percent: app_commands.Range[int, 0, 99]):
+        if not await require_admin(interaction):
+            return
+        cfg = self.cfg(interaction.guild_id)
+        cfg["gift_fee"] = percent
+        self.save(interaction.guild_id, cfg)
+        example = 1000 - rp.gift_fee(1000, percent)
+        await self._say(interaction, f"💸 /com선물 수수료를 **{percent}%** 로 정했어요. 예: 1,000 {COM_NAME}을(를) 선물하면 {example:,} {COM_NAME}을(를) 받아요."
+                        + ("" if percent else " (수수료 없음)"))
 
     @admin.command(name="음성제한", description="마이크·헤드셋을 스스로 끈 사람의 음성 경험치를 막거나 줄여요(서버 뮤트는 상관없어요) (관리자)")
     @app_commands.rename(mode="모드", percent="감소비율")

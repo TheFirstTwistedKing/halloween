@@ -29,10 +29,11 @@ DEFAULT_FORMULA = {"mul": 1, "offset": 1, "div": 10}  # 누적 경험치 = ((나
 FORMULA_LIMITS = {"mul": (1, 1_000_000), "offset": (0, 1_000_000_000), "div": (1, 10_000)}
 MUTE_MODES = ("off", "block", "reduce")           # 음성 마이크/헤드셋 음소거: 제한 없음 · 차단 · 감소
 DEFAULT_CONFIG = {"pay_step": 5, "bet_max": 1000, "spin_cooldown": 10, "label": "LV.", "chat_xp": 30, "voice_xp": 0, "attend_xp": 1000,
-                  "chat_cooldown": 1, "mute_mode": "block", "mute_percent": 50, "shop_channel": None, "level_channel": None,
+                  "chat_cooldown": 1, "mute_mode": "block", "mute_percent": 50, "gift_fee": 50, "shop_channel": None, "level_channel": None,
                   "formula": DEFAULT_FORMULA, "roulette": DEFAULT_ROULETTE, "rewards": [], "jobs": [], "shop": [], "no_xp": []}
 LIMITS = {"pay_step": (0, 1000), "bet_max": (1, COM_MAX), "spin_cooldown": (0, 86400), "chat_xp": (0, 1_000_000), "voice_xp": (0, 1_000_000),
-          "attend_xp": (0, 1_000_000_000), "chat_cooldown": (0, 3600), "mute_percent": (0, 100)}
+          "attend_xp": (0, 1_000_000_000), "chat_cooldown": (0, 3600), "mute_percent": (0, 100),
+          "gift_fee": (0, 99)}
 SHOP_MAX = 25
 NO_XP_MAX = 50                                    # 경험치가 오르지 않는 채널·카테고리 수 한도
 LIST_KEYS = ("formula", "roulette", "rewards", "jobs", "shop", "no_xp")
@@ -245,25 +246,35 @@ def transfer(store, guild: int, giver: int, receiver: int, amount: int, cfg: dic
     return gift(store, guild, giver, receiver, amount)
 
 
-def gift(store, guild: int, giver: int, receiver: int, amount: int) -> tuple[int, int]:
-    """COM 선물(누구나)·COM 주기: 지갑의 COM과 함께 경험치도 옮긴다. 받은 사람은 준 만큼 경험치가 오르고,
-    준 사람은 그만큼 내려간다(0 아래로는 안 내려감). 그래서 주고받기만 해서는 레벨이 오르지 않는다.
-    (준 사람의 남은 COM, 받은 사람의 COM)."""
+def gift_fee(amount: int, percent: int) -> int:
+    """COM 선물 수수료: amount의 percent%를 올림(수수료가 있으면 최소 1). 0%면 0."""
+    if percent <= 0:
+        return 0
+    return max(1, -(-amount * percent // 100))
+
+
+def gift(store, guild: int, giver: int, receiver: int, amount: int, fee: int = 0) -> tuple[int, int]:
+    """COM 선물(누구나)·COM 주기: 지갑의 COM과 함께 경험치도 옮긴다. 준 사람은 amount만큼 COM·경험치가 내려가고
+    (경험치는 0 아래로는 안 내려감), 받은 사람은 수수료(fee)를 뗀 만큼 COM·경험치가 오른다. 수수료는 사라진다.
+    그래서 주고받기만 해서는 레벨이 오르지 않는다. (준 사람의 남은 COM, 받은 사람의 COM)."""
     if giver == receiver:
         raise RpError("나에게는 줄 수 없어요.")
     if amount < 1:
         raise RpError("1 이상 줘 주세요.")
+    net = amount - fee
+    if net < 1:
+        raise RpError(f"수수료 {fee:,} {COM_NAME}을(를) 떼면 받을 {COM_NAME}이(가) 없어요. 더 많이 선물해 주세요.")
     with store.db:
         me = row(store, guild, giver)
         if me["com"] < amount:
             raise RpError(f"{i_ga(COM_NAME)} 모자라요. (가진 것 {me['com']:,})")
         _ensure(store, guild, receiver)
         other = row(store, guild, receiver)
-        if other["com"] + amount > COM_MAX:
+        if other["com"] + net > COM_MAX:
             raise RpError(f"받는 사람의 {COM_NAME}이(가) 최대({COM_MAX:,})를 넘어서 줄 수 없어요.")
         store.db.execute("UPDATE rp SET com=com-?, exp=MAX(0, exp-?) WHERE guild=? AND user=?", (amount, amount, guild, giver))
-        store.db.execute("UPDATE rp SET com=com+?, exp=exp+? WHERE guild=? AND user=?", (amount, amount, guild, receiver))
-    return me["com"] - amount, other["com"] + amount
+        store.db.execute("UPDATE rp SET com=com+?, exp=exp+? WHERE guild=? AND user=?", (net, net, guild, receiver))
+    return me["com"] - amount, other["com"] + net
 
 
 # ---------------------------------------------------------------- 환전·룰렛

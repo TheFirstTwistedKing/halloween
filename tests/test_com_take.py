@@ -108,6 +108,7 @@ class GiftTests(unittest.IsolatedAsyncioTestCase):
         self.a, self.b = self.w.new_member(A), self.w.new_member(8)
         rp.give(self.store, G, A, 1000)
         rp.deposit(self.store, G, A, 500)                                               # 지갑 500 · 금고 500
+        self.store.update_settings(G, rp={"gift_fee": 0})                               # 이 묶음은 수수료 없이 본다(수수료는 FeeTests)
 
     async def asyncTearDown(self):
         await self.w.close()
@@ -159,6 +160,71 @@ class GiftTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("최대", await self.call(self.b, 6))
         self.assertEqual(self.com_exp(A), (500, 500, 1000))
         self.assertEqual(rp.row(self.store, G, 9)["com"], 0)
+
+
+
+class FeeTests(unittest.IsolatedAsyncioTestCase):
+    """/com선물 수수료: 받는 쪽에서 뗀다(기본 50%, 올림, 최소 1). 수수료는 사라지고, 준 사람은 낸 만큼·받은 사람은 받은 만큼 경험치가 바뀐다."""
+
+    async def asyncSetUp(self):
+        self.w = World()
+        self.store, self.bot = self.w.store, self.w.bot
+        self.cog = Roleplay(self.bot)
+        self.a, self.b = self.w.new_member(A), self.w.new_member(8)
+        rp.give(self.store, G, A, 1000)
+
+    async def asyncTearDown(self):
+        await self.w.close()
+
+    async def gift(self, amount):
+        i = self.w.interaction(uid=A, admin=False)
+        await Roleplay.gift.callback(self.cog, i, self.b, amount)
+        return sent_embed(i)[0].description or ""
+
+    async def set_fee(self, percent, admin=True):
+        i = self.w.interaction(uid=A, admin=admin)
+        await Roleplay.gift_fee.callback(self.cog, i, percent)
+        return sent_embed(i)[0].description or ""
+
+    def state(self, uid):
+        r = rp.row(self.store, G, uid)
+        return r["com"], r["exp"]
+
+    def test_fee_math(self):
+        self.assertEqual(rp.config({})["gift_fee"], 50)                                  # 기본 50%
+        self.assertEqual(rp.config({"gift_fee": 100})["gift_fee"], 50)                  # 100%는 안 된다
+        self.assertEqual([rp.gift_fee(1000, p) for p in (0, 1, 50, 99)], [0, 10, 500, 990])
+        self.assertEqual((rp.gift_fee(3, 50), rp.gift_fee(1, 1), rp.gift_fee(999, 99)), (2, 1, 990))   # 올림, 최소 1
+
+    async def test_default_half_is_taken_from_the_receiver(self):
+        text = await self.gift(400)
+        self.assertIn("남은 COM 600", text)
+        self.assertIn("수수료 🪙 200 COM(50%)", text)
+        self.assertIn("🪙 200 COM을(를) 받았어요", text)
+        self.assertEqual((self.state(A), self.state(8)), ((600, 600), (200, 200)))     # 준 사람은 400 다, 받은 사람은 200
+        await self.gift(3)                                                               # 1.5 → 2 올림, 받는 건 1
+        self.assertEqual((self.state(A), self.state(8)), ((597, 597), (201, 201)))
+
+    async def test_too_small_after_fee_is_refused(self):
+        self.assertIn("받을 COM이(가) 없어요", await self.gift(1))                         # 수수료 1 → 받을 것 0
+        self.assertEqual((self.state(A), self.state(8)), ((1000, 1000), (0, 0)))
+
+    async def test_receiver_limit_counts_what_arrives(self):
+        with self.store.db:
+            self.store.db.execute("INSERT INTO rp(guild, user, com) VALUES(?,?,?)", (G, 8, rp.COM_MAX - 5))
+        self.assertIn("선물했어요", await self.gift(10))                                 # 받는 건 5라서 최대에 딱 맞는다
+        self.assertEqual(self.state(8)[0], rp.COM_MAX)
+
+    async def test_admin_sets_the_fee(self):
+        self.assertIn("관리자만", await self.set_fee(10, admin=False))
+        self.assertEqual(rp.config(self.store.settings(G)["rp"])["gift_fee"], 50)
+        self.assertIn("**10%**", await self.set_fee(10))
+        self.assertIn("수수료 🪙 10 COM(10%)", await self.gift(100))
+        self.assertEqual(self.state(8), (90, 90))
+        self.assertIn("수수료 없음", await self.set_fee(0))
+        text = await self.gift(100)
+        self.assertNotIn("수수료", text)
+        self.assertEqual(self.state(8), (190, 190))
 
 
 if __name__ == "__main__":

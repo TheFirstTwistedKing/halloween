@@ -56,7 +56,7 @@ class Roleplay(commands.Cog):
         if hasattr(self.bot, "allowed_guild") and not self.bot.allowed_guild(message.guild.id):
             return
         cfg = self.cfg(message.guild.id)
-        if cfg["chat_xp"] <= 0:
+        if cfg["chat_xp"] <= 0 or rp.no_xp(cfg, message.channel):         # 경험치 제외 채널(방)에서는 오르지 않는다
             return
         key, now = (message.guild.id, message.author.id), time.time()
         if now - self.last_chat.get(key, 0.0) < cfg["chat_cooldown"]:
@@ -88,7 +88,7 @@ class Roleplay(commands.Cog):
                 continue
             afk = getattr(guild, "afk_channel", None)
             for channel in list(guild.voice_channels) + list(getattr(guild, "stage_channels", [])):
-                if afk is not None and channel.id == afk.id:
+                if (afk is not None and channel.id == afk.id) or rp.no_xp(cfg, channel):
                     continue
                 for member in channel.members:
                     voice = member.voice
@@ -785,6 +785,42 @@ class Roleplay(commands.Cog):
         cfg["shop_channel"] = channel.id
         self.save(interaction.guild_id, cfg)
         await self._say(interaction, f"📨 텍스트 물품을 사면 {channel.mention}에 알림이 올라가요.")
+
+    @admin.command(name="경험치제외", description="채팅·음성 경험치가 오르지 않는 채널(방)을 넣고 빼요. 카테고리를 고르면 그 안 전부 (관리자)")
+    @app_commands.rename(action="동작", channel="채널")
+    @app_commands.describe(action="추가·삭제·목록", channel="텍스트·음성 채널이나 카테고리(추가·삭제일 때)")
+    @app_commands.choices(action=[Choice(name="추가", value="add"), Choice(name="삭제", value="remove"), Choice(name="목록", value="list")])
+    async def no_xp_rooms(self, interaction: discord.Interaction, action: Choice[str], channel: discord.abc.GuildChannel | None = None):
+        if not await require_admin(interaction):
+            return
+        cfg = self.cfg(interaction.guild_id)
+        guild = interaction.guild
+        before = list(cfg["no_xp"])
+        cfg["no_xp"] = [c for c in cfg["no_xp"] if guild is None or guild.get_channel(c) is not None]   # 지워진 채널은 정리한다
+        problem = None
+        if action.value != "list" and channel is None:
+            problem = "넣거나 뺄 채널을 골라 주세요."
+        elif action.value == "add":
+            if channel.id in cfg["no_xp"]:
+                problem = f"{channel.mention}은(는) 이미 경험치 제외예요."
+            elif len(cfg["no_xp"]) >= rp.NO_XP_MAX:
+                problem = f"경험치 제외 채널은 {rp.NO_XP_MAX}개까지예요."
+            else:
+                cfg["no_xp"].append(channel.id)
+        elif action.value == "remove":
+            if channel.id not in cfg["no_xp"]:
+                problem = f"{channel.mention}은(는) 경험치 제외 목록에 없어요."
+            else:
+                cfg["no_xp"].remove(channel.id)
+        if cfg["no_xp"] != before:
+            self.save(interaction.guild_id, cfg)
+        if problem:
+            await self._say(interaction, problem, False)
+            return
+        shown = ", ".join(f"<#{c}>" for c in cfg["no_xp"]) or "없음"
+        head = {"add": f"🚫 {channel.mention if channel else ''}에서는 이제 경험치가 오르지 않아요.",
+                "remove": f"✅ {channel.mention if channel else ''}에서 다시 경험치가 올라요.", "list": "🚫 경험치 제외 채널"}[action.value]
+        await self._say(interaction, f"{head}\n목록: {shown}\n(채팅·음성 경험치만 막아요. 출석체크·일하기 같은 명령어는 그대로예요)")
 
     @admin.command(name="레벨업채널", description="레벨이 오르면 알림이 올라갈 채널을 정해요. 비우면 채팅한 채널에 알려요 (관리자)")
     @app_commands.rename(channel="채널")

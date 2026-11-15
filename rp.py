@@ -141,6 +141,26 @@ def give(store, guild: int, user: int, amount: int, *, exp: bool = True) -> tupl
         return _gain(store, guild, user, amount, amount if exp else 0)
 
 
+def take(store, guild: int, user: int, amount: int | None = None, *, where: str = "wallet", exp: bool = False) -> tuple[int, int, int]:
+    """관리자 회수. where는 wallet(지갑)·bank(금고), amount가 None이면 그곳의 전부. exp면 EXP도 같은 양만큼 뺀다(0 아래로는 안 내려감).
+    (가져간 양, 그곳에 남은 COM, 지금 EXP). 없거나 모자라면 RpError."""
+    column, place = ("bank", "금고") if where == "bank" else ("com", "지갑")
+    with store.db:
+        me = row(store, guild, user)
+        have = me[column]
+        if amount is None:
+            amount = have
+            if amount <= 0:
+                raise RpError(f"{place}에 가져갈 {COM_NAME}이(가) 없어요.")
+        if amount < 1:
+            raise RpError("1 이상 적어 주세요.")
+        if have < amount:
+            raise RpError(f"{place}에 그만큼 없어요. ({place} {have:,} {COM_NAME}) 수량을 비우면 전부 가져가요.")
+        new_exp = max(0, me["exp"] - amount) if exp else me["exp"]
+        store.db.execute(f"UPDATE rp SET {column}={column}-?, exp=? WHERE guild=? AND user=?", (amount, new_exp, guild, user))
+    return amount, have - amount, new_exp
+
+
 # ---------------------------------------------------------------- 직업
 def jobs(cfg: dict) -> list[dict]:
     return cfg["jobs"]
@@ -208,6 +228,12 @@ def transfer(store, guild: int, giver: int, receiver: int, amount: int, cfg: dic
     job = job_by_id(cfg, row(store, guild, giver)["job"])
     if job is None or not job.get("give"):
         raise RpError("COM 주기는 'COM 주기' 능력이 있는 직업만 쓸 수 있어요(`/직업목록`에서 확인해요).")
+    return gift(store, guild, giver, receiver, amount)
+
+
+def gift(store, guild: int, giver: int, receiver: int, amount: int) -> tuple[int, int]:
+    """COM 선물(누구나): 지갑의 COM만 옮기고 경험치는 늘리지 않는다(주고받기만 해서 레벨을 올리지 못하게).
+    (준 사람의 남은 COM, 받은 사람의 COM)."""
     if giver == receiver:
         raise RpError("나에게는 줄 수 없어요.")
     if amount < 1:

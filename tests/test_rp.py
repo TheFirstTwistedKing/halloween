@@ -196,7 +196,7 @@ class ActivityTests(Base):
 
 
 class TransferTests(Base):
-    def test_only_jobs_with_the_ability_can_give_and_no_exp_moves(self):
+    def test_only_jobs_with_the_ability_can_give_and_exp_moves_too(self):
         self.cfg["jobs"].append(job(id=3, name="은행원", give=True))
         rp.give(self.store, G, A, 100)
         with self.assertRaisesRegex(RpError, "능력이 있는 직업"):
@@ -206,7 +206,7 @@ class TransferTests(Base):
             rp.transfer(self.store, G, A, B, 10, self.cfg)                               # 능력 없는 직업
         rp.assign(self.store, G, A, 3)
         self.assertEqual(rp.transfer(self.store, G, A, B, 30, self.cfg), (70, 30))
-        self.assertEqual((rp.row(self.store, G, A)["exp"], rp.row(self.store, G, B)["exp"]), (100, 0))     # 경험치는 옮기지 않는다
+        self.assertEqual((rp.row(self.store, G, A)["exp"], rp.row(self.store, G, B)["exp"]), (70, 30))     # 경험치도 같이 옮긴다
         with self.assertRaisesRegex(RpError, "모자라요"):
             rp.transfer(self.store, G, A, B, 71, self.cfg)
         with self.assertRaisesRegex(RpError, "나에게는"):
@@ -215,7 +215,7 @@ class TransferTests(Base):
             self.store.db.execute("UPDATE rp SET com=? WHERE guild=? AND user=?", (rp.COM_MAX, G, B))
         with self.assertRaisesRegex(RpError, "최대"):
             rp.transfer(self.store, G, A, B, 1, self.cfg)
-        self.assertEqual(rp.row(self.store, G, A)["com"], 70)                            # 거절되면 그대로
+        self.assertEqual((rp.row(self.store, G, A)["com"], rp.row(self.store, G, A)["exp"]), (70, 70))     # 거절되면 그대로
 
 
 class ShopTests(Base):
@@ -306,7 +306,8 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("능력이 있는 직업", await self.run_cmd(Roleplay.give, self.w.members[B], 10, admin=False))
         self.assertIn("COM 주기 능력", await self.run_cmd(Roleplay.job_edit, "정비공", give=True))
         self.assertIn("줬어요", await self.run_cmd(Roleplay.give, self.w.members[B], 10, admin=False))
-        self.assertEqual(rp.row(self.store, G, B)["com"], 10)
+        self.assertEqual((rp.row(self.store, G, B)["com"], rp.row(self.store, G, B)["exp"]), (10, 10))   # 받은 만큼 경험치도 오른다
+        self.assertEqual(rp.row(self.store, G, A)["exp"], 90)
         self.assertIn("직업 능력", await self.run_cmd(Roleplay.profile, admin=False))
         self.assertIn("🤝 COM 주기", await self.run_cmd(Roleplay.job_list, admin=False))
         robot = self.w.new_member(77)

@@ -78,6 +78,7 @@ DEFAULT_SETTINGS = {
     "package_table": [],         # 패키지 결과표 [{id, kind(none|candy|item), item, amount, weight, emoji, title}]
     "guild_cost": 1000,          # 길드를 만드는 데 드는 재화(/길드 만들기)
     "raid_items": [{"id": 1, "name": "응급 배터리", "emoji": "🔋", "heal": 300, "amount": 2}],   # 레이드 회복 아이템(/레이드아이템): 시작할 때 참가자 모두에게
+    "security": {},              # 대테러(/대테러): 화이트·블랙리스트, 알림 받을 관리자 역할, 감지 기준, 잠금 상태. 빈 칸은 기본값(security.clean)
     "war_hours": 24,             # 길드전 기간(시간). 선전포고는 이 시간 안에 받지 않으면 사라진다
     "guild_size": 20,            # 길드 인원 한도(길드장 포함)
     "workshop": [],              # 기지의 요리·제작 레시피(/기지레시피) [{id, kind: cook|craft, result: 던전 key, amount, ingredients: [[물품 id, 개수], ...], cost}]
@@ -145,6 +146,8 @@ def validate_settings(cfg: dict) -> None:
     number("guild_size", 2, 100, True)
     number("war_hours", 1, 168, True)
     check_raid_items(cfg["raid_items"])
+    if not isinstance(cfg["security"], dict) or len(cfg["security"]) > 10:
+        raise ValueError("대테러 설정이 올바르지 않아요.")
     if not isinstance(cfg["dungeon_content"], dict):
         raise ValueError("던전 콘텐츠 설정이 올바르지 않아요.")
     mods = cfg["weapon_mods"]

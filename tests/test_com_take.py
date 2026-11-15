@@ -1,5 +1,5 @@
-"""관리자 COM 회수(/롤플관리 com회수): 지갑·금고, 수량 비우면 전부, EXP는 고를 때만 뺀다.
-누구나 쓰는 COM 선물(/com선물): 직업 없이 지갑 COM만 옮기고 경험치는 늘지 않는다."""
+"""관리자 COM 회수(/롤플관리 com회수): 지갑·금고, 수량 비우면 전부, 가져간 만큼 경험치(레벨)도 내려간다.
+누구나 쓰는 COM 선물(/com선물): 직업 없이 지갑 COM을 주고, 경험치도 같이 옮긴다(받은 사람 +, 준 사람 −)."""
 import unittest
 
 import discord
@@ -27,9 +27,10 @@ class TakeTests(unittest.TestCase):
         r = rp.row(self.store, G, A)
         return r["com"], r["bank"], r["exp"]
 
-    def test_wallet_take_keeps_exp_by_default(self):
-        self.assertEqual(rp.take(self.store, G, A, 100), (100, 500, 1000))
-        self.assertEqual(self.me(), (500, 400, 1000))
+    def test_wallet_take_lowers_exp_by_default(self):
+        self.assertEqual(rp.take(self.store, G, A, 100), (100, 500, 900))
+        self.assertEqual(self.me(), (500, 400, 900))
+        self.assertEqual(rp.take(self.store, G, A, 100, exp=False), (100, 400, 900))   # 함수로는 경험치를 남길 수도 있다
 
     def test_take_with_exp_lowers_exp_but_never_below_zero(self):
         self.assertEqual(rp.take(self.store, G, A, 300, exp=True), (300, 300, 700))
@@ -42,11 +43,11 @@ class TakeTests(unittest.TestCase):
         self.assertEqual(self.me(), (250, 0, 0))
 
     def test_bank_and_take_all(self):
-        self.assertEqual(rp.take(self.store, G, A, where="bank"), (400, 0, 1000))
-        self.assertEqual(self.me(), (600, 0, 1000))                                     # 지갑은 그대로
+        self.assertEqual(rp.take(self.store, G, A, where="bank"), (400, 0, 600))
+        self.assertEqual(self.me(), (600, 0, 600))                                      # 지갑은 그대로
         with self.assertRaisesRegex(RpError, "금고에 가져갈"):
             rp.take(self.store, G, A, where="bank")
-        self.assertEqual(rp.take(self.store, G, A), (600, 0, 1000))
+        self.assertEqual(rp.take(self.store, G, A), (600, 0, 0))
         with self.assertRaisesRegex(RpError, "지갑에 가져갈"):
             rp.take(self.store, G, A)
 
@@ -84,18 +85,18 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_command(self):
         self.assertIn("관리자만", await self.call(self.member, 10, admin=False))
         self.assertEqual(rp.row(self.store, G, A)["com"], 1000)
-        text = await self.call(self.member, 100)
-        self.assertIn("지갑에서 🪙 100 COM", text)
-        self.assertIn("900 COM 남음", text)
+        text = await self.call(self.member, 50)                                          # EXP 1000 → 950: LV 3 그대로
+        self.assertIn("지갑에서 🪙 50 COM", text)
+        self.assertIn("950 COM 남음", text)
         self.assertNotIn("📉", text)
-        text = await self.call(self.member, 500, with_exp=True)                          # EXP 1000 → 500: LV 3 → 2
+        self.assertIn("경험치도 같이 뺐어요. (지금 LV. 3)", text)
+        text = await self.call(self.member, 450)                                         # EXP 950 → 500: LV 3 → 2
         self.assertIn("LV. 3 → LV. 2", text)
         self.assertIn("자동으로 빼지 않아요", text)
-        self.assertIn("그만큼 없어요", await self.call(self.member, 401))
+        self.assertIn("그만큼 없어요", await self.call(self.member, 501))
         rp.deposit(self.store, G, A, 300)
         self.assertIn("금고에서 🪙 300 COM", await self.call(self.member, where=Choice(name="금고", value="bank")))
-        self.assertEqual((rp.row(self.store, G, A)["com"], rp.row(self.store, G, A)["bank"], rp.row(self.store, G, A)["exp"]), (100, 0, 500))
-        self.assertIn("EXP도 뺐어요", await self.call(self.member, 1, with_exp=True))
+        self.assertEqual((rp.row(self.store, G, A)["com"], rp.row(self.store, G, A)["bank"], rp.row(self.store, G, A)["exp"]), (200, 0, 200))
 
 
 
@@ -121,15 +122,31 @@ class GiftTests(unittest.IsolatedAsyncioTestCase):
         r = rp.row(self.store, G, uid)
         return r["com"], r["bank"], r["exp"]
 
-    async def test_anyone_without_a_job_can_gift_and_no_exp_moves(self):
+    async def test_anyone_without_a_job_can_gift_and_exp_moves_too(self):
         self.assertIsNone(rp.row(self.store, G, A)["job"])
-        text = await self.call(self.b, 200)
+        text = await self.call(self.b, 200)                                              # 받은 사람 LV 0 → 1, 준 사람 LV 3 → 2
         self.assertIn("선물했어요", text)
         self.assertIn("남은 COM 300", text)
-        self.assertEqual(self.com_exp(A), (300, 500, 1000))                              # 준 사람 EXP·금고 그대로
-        self.assertEqual(self.com_exp(8), (200, 0, 0))                                   # 받은 사람 EXP는 늘지 않는다
-        self.assertIn("선물했어요", await self.call(self.a, 50, uid=8))                   # 받은 사람도 다시 선물할 수 있다
-        self.assertEqual(self.com_exp(A), (350, 500, 1000))
+        self.assertIn("<@8> 🎉 **LV. 0 → LV. 1**", text)
+        self.assertIn("📉 내 레벨: LV. 3 → LV. 2", text)
+        self.assertEqual(self.com_exp(A), (300, 500, 800))                               # 준 사람은 경험치도 줄고 금고는 그대로
+        self.assertEqual(self.com_exp(8), (200, 0, 200))                                 # 받은 사람은 그만큼 오른다
+        text = await self.call(self.a, 50, uid=8)                                        # 받은 사람도 다시 선물할 수 있다
+        self.assertNotIn("🎉", text)
+        self.assertNotIn("📉", text)
+        self.assertEqual((self.com_exp(A), self.com_exp(8)), ((350, 500, 850), (150, 0, 150)))
+
+    async def test_passing_back_and_forth_creates_no_exp(self):
+        for _ in range(5):
+            await self.call(self.b, 300)
+            await self.call(self.a, 300, uid=8)
+        self.assertEqual(rp.row(self.store, G, A)["exp"] + rp.row(self.store, G, 8)["exp"], 1000)   # 합은 처음 그대로
+
+    async def test_giver_exp_never_goes_below_zero(self):
+        with self.store.db:
+            self.store.db.execute("UPDATE rp SET exp=100 WHERE guild=? AND user=?", (G, A))
+        await self.call(self.b, 300)
+        self.assertEqual((rp.row(self.store, G, A)["exp"], rp.row(self.store, G, 8)["exp"]), (0, 300))
 
     async def test_refusals_change_nothing(self):
         self.assertIn("모자라요", await self.call(self.b, 501))                           # 금고 COM은 선물에 쓰지 않는다

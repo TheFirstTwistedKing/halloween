@@ -308,38 +308,43 @@ class Roleplay(commands.Cog):
     @app_commands.command(name="com주기", description="다른 사람에게 COM을 줘요. 'COM 주기' 능력이 있는 직업만 쓸 수 있어요")
     @app_commands.guild_only()
     @app_commands.rename(member="사람", amount="수량")
-    @app_commands.describe(member="COM을 받을 사람", amount="줄 COM(받은 사람의 경험치는 늘지 않아요)")
+    @app_commands.describe(member="COM을 받을 사람", amount="줄 COM(경험치도 같이 옮겨져요)")
     async def give(self, interaction: discord.Interaction, member: discord.Member, amount: app_commands.Range[int, 1, rp.COM_MAX]):
-        store, gid = self.bot.store, interaction.guild_id
-        if member.bot:
-            await self._say(interaction, "봇에게는 줄 수 없어요.", False)
-            return
-        try:
-            left, got = rp.transfer(store, gid, interaction.user.id, member.id, amount, self.cfg(gid))
-        except RpError as exc:
-            await self._say(interaction, str(exc), False)
-            return
-        LOG.info("COM 주기: %s → %s, %d (서버 %s)", interaction.user.id, member.id, amount, gid)
-        await self._say(interaction, f"🤝 {member.mention}님에게 {money(amount)}을(를) 줬어요. (남은 {COM_NAME} {left:,})\n"
-                                     f"받은 COM은 경험치(레벨)로 치지 않아요.")
+        cfg = self.cfg(interaction.guild_id)
+        await self._move(interaction, member, amount, "🤝", "줬어요",
+                         lambda: rp.transfer(self.bot.store, interaction.guild_id, interaction.user.id, member.id, amount, cfg))
 
     @app_commands.command(name="com선물", description="다른 사람에게 내 지갑의 COM을 선물해요. 누구나 쓸 수 있어요")
     @app_commands.guild_only()
     @app_commands.rename(member="사람", amount="수량")
-    @app_commands.describe(member="선물 받을 사람", amount="선물할 COM(받은 사람의 경험치는 늘지 않아요)")
+    @app_commands.describe(member="선물 받을 사람", amount="선물할 COM(경험치도 같이 옮겨져요)")
     async def gift(self, interaction: discord.Interaction, member: discord.Member, amount: app_commands.Range[int, 1, rp.COM_MAX]):
+        await self._move(interaction, member, amount, "🎁", "선물했어요",
+                         lambda: rp.gift(self.bot.store, interaction.guild_id, interaction.user.id, member.id, amount))
+
+    async def _move(self, interaction: discord.Interaction, member, amount: int, icon: str, verb: str, move) -> None:
+        """COM 주기·선물 공통: COM과 경험치를 옮기고, 받은 사람이 레벨업하면 보상·알림, 준 사람이 레벨다운하면 알려 준다."""
         store, gid = self.bot.store, interaction.guild_id
         if member.bot:
-            await self._say(interaction, "봇에게는 선물할 수 없어요.", False)
+            await self._say(interaction, "봇에게는 줄 수 없어요.", False)
             return
+        cfg = self.cfg(gid)
+        level = lambda uid: rp.level_of(rp.row(store, gid, uid)["exp"], cfg)[0]          # noqa: E731
+        mine, theirs = level(interaction.user.id), level(member.id)
         try:
-            left, _got = rp.gift(store, gid, interaction.user.id, member.id, amount)
+            left, _got = move()
         except RpError as exc:
             await self._say(interaction, str(exc), False)
             return
-        LOG.info("COM 선물: %s → %s, %d (서버 %s)", interaction.user.id, member.id, amount, gid)
-        await self._say(interaction, f"🎁 {member.mention}님에게 {money(amount)}을(를) 선물했어요. (남은 {COM_NAME} {left:,})\n"
-                                     f"받은 COM은 경험치(레벨)로 치지 않아요.")
+        LOG.info("COM %s: %s → %s, %d (서버 %s)", verb, interaction.user.id, member.id, amount, gid)
+        text = f"{icon} {member.mention}님에게 {money(amount)}을(를) {verb}. (남은 {COM_NAME} {left:,})\n경험치도 같이 옮겨졌어요."
+        extra = await self.level_up(member, cfg, theirs, level(member.id), origin=interaction.channel)
+        if extra:
+            text += f"\n{member.mention} {extra}"
+        now = level(interaction.user.id)
+        if now < mine:
+            text += f"\n📉 내 레벨: {cfg['label']} {mine} → {cfg['label']} {now}"
+        await self._say(interaction, text)
 
     # ---------------------------------------------------------------- 개인 금고
     @bank.command(name="보기", description="내 금고와 지갑의 COM을 봐요")
@@ -657,32 +662,28 @@ class Roleplay(commands.Cog):
         await self._say(interaction, "🎁 레벨 보상: " + (", ".join(f"LV {r['level']} → <@&{r['role']}>" for r in cfg["rewards"]) or "없음")
                         + "\n(이미 그 LV을 넘은 사람은 다음에 LV이 오를 때 받지 않아요. 직접 주거나 `/롤플관리 com지급`으로 LV을 올려 주세요)")
 
-    @admin.command(name="com지급", description="사람에게 COM을 줘요. EXP로도 쌓을지 고를 수 있어요 (관리자)")
-    @app_commands.rename(member="사람", amount="수량", with_exp="경험치포함")
-    @app_commands.describe(with_exp="받은 COM을 EXP(LV)로도 쌓을까요(기본 예)")
-    async def give_com(self, interaction: discord.Interaction, member: discord.Member, amount: app_commands.Range[int, 1, rp.COM_MAX],
-                       with_exp: bool = True):
+    @admin.command(name="com지급", description="사람에게 COM을 줘요. 준 만큼 경험치(레벨)도 올라요 (관리자)")
+    @app_commands.rename(member="사람", amount="수량")
+    async def give_com(self, interaction: discord.Interaction, member: discord.Member, amount: app_commands.Range[int, 1, rp.COM_MAX]):
         if not await require_admin(interaction):
             return
         store, gid = self.bot.store, interaction.guild_id
         cfg = self.cfg(gid)
         before = rp.level_of(rp.row(store, gid, member.id)["exp"], cfg)[0]
         try:
-            com, exp = rp.give(store, gid, member.id, amount, exp=with_exp)
+            com, exp = rp.give(store, gid, member.id, amount)
         except RpError as exc:
             await self._say(interaction, str(exc), False)
             return
         extra = await self.level_up(member, cfg, before, rp.level_of(exp, cfg)[0], origin=interaction.channel)
         await self._say(interaction, f"{rp.COM} {member.mention}님에게 {money(amount)}을(를) 줬어요. (가진 {COM_NAME} {com:,})" + ("\n" + extra if extra else ""))
 
-    @admin.command(name="com회수", description="사람의 COM을 가져가요. 수량을 비우면 전부, 지갑·금고 중 고를 수 있어요 (관리자)")
-    @app_commands.rename(member="사람", amount="수량", where="위치", with_exp="경험치포함")
-    @app_commands.describe(amount="가져갈 COM(비우면 그곳의 전부)", where="어디서 가져갈까요(기본 지갑)",
-                           with_exp="EXP(LV)도 같은 양만큼 뺄까요(기본 아니요)")
+    @admin.command(name="com회수", description="사람의 COM을 가져가요. 가져간 만큼 경험치(레벨)도 내려가요 (관리자)")
+    @app_commands.rename(member="사람", amount="수량", where="위치")
+    @app_commands.describe(amount="가져갈 COM(비우면 그곳의 전부)", where="어디서 가져갈까요(기본 지갑)")
     @app_commands.choices(where=[Choice(name="지갑", value="wallet"), Choice(name="금고", value="bank")])
     async def take_com(self, interaction: discord.Interaction, member: discord.Member,
-                       amount: app_commands.Range[int, 1, rp.COM_MAX] | None = None, where: Choice[str] | None = None,
-                       with_exp: bool = False):
+                       amount: app_commands.Range[int, 1, rp.COM_MAX] | None = None, where: Choice[str] | None = None):
         if not await require_admin(interaction):
             return
         store, gid = self.bot.store, interaction.guild_id
@@ -690,7 +691,7 @@ class Roleplay(commands.Cog):
         place = where.value if where else "wallet"
         before = rp.level_of(rp.row(store, gid, member.id)["exp"], cfg)[0]
         try:
-            taken, left, exp = rp.take(store, gid, member.id, amount, where=place, exp=with_exp)
+            taken, left, exp = rp.take(store, gid, member.id, amount, where=place)
         except RpError as exc:
             await self._say(interaction, str(exc), False)
             return
@@ -700,8 +701,8 @@ class Roleplay(commands.Cog):
         if after < before:
             text += (f"\n📉 {cfg['label']} {before} → {cfg['label']} {after}"
                      "\n(이미 받은 레벨 보상 역할은 자동으로 빼지 않아요. 필요하면 직접 빼 주세요)")
-        elif with_exp:
-            text += f"\nEXP도 뺐어요. (지금 {cfg['label']} {after})"
+        else:
+            text += f"\n경험치도 같이 뺐어요. (지금 {cfg['label']} {after})"
         await self._say(interaction, text)
 
     # ---------------------------------------------------------------- 관리자: COM 상점
